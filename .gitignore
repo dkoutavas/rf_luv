@@ -1,0 +1,32 @@
+# Recordings (large binary files)
+recordings/*.raw
+recordings/*.iq
+recordings/*.wav
+recordings/*.csv
+recordings/*.png
+!recordings/.gitkeep
+
+# ClickHouse data
+adsb/clickhouse/data/
+
+# Grafana data
+adsb/grafana/data/
+
+# Docker volumes
+docker-volumes/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SDR config (may contain device-specific settings)
+config/sdrpp_config.json
+
+# Notes (personal)
+notes/*.md
+!notes/.gitkeep

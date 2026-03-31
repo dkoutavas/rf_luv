@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY ingest.py .
+
+# No external dependencies — uses stdlib only
+CMD ["python3", "-u", "ingest.py"]

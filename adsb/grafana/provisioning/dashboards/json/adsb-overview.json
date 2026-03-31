@@ -1,0 +1,181 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Aircraft Now",
+      "description": "Unique aircraft seen in the last 60 seconds",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(hex_ident) as count FROM adsb.positions WHERE timestamp > now() - INTERVAL 60 SECOND",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "yellow", "value": null },
+              { "color": "green", "value": 5 },
+              { "color": "blue", "value": 30 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Messages / min",
+      "description": "ADS-B messages received per minute (last 5 min avg)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() / 5 as msg_per_min FROM adsb.positions WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique Aircraft Today",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(hex_ident) as count FROM adsb.positions WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Messages Today",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT formatReadableQuantity(count()) as total FROM adsb.positions WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Aircraft Count Over Time",
+      "description": "Unique aircraft seen per 5-minute window",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfFiveMinutes(timestamp) AS time, uniq(hex_ident) AS aircraft FROM adsb.positions WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Message Rate Over Time",
+      "description": "Messages received per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, count() AS messages FROM adsb.positions WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "histogram",
+      "title": "Altitude Distribution",
+      "description": "Histogram of aircraft altitudes",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT altitude FROM adsb.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND altitude IS NOT NULL AND altitude > 0 AND altitude < 50000",
+          "format": 1
+        }
+      ],
+      "options": {
+        "bucketSize": 2000,
+        "combine": false,
+        "fillOpacity": 80
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent Flights",
+      "description": "Last 20 aircraft with callsigns",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT hex_ident, anyLast(callsign) AS callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE AND callsign != '' GROUP BY hex_ident ORDER BY last_seen DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Altitude Traces (Top Aircraft)",
+      "description": "Altitude over time for the 5 most active aircraft in the last hour",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "WITH top_aircraft AS (SELECT hex_ident FROM adsb.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND altitude IS NOT NULL GROUP BY hex_ident ORDER BY count() DESC LIMIT 5) SELECT timestamp AS time, altitude AS value, concat(hex_ident, coalesce(concat(' (', callsign, ')'), '')) AS metric FROM adsb.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND hex_ident IN (SELECT hex_ident FROM top_aircraft) AND altitude IS NOT NULL ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "lengthft",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["adsb", "aviation", "rtl-sdr"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ADS-B Overview — Athens",
+  "uid": "adsb-overview-athens"
+}

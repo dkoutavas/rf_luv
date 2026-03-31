@@ -1,0 +1,149 @@
+# ADS-B Tracking Pipeline
+# readsb (decoder) → tar1090 (map) → ClickHouse (storage) → Grafana (dashboards)
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:8080 for live map (tar1090)
+#   open http://localhost:3000 for Grafana dashboards
+#
+# The RTL-SDR dongle must be accessible. Two approaches:
+#
+# A) usbipd passthrough — dongle visible in WSL:
+#   Uncomment the `devices` section in readsb service
+#
+# B) rtl_tcp on Windows — network stream:
+#   Run on Windows: rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+#   Keep READSB_NET_CONNECTOR as-is (points to host.docker.internal:1234)
+#
+# First run: docker compose up -d && docker compose logs -f readsb
+
+services:
+
+  # ─── ADS-B Decoder ──────────────────────────────────────
+  readsb:
+    image: ghcr.io/sdr-enthusiasts/docker-readsb-protobuf:v4.0.3
+    container_name: readsb
+    restart: unless-stopped
+    environment:
+      # ── Device config ──
+      # Option A: direct USB (uncomment devices below too)
+      # READSB_DEVICE_TYPE: rtlsdr
+      # READSB_RTLSDR_DEVICE: "0"
+      # READSB_GAIN: 40
+
+      # Option B: rtl_tcp from Windows (default)
+      READSB_DEVICE_TYPE: rtltcp
+      READSB_NET_CONNECTOR: "host.docker.internal,1234,raw_in"
+      READSB_GAIN: 40
+
+      # ── Location (Polygono, Athens) ──
+      READSB_LAT: "37.989"
+      READSB_LON: "23.736"
+
+      # ── Network outputs ──
+      READSB_NET_ENABLE: "true"
+      READSB_NET_SBS_OUTPUT_PORT: "30003"       # BaseStation format (CSV-like)
+      READSB_NET_RAW_OUTPUT_PORT: "30002"
+      READSB_NET_BEAST_OUTPUT_PORT: "30005"     # Beast binary format
+
+      # ── Stats ──
+      READSB_STATS_EVERY: "60"
+      READSB_STATS_RANGE: "true"
+    ports:
+      - "30002:30002"   # raw output
+      - "30003:30003"   # SBS/BaseStation output (used by ingest script)
+      - "30005:30005"   # Beast output
+    volumes:
+      - readsb-data:/run/readsb
+    # Uncomment for direct USB access (Option A):
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb
+
+  # ─── Web Map ────────────────────────────────────────────
+  tar1090:
+    image: ghcr.io/sdr-enthusiasts/docker-tar1090:v2024.07.10
+    container_name: tar1090
+    restart: unless-stopped
+    depends_on:
+      - readsb
+    environment:
+      BEASTHOST: readsb
+      BEASTPORT: 30005
+      TAR1090_DEFAULTCENTERLAT: "37.989"
+      TAR1090_DEFAULTCENTERLON: "23.736"
+      TAR1090_DEFAULTRANGE: "200"               # default zoom range in NM
+      TAR1090_MESSAGERATEINTITLE: "true"
+      TAR1090_PLANECOUNTINTITLE: "true"
+      UPDATE_TAR1090: "true"
+    ports:
+      - "8080:80"
+    volumes:
+      - readsb-data:/run/readsb:ro
+    tmpfs:
+      - /run:exec,size=256M
+      - /var/log
+
+  # ─── ClickHouse (Time Series Storage) ──────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-adsb
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: adsb
+      CLICKHOUSE_USER: adsb
+      CLICKHOUSE_PASSWORD: adsb_local
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # native TCP
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana (Dashboards) ──────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-adsb
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+  # ─── ADS-B Ingest Worker ───────────────────────────────
+  # Reads SBS BaseStation output from readsb, inserts into ClickHouse
+  adsb-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: adsb-ingest
+    restart: unless-stopped
+    depends_on:
+      - readsb
+      - clickhouse
+    environment:
+      SBS_HOST: readsb
+      SBS_PORT: "30003"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: adsb
+      CLICKHOUSE_USER: adsb
+      CLICKHOUSE_PASSWORD: adsb_local
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_SECONDS: "5"
+
+volumes:
+  readsb-data:
+  clickhouse-data:
+  grafana-data:

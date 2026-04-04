@@ -234,6 +234,9 @@ def main():
                     b["sweep_id"] = sweep_id
                     print(json.dumps(b), flush=True)
 
+                # Emit flush marker so ingest flushes the final batch
+                print(json.dumps({"flush": True}), flush=True)
+
                 log.info(f"Sweep complete: {len(bins)} bins in {elapsed:.1f}s")
 
                 # Sleep until next sweep

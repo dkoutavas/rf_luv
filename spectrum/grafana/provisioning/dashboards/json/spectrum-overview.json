@@ -11,7 +11,7 @@
       "title": "Latest Sweep",
       "description": "When the last spectrum sweep completed",
       "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
           "rawSql": "SELECT max(timestamp) AS last_sweep FROM spectrum.scans",
@@ -29,7 +29,7 @@
       "title": "Freq Bins",
       "description": "Number of frequency bins in the latest sweep",
       "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
           "rawSql": "SELECT count() AS bins FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1)",
@@ -42,7 +42,7 @@
       "title": "Sweeps Today",
       "description": "Number of completed sweeps since midnight",
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
           "rawSql": "SELECT uniq(sweep_id) AS sweeps FROM spectrum.scans WHERE timestamp > today()",
@@ -55,7 +55,7 @@
       "title": "Current Power Spectrum",
       "description": "Power vs frequency from the latest sweep (88-470 MHz)",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
           "rawSql": "SELECT round(freq_hz / 1000000.0, 1) AS freq_mhz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1) ORDER BY freq_hz",
@@ -77,10 +77,10 @@
       "title": "Signal Power Over Time",
       "description": "Power at known frequencies over time",
       "gridPos": { "h": 8, "w": 14, "x": 0, "y": 14 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s INNER JOIN spectrum.known_frequencies kf ON s.freq_hz >= kf.freq_hz - greatest(kf.bandwidth_hz / 2, 50000) AND s.freq_hz <= kf.freq_hz + greatest(kf.bandwidth_hz / 2, 50000) WHERE s.timestamp >= $__fromTime AND s.timestamp <= $__toTime AND kf.category IN ('airband', 'marine', 'tetra', 'ism') ORDER BY time",
+          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND s.timestamp >= $__fromTime AND s.timestamp <= $__toTime AND kf.category IN ('airband', 'marine', 'tetra', 'ism') ORDER BY time",
           "format": 0
         }
       ],
@@ -100,10 +100,10 @@
       "title": "Active Known Frequencies",
       "description": "Which known signals are currently detected with their power levels",
       "gridPos": { "h": 8, "w": 10, "x": 14, "y": 14 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT kf.name, kf.category, round(kf.freq_hz / 1000000.0, 3) AS freq_mhz, kf.modulation, round(fl.power_dbfs, 1) AS power_dbfs, fl.last_seen FROM spectrum.known_frequencies kf INNER JOIN spectrum.freq_latest fl FINAL ON fl.freq_hz >= kf.freq_hz - greatest(kf.bandwidth_hz / 2, 50000) AND fl.freq_hz <= kf.freq_hz + greatest(kf.bandwidth_hz / 2, 50000) WHERE fl.last_seen > now() - INTERVAL 10 MINUTE ORDER BY fl.power_dbfs DESC",
+          "rawSql": "SELECT kf.name, kf.category, round(kf.freq_hz / 1000000.0, 3) AS freq_mhz, kf.modulation, round(s.power_dbfs, 1) AS power_dbfs FROM spectrum.known_frequencies kf CROSS JOIN (SELECT freq_hz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1)) s WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) ORDER BY power_dbfs DESC",
           "format": 1
         }
       ]
@@ -113,10 +113,10 @@
       "title": "Anomalies",
       "description": "Frequency bins with power significantly above their hourly baseline",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp, round(s.freq_hz / 1000000.0, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, round(avgMerge(b.avg_power), 1) AS baseline, round(s.power_dbfs - avgMerge(b.avg_power), 1) AS deviation_db, kf.name AS known_signal FROM spectrum.scans s LEFT JOIN spectrum.hourly_baseline b ON s.freq_hz = b.freq_hz AND toStartOfHour(s.timestamp) = b.hour LEFT JOIN spectrum.known_frequencies kf ON s.freq_hz >= kf.freq_hz - greatest(kf.bandwidth_hz / 2, 50000) AND s.freq_hz <= kf.freq_hz + greatest(kf.bandwidth_hz / 2, 50000) WHERE s.timestamp > now() - INTERVAL 10 MINUTE GROUP BY s.timestamp, s.freq_hz, s.power_dbfs, kf.name HAVING deviation_db > 10 ORDER BY deviation_db DESC LIMIT 30",
+          "rawSql": "SELECT s.timestamp, round(s.freq_hz / 1000000.0, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, round(avgMerge(b.avg_power), 1) AS baseline, round(s.power_dbfs - avgMerge(b.avg_power), 1) AS deviation_db FROM spectrum.scans s LEFT JOIN spectrum.hourly_baseline b ON s.freq_hz = b.freq_hz AND toStartOfHour(s.timestamp) = b.hour WHERE s.timestamp > now() - INTERVAL 10 MINUTE GROUP BY s.timestamp, s.freq_hz, s.power_dbfs HAVING deviation_db > 10 ORDER BY deviation_db DESC LIMIT 30",
           "format": 1
         }
       ]

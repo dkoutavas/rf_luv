@@ -121,6 +121,17 @@ def main():
         except json.JSONDecodeError:
             continue
 
+        # Flush marker from scanner.py — flush remaining batch
+        if data.get("flush"):
+            if batch:
+                count = insert_batch(batch)
+                total_inserted += count
+                if count > 0:
+                    log.info(f"Flushed {count} rows (sweep end) | read: {total_read} | inserted: {total_inserted}")
+                batch.clear()
+                last_flush = time.monotonic()
+            continue
+
         # Map fields
         row = {
             "timestamp": data.get("sweep_id", ""),

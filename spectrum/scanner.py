@@ -110,6 +110,7 @@ class RTLTCPClient:
 
     def set_gain(self, gain_db: float):
         self.send_command(self.CMD_SET_GAIN_MODE, 1)  # manual gain
+        self.send_command(self.CMD_SET_AGC, 0)  # disable AGC
         self.send_command(self.CMD_SET_GAIN, int(gain_db * 10))
 
     def read_samples(self, num_bytes: int) -> bytes:
@@ -178,21 +179,35 @@ def downsample_bins(
 # ─── Sweep ───────────────────────────────────────────────
 
 
+NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
+
+
 def sweep(client: RTLTCPClient) -> list[dict]:
     """Perform one full frequency sweep, return list of {freq_hz, power_dbfs}."""
     window = np.hanning(FFT_SIZE)
     capture_bytes = FFT_SIZE * 2  # I + Q interleaved
-    settle_bytes = 4096  # discard after retune (~2ms at 2.048 MS/s)
 
     all_bins = []
     center = FREQ_START + SAMPLE_RATE // 2
 
     while center < FREQ_END + SAMPLE_RATE // 2:
         client.set_frequency(center)
-        client.discard(settle_bytes)
-        iq_data = client.read_samples(capture_bytes)
 
-        power_db = compute_power_spectrum(iq_data, FFT_SIZE, window)
+        # Let PLL settle after retuning. The R820T needs 1-5ms,
+        # but we also need to drain stale samples from the TCP buffer.
+        # Sleep first (PLL lock), then discard buffered stale data.
+        time.sleep(0.005)  # 5ms PLL settle
+        client.discard(32768)  # drain ~8ms of stale buffered IQ
+
+        # Average multiple FFT frames for stable power measurement.
+        # Like averaging multiple spectrogram frames in audio — reduces
+        # variance from noise and transient effects.
+        power_sum = np.zeros(FFT_SIZE)
+        for _ in range(NUM_AVERAGES):
+            iq_data = client.read_samples(capture_bytes)
+            power_sum += compute_power_spectrum(iq_data, FFT_SIZE, window)
+        power_db = power_sum / NUM_AVERAGES
+
         bins = downsample_bins(power_db, center, SAMPLE_RATE, BIN_WIDTH)
 
         for b in bins:
@@ -218,34 +233,39 @@ def main():
 
     while running:
         try:
+            # Connect fresh for each sweep — avoids stale IQ data
+            # accumulating in the TCP socket buffer during sleep.
+            # rtl_tcp streams continuously; a 280s sleep would buffer
+            # ~1.1 GB of stale samples that pollute the next sweep.
             client = RTLTCPClient(RTL_HOST, RTL_PORT)
             client.set_sample_rate(SAMPLE_RATE)
             client.set_gain(GAIN_DB)
+            # Warmup: discard initial samples while PLL settles after connect
+            client.discard(65536)
 
-            while running:
-                sweep_id = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                t0 = time.monotonic()
+            sweep_id = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            t0 = time.monotonic()
 
-                bins = sweep(client)
-                elapsed = time.monotonic() - t0
-
-                # Output JSON lines to stdout (picked up by scan_ingest.py)
-                for b in bins:
-                    b["sweep_id"] = sweep_id
-                    print(json.dumps(b), flush=True)
-
-                # Emit flush marker so ingest flushes the final batch
-                print(json.dumps({"flush": True}), flush=True)
-
-                log.info(f"Sweep complete: {len(bins)} bins in {elapsed:.1f}s")
-
-                # Sleep until next sweep
-                for _ in range(SCAN_INTERVAL):
-                    if not running:
-                        break
-                    time.sleep(1)
+            bins = sweep(client)
+            elapsed = time.monotonic() - t0
 
             client.close()
+
+            # Output JSON lines to stdout (picked up by scan_ingest.py)
+            for b in bins:
+                b["sweep_id"] = sweep_id
+                print(json.dumps(b), flush=True)
+
+            # Emit flush marker so ingest flushes the final batch
+            print(json.dumps({"flush": True}), flush=True)
+
+            log.info(f"Sweep complete: {len(bins)} bins in {elapsed:.1f}s")
+
+            # Sleep until next sweep
+            for _ in range(SCAN_INTERVAL):
+                if not running:
+                    break
+                time.sleep(1)
 
         except (ConnectionRefusedError, ConnectionError, socket.error, OSError) as e:
             log.warning(f"Connection error: {e} — retrying in 10s...")

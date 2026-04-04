@@ -14,10 +14,15 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT toString(max(timestamp)) AS last_sweep FROM spectrum.scans",
+          "rawSql": "SELECT toUnixTimestamp64Milli(max(timestamp)) AS last_sweep FROM spectrum.scans",
           "format": 1
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso"
+        }
+      }
     },
     {
       "type": "stat",

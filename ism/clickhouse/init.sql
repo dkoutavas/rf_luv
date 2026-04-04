@@ -16,7 +16,7 @@ CREATE DATABASE IF NOT EXISTS ism;
 CREATE TABLE IF NOT EXISTS ism.events (
     timestamp       DateTime64(3) DEFAULT now64(3),
     model           String,                  -- device protocol/model name (e.g., "Acurite-Tower")
-    device_id       Nullable(String),        -- device-specific ID
+    device_id       String DEFAULT '',        -- device-specific ID
     channel         Nullable(String),        -- channel number (some devices use multiple)
     battery_ok      Nullable(Float32),       -- battery status (1.0 = OK, 0.0 = low)
     temperature_c   Nullable(Float32),       -- Celsius

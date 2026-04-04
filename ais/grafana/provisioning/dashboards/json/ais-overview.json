@@ -123,7 +123,7 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT multiIf(ship_type >= 70 AND ship_type <= 79, 'Cargo', ship_type >= 80 AND ship_type <= 89, 'Tanker', ship_type >= 60 AND ship_type <= 69, 'Passenger', ship_type >= 40 AND ship_type <= 49, 'High-speed craft', ship_type >= 30 AND ship_type <= 39, 'Fishing', ship_type >= 50 AND ship_type <= 59, 'Special craft', ship_type = 0, 'Unknown', toString(ship_type)) AS type_name, uniq(mmsi) AS count FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND ship_type IS NOT NULL AND ship_type > 0 GROUP BY type_name ORDER BY count DESC",
+          "rawSql": "SELECT dictGetOrDefault('ais.ship_types', 'name', toUInt64(ship_type), concat('Type ', toString(ship_type))) AS type_name, uniq(mmsi) AS count FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND ship_type IS NOT NULL AND ship_type > 0 GROUP BY type_name ORDER BY count DESC",
           "format": 1
         }
       ],
@@ -134,12 +134,12 @@
     {
       "type": "table",
       "title": "Recent Ships",
-      "description": "Last 20 vessels with names",
+      "description": "Last 20 vessels with enriched names from ship_latest",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT mmsi, anyLast(ship_name) AS name, anyLast(callsign) AS callsign, round(anyLast(speed), 1) AS speed_kts, round(anyLast(course), 0) AS course_deg, round(anyLast(lat), 4) AS lat, round(anyLast(lon), 4) AS lon, count() AS msgs, max(timestamp) AS last_seen FROM ais.positions WHERE timestamp > now() - INTERVAL 30 MINUTE GROUP BY mmsi ORDER BY last_seen DESC LIMIT 20",
+          "rawSql": "SELECT p.mmsi, sl.ship_name AS name, sl.callsign AS callsign, dictGetOrDefault('ais.ship_types', 'name', toUInt64(coalesce(sl.ship_type, 0)), '') AS type, round(anyLast(p.speed), 1) AS speed_kts, round(anyLast(p.course), 0) AS course_deg, round(anyLast(p.lat), 4) AS lat, round(anyLast(p.lon), 4) AS lon, count() AS msgs, max(p.timestamp) AS last_seen FROM ais.positions AS p LEFT JOIN (SELECT mmsi, ship_name, callsign, ship_type FROM ais.ship_latest FINAL) AS sl ON p.mmsi = sl.mmsi WHERE p.timestamp > now() - INTERVAL 30 MINUTE GROUP BY p.mmsi, sl.ship_name, sl.callsign, sl.ship_type ORDER BY last_seen DESC LIMIT 20",
           "format": 1
         }
       ]
@@ -170,7 +170,7 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "WITH top_ships AS (SELECT mmsi FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND speed IS NOT NULL GROUP BY mmsi ORDER BY count() DESC LIMIT 5) SELECT timestamp AS time, speed AS value, concat(toString(mmsi), coalesce(concat(' (', ship_name, ')'), '')) AS metric FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND mmsi IN (SELECT mmsi FROM top_ships) AND speed IS NOT NULL ORDER BY time",
+          "rawSql": "WITH top_ships AS (SELECT mmsi FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND speed IS NOT NULL GROUP BY mmsi ORDER BY count() DESC LIMIT 5), ship_names AS (SELECT mmsi, ship_name FROM ais.ship_latest FINAL WHERE mmsi IN (SELECT mmsi FROM top_ships)) SELECT p.timestamp AS time, p.speed AS value, concat(toString(p.mmsi), coalesce(concat(' (', sn.ship_name, ')'), '')) AS metric FROM ais.positions AS p LEFT JOIN ship_names AS sn ON p.mmsi = sn.mmsi WHERE p.timestamp > now() - INTERVAL 1 HOUR AND p.mmsi IN (SELECT mmsi FROM top_ships) AND p.speed IS NOT NULL ORDER BY time",
           "format": 0
         }
       ],
@@ -182,6 +182,78 @@
             "showPoints": "never"
           }
         }
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "Ship Positions — Live",
+      "description": "Current ship positions from the last 5 minutes, centered on Piraeus",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT mmsi, ship_name, lat, lon, speed, course, last_seen, dictGetOrDefault('ais.ship_types', 'name', toUInt64(coalesce(ship_type, 0)), 'Unknown') AS type_name FROM ais.ship_latest FINAL WHERE last_seen > now() - INTERVAL 5 MINUTE AND lat IS NOT NULL AND lon IS NOT NULL",
+          "format": 1
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 37.94,
+          "lon": 23.64,
+          "zoom": 11
+        },
+        "basemap": {
+          "type": "default",
+          "name": "OpenStreetMap"
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Ships",
+            "config": {
+              "showLegend": true,
+              "style": {
+                "size": { "fixed": 8 },
+                "color": { "field": "speed", "fixed": "semi-dark-blue" },
+                "symbol": { "fixed": "img/icons/marker/circle.svg" },
+                "rotation": { "field": "course", "mode": "mod", "min": 0, "max": 360 }
+              }
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "tooltip": true
+          }
+        ],
+        "tooltip": { "mode": "details" }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "speed" },
+            "properties": [{ "id": "unit", "value": "knots" }]
+          }
+        ]
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Ships by Zone",
+      "description": "Active vessels per geographic zone (last 5 minutes)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT multiIf(lat >= 37.93 AND lat <= 37.96 AND lon >= 23.60 AND lon <= 23.66, 'Piraeus Port', lat >= 37.90 AND lat <= 37.96 AND lon >= 23.48 AND lon <= 23.58, 'Salamina Strait', lat >= 38.01 AND lat <= 38.06 AND lon >= 23.48 AND lon <= 23.56, 'Elefsina Bay', lat >= 37.50 AND lat <= 38.10 AND lon >= 23.20 AND lon <= 24.00, 'Saronic Open', 'Unknown') AS zone, uniq(mmsi) AS ships FROM ais.ship_latest FINAL WHERE last_seen > now() - INTERVAL 5 MINUTE AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY zone ORDER BY ships DESC",
+          "format": 1
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
       }
     }
   ],

@@ -1,15 +1,15 @@
--- AIS Ship Tracking — ClickHouse Schema
+-- AIS Ship Tracking -ClickHouse Schema
 -- Ingested from AIS-catcher NMEA output via ais_ingest.py
 --
 -- AIS message types stored:
---   1-3: Position reports (Class A) — speed, lat, lon, course, heading
---   5:   Static/voyage data — ship name, type, callsign, destination, dimensions
---   18:  Position reports (Class B) — smaller/leisure vessels
---   24:  Static data (Class B) — name, type, callsign
+--   1-3: Position reports (Class A) -speed, lat, lon, course, heading
+--   5:   Static/voyage data -ship name, type, callsign, destination, dimensions
+--   18:  Position reports (Class B) -smaller/leisure vessels
+--   24:  Static data (Class B) -name, type, callsign
 
 CREATE DATABASE IF NOT EXISTS ais;
 
--- Main positions table — all decoded AIS messages land here
+-- Main positions table -all decoded AIS messages land here
 -- Position data (types 1-3, 18) has lat/lon/speed/course
 -- Static data (types 5, 24) has ship_name/callsign/destination
 CREATE TABLE IF NOT EXISTS ais.positions (
@@ -37,6 +37,67 @@ ORDER BY (timestamp, mmsi)
 TTL toDateTime(timestamp) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
+-- Ship type lookup -ITU-R M.1371-5 Table 53
+-- Source table must be populated before the dictionary is created
+CREATE TABLE IF NOT EXISTS ais.ship_types_source (
+    code UInt8,
+    name String
+) ENGINE = MergeTree() ORDER BY code;
+
+INSERT INTO ais.ship_types_source VALUES
+    (20, 'Wing in ground'),
+    (30, 'Fishing'),
+    (31, 'Towing'),
+    (32, 'Towing (large)'),
+    (33, 'Dredging/underwater ops'),
+    (34, 'Diving ops'),
+    (35, 'Military ops'),
+    (36, 'Sailing'),
+    (37, 'Pleasure craft'),
+    (40, 'High-speed craft'),
+    (50, 'Pilot vessel'),
+    (51, 'Search and rescue'),
+    (52, 'Tug'),
+    (53, 'Port tender'),
+    (54, 'Anti-pollution'),
+    (55, 'Law enforcement'),
+    (58, 'Medical transport'),
+    (59, 'Noncombatant (RR)'),
+    (60, 'Passenger'),
+    (69, 'Passenger -No info'),
+    (70, 'Cargo'),
+    (79, 'Cargo -No info'),
+    (80, 'Tanker'),
+    (89, 'Tanker -No info'),
+    (90, 'Other'),
+    (99, 'Other -No info');
+
+CREATE DICTIONARY IF NOT EXISTS ais.ship_types (
+    code UInt8,
+    name String
+)
+PRIMARY KEY code
+SOURCE(CLICKHOUSE(TABLE 'ship_types_source' DB 'ais' USER 'ais' PASSWORD 'ais_local'))
+LAYOUT(FLAT())
+LIFETIME(0);
+
+-- Geofencing zones -rectangular bounding boxes for Saronic Gulf areas
+-- Used in dashboard queries via inline multiIf (priority order: most specific first)
+CREATE TABLE IF NOT EXISTS ais.zones (
+    zone_id   UInt8,
+    zone_name String,
+    lat_min   Float64,
+    lat_max   Float64,
+    lon_min   Float64,
+    lon_max   Float64
+) ENGINE = MergeTree() ORDER BY zone_id;
+
+INSERT INTO ais.zones VALUES
+    (1, 'Piraeus Port',    37.93, 37.96, 23.60, 23.66),
+    (2, 'Salamina Strait', 37.90, 37.96, 23.48, 23.58),
+    (3, 'Elefsina Bay',    38.01, 38.06, 23.48, 23.56),
+    (4, 'Saronic Open',    37.50, 38.10, 23.20, 24.00);
+
 -- Materialized view: unique ships per hour + message stats
 CREATE MATERIALIZED VIEW IF NOT EXISTS ais.hourly_stats
 ENGINE = AggregatingMergeTree()
@@ -51,25 +112,25 @@ FROM ais.positions
 GROUP BY hour;
 
 -- Materialized view: latest known state per vessel
--- Merges position data with static data via argMax — whichever message
--- arrived most recently for each field wins. This is how we get
--- "MMSI 237012345 is BLUE STAR PATMOS at 37.94N 23.65E doing 18 knots"
+-- Uses argMaxIf so that position fields (from types 1-3, 18) don't clobber
+-- identity fields (from types 5, 24) with NULL, and vice versa.
+-- Think of it like a UPSERT that only overwrites non-NULL columns.
 CREATE MATERIALIZED VIEW IF NOT EXISTS ais.ship_latest
 ENGINE = ReplacingMergeTree(last_seen)
 ORDER BY mmsi
 AS SELECT
     mmsi,
-    argMax(ship_name, timestamp) AS ship_name,
-    argMax(callsign, timestamp) AS callsign,
-    argMax(ship_type, timestamp) AS ship_type,
-    argMax(destination, timestamp) AS destination,
-    argMax(imo, timestamp) AS imo,
-    argMax(lat, timestamp) AS lat,
-    argMax(lon, timestamp) AS lon,
-    argMax(speed, timestamp) AS speed,
-    argMax(course, timestamp) AS course,
-    argMax(heading, timestamp) AS heading,
-    argMax(nav_status, timestamp) AS nav_status,
+    argMaxIf(ship_name,   timestamp, ship_name   IS NOT NULL) AS ship_name,
+    argMaxIf(callsign,    timestamp, callsign    IS NOT NULL) AS callsign,
+    argMaxIf(ship_type,   timestamp, ship_type   IS NOT NULL) AS ship_type,
+    argMaxIf(destination,  timestamp, destination  IS NOT NULL) AS destination,
+    argMaxIf(imo,          timestamp, imo          IS NOT NULL) AS imo,
+    argMaxIf(lat,          timestamp, lat          IS NOT NULL) AS lat,
+    argMaxIf(lon,          timestamp, lon          IS NOT NULL) AS lon,
+    argMaxIf(speed,        timestamp, speed        IS NOT NULL) AS speed,
+    argMaxIf(course,       timestamp, course       IS NOT NULL) AS course,
+    argMaxIf(heading,      timestamp, heading      IS NOT NULL) AS heading,
+    argMaxIf(nav_status,   timestamp, nav_status   IS NOT NULL) AS nav_status,
     max(timestamp) AS last_seen,
     count() AS message_count
 FROM ais.positions

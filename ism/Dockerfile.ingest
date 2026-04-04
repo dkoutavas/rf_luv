@@ -1,0 +1,6 @@
+FROM hertzg/rtl_433:24.10-alpine
+RUN apk add --no-cache python3
+WORKDIR /app
+COPY ism_ingest.py entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]

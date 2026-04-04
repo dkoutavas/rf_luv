@@ -35,7 +35,31 @@ docker compose up -d
 #   http://localhost:3000  — Grafana dashboards (admin/admin)
 ```
 
-### 5. Spectrum survey
+### 5. AIS ship tracking
+
+```bash
+# Start rtl_tcp on Windows first, then:
+cd ais
+docker compose up -d
+
+# Open:
+#   http://localhost:3001  — Grafana dashboards (admin/admin)
+# Antenna: dipole arms ~44 cm, vertical, pointed SW toward Piraeus
+```
+
+### 6. ISM band monitoring
+
+```bash
+# Start rtl_tcp on Windows first, then:
+cd ism
+docker compose up -d
+
+# Open:
+#   http://localhost:3002  — Grafana dashboards (admin/admin)
+# Antenna: dipole arms ~16.4 cm, vertical, at window
+```
+
+### 7. Spectrum survey
 
 ```bash
 # Requires direct USB access (usbipd)
@@ -44,11 +68,15 @@ bash scripts/spectrum-scan.sh fm       # FM band only
 bash scripts/spectrum-scan.sh full     # 24 MHz — 1.7 GHz
 ```
 
+**Note:** only one pipeline can use the dongle at a time. Stop one before starting another.
+
 ## Project Structure
 
 ```
 setup/              → installation scripts and guides
 adsb/               → ADS-B tracking pipeline (Docker Compose)
+ais/                → AIS ship tracking pipeline (Docker Compose)
+ism/                → ISM band IoT monitoring pipeline (Docker Compose)
 scripts/            → utility scripts for scanning, recording
 config/             → SDR++ and tool configurations
 recordings/         → IQ recordings, scan CSVs, decoded images

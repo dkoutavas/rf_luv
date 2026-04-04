@@ -1,0 +1,179 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active Devices",
+      "description": "Unique devices seen in the last 5 minutes",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(model, device_id) as count FROM ism.events WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "yellow", "value": null },
+              { "color": "green", "value": 3 },
+              { "color": "blue", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Events / min",
+      "description": "Device transmissions per minute (last 5 min avg)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() / 5 as events_per_min FROM ism.events WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique Devices Today",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(model, device_id) as count FROM ism.events WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Events Today",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT formatReadableQuantity(count()) as total FROM ism.events WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Device Types",
+      "description": "Breakdown by device model/protocol",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT model, uniq(device_id) AS devices, count() AS events FROM ism.events WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY model ORDER BY events DESC LIMIT 15",
+          "format": 1
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Events Over Time",
+      "description": "Device transmissions per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, count() AS events FROM ism.events WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Temperature Readings",
+      "description": "Temperature over time, per device",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, temperature_c AS value, concat(model, ' #', coalesce(device_id, '?')) AS metric FROM ism.events WHERE timestamp >= $__fromTime AND timestamp <= $__toTime AND temperature_c IS NOT NULL ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 4
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Humidity Readings",
+      "description": "Humidity over time, per device",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, humidity AS value, concat(model, ' #', coalesce(device_id, '?')) AS metric FROM ism.events WHERE timestamp >= $__fromTime AND timestamp <= $__toTime AND humidity IS NOT NULL ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 4
+          }
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent Events",
+      "description": "Last 20 device transmissions",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, model, device_id, channel, temperature_c, humidity, battery_ok, round(rssi, 1) AS rssi_db, round(snr, 1) AS snr_db FROM ism.events ORDER BY timestamp DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["ism", "iot", "433mhz", "rtl-sdr"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ISM Band Overview — 433 MHz",
+  "uid": "ism-overview-433"
+}

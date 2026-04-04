@@ -8,9 +8,13 @@ recordings/*.png
 
 # ClickHouse data
 adsb/clickhouse/data/
+ais/clickhouse/data/
+ism/clickhouse/data/
 
 # Grafana data
 adsb/grafana/data/
+ais/grafana/data/
+ism/grafana/data/
 
 # Docker volumes
 docker-volumes/

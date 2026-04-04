@@ -80,6 +80,26 @@ rf_luv/
 │               └── json/
 │                   └── adsb-overview.json  # pre-built dashboard
 │
+├── ais/                        # AIS ship tracking pipeline
+│   ├── docker-compose.yml      # AIS-catcher + ClickHouse + Grafana + ingest
+│   ├── Dockerfile.ingest       # container for ais_ingest.py + ais_decoder.py
+│   ├── ais_ingest.py           # NMEA UDP → ClickHouse batch inserter
+│   ├── ais_decoder.py          # stdlib-only AIVDM decoder (msg types 1-3, 5, 18, 24)
+│   ├── clickhouse/
+│   │   └── init.sql            # positions table, ship_latest, hourly_stats views
+│   └── grafana/
+│       └── provisioning/       # datasource + dashboard auto-provisioning
+│
+├── ism/                        # ISM band IoT device monitoring pipeline
+│   ├── docker-compose.yml      # rtl_433 + ClickHouse + Grafana
+│   ├── Dockerfile.ingest       # rtl_433 + Python in single container
+│   ├── entrypoint.sh           # pipes rtl_433 JSON stdout → ism_ingest.py
+│   ├── ism_ingest.py           # JSON line reader → ClickHouse batch inserter
+│   ├── clickhouse/
+│   │   └── init.sql            # events table, device_latest, hourly_stats views
+│   └── grafana/
+│       └── provisioning/       # datasource + dashboard auto-provisioning
+│
 ├── scripts/
 │   ├── spectrum-scan.sh        # rtl_power wideband scanning with band presets
 │   ├── satellite-pass.sh       # NOAA/Meteor pass recording with rtl_fm
@@ -276,6 +296,66 @@ ClickHouse (adsb database)
 - ingest.py is stdlib-only Python (no dependencies) to keep the Docker image tiny and the code obvious
 - SBS BaseStation format chosen over Beast binary because it's human-readable CSV, easy to debug and parse
 - Materialized views handle rollups at write time so dashboards query pre-aggregated data
+
+## AIS Pipeline Architecture
+
+```
+RTL-SDR (161.975 + 162.025 MHz, via rtl_tcp on Windows)
+  └→ AIS-catcher (Docker, dual-channel decoder)
+       └→ NMEA sentences (UDP :10110) → ais_ingest.py → ClickHouse
+
+ClickHouse (ais database, :8124/:9001)
+  ├── positions table (MergeTree, partitioned by day, 90-day TTL)
+  ├── hourly_stats (materialized view — uniq ships, avg speed)
+  └── ship_latest (materialized view — last known state per MMSI)
+        └→ Grafana (:3001)
+             └── ais-overview dashboard (auto-provisioned)
+                 • Ship count (live + over time)
+                 • Message rate
+                 • Ship types bar chart
+                 • Recent ships table
+                 • Speed distribution + traces
+```
+
+**Key design decisions:**
+- AIS-catcher over rtl_ais because it supports rtl_tcp input (rtl_ais requires direct USB)
+- Custom stdlib-only AIVDM decoder (ais_decoder.py) — 6-bit dearmoring, msg types 1-3/5/18/24, multi-sentence reassembly
+- UDP transport from decoder to ingest — one NMEA sentence per datagram, no framing needed
+- ship_latest view merges position data (types 1-3, 18) with identity data (types 5, 24) via argMax
+
+## ISM Pipeline Architecture
+
+```
+RTL-SDR (433.92 MHz, via rtl_tcp on Windows)
+  └→ rtl_433 (in Docker, protocol decoder)
+       └→ JSON stdout (pipe) → ism_ingest.py → ClickHouse
+
+ClickHouse (ism database, :8125/:9002)
+  ├── events table (MergeTree, partitioned by day, 180-day TTL)
+  ├── hourly_stats (materialized view — uniq devices, avg temperature)
+  └── device_latest (materialized view — last reading per device)
+        └→ Grafana (:3002)
+             └── ism-overview dashboard (auto-provisioned)
+                 • Active devices + event rate
+                 • Device types bar chart
+                 • Temperature + humidity traces
+                 • Recent events table
+```
+
+**Key design decisions:**
+- rtl_433 and Python ingest in a single container — stdout pipe is the simplest IPC
+- 180-day TTL (vs 90 for ADS-B/AIS) — ISM data is interesting for seasonal device patterns
+- raw_json column stores full rtl_433 output — covers all 200+ protocols without explicit field mapping
+
+## Port Allocation
+
+| Pipeline | ClickHouse HTTP | ClickHouse Native | Grafana | Extra |
+|----------|----------------|-------------------|---------|-------|
+| ADS-B    | 8123           | 9000              | 3000    | tar1090: 8080 |
+| AIS      | 8124           | 9001              | 3001    | — |
+| ISM      | 8125           | 9002              | 3002    | — |
+
+Only one pipeline can use rtl_tcp at a time (single dongle).
 
 ---
 

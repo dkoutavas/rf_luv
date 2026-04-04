@@ -1,0 +1,95 @@
+# AIS Ship Tracking Pipeline
+# AIS-catcher (decoder) → ais-ingest (NMEA→ClickHouse) → Grafana (dashboards)
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:3001 for Grafana dashboards
+#
+# The RTL-SDR must be streaming via rtl_tcp on Windows:
+#   rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+#
+# AIS-catcher auto-tunes to 161.975 + 162.025 MHz (dual-channel).
+# Point dipole antenna SW toward Piraeus, arms ~44 cm, vertical.
+#
+# NOTE: only one pipeline can use rtl_tcp at a time.
+# Stop ADS-B before starting AIS: cd ../adsb && docker compose down
+
+services:
+
+  # ─── AIS Decoder ─────────────────────────────────────────
+  # AIS-catcher connects to rtl_tcp, demodulates dual-channel AIS,
+  # and sends decoded NMEA sentences to ais-ingest via UDP.
+  ais-decoder:
+    image: ghcr.io/jvde-github/ais-catcher:v0.62
+    container_name: ais-decoder
+    restart: unless-stopped
+    depends_on:
+      - ais-ingest
+    command: >
+      -t rtltcp host.docker.internal 1234
+      -gt tuner 40.0
+      -u ais-ingest 10110
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── AIS Ingest Worker ──────────────────────────────────
+  # Receives NMEA over UDP, decodes AIVDM payloads, batch-inserts to ClickHouse
+  ais-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: ais-ingest
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      AIS_UDP_PORT: "10110"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: ais
+      CLICKHOUSE_USER: ais
+      CLICKHOUSE_PASSWORD: ais_local
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_SECONDS: "5"
+
+  # ─── ClickHouse (Time Series Storage) ──────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-ais
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ais
+      CLICKHOUSE_USER: ais
+      CLICKHOUSE_PASSWORD: ais_local
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8124:8123"   # HTTP interface
+      - "9001:9000"   # native TCP
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana (Dashboards) ──────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-ais
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  clickhouse-data:
+  grafana-data:

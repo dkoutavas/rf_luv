@@ -1,0 +1,86 @@
+# ISM Band Device Monitoring Pipeline
+# rtl_433 (decoder) → ism_ingest.py (JSON→ClickHouse) → Grafana (dashboards)
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:3002 for Grafana dashboards
+#
+# The RTL-SDR must be streaming via rtl_tcp on Windows:
+#   rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+#
+# Decodes weather stations, tire sensors, doorbells, remotes, etc.
+# at 433.92 MHz. Dipole arms ~16.4 cm, vertical, at window.
+#
+# NOTE: only one pipeline can use rtl_tcp at a time.
+# Stop other pipelines first: cd ../adsb && docker compose down
+
+services:
+
+  # ─── rtl_433 + Ingest (combined) ───────────────────────
+  # Single container: rtl_433 pipes JSON to Python ingest script.
+  # Combined because the pipe is the simplest IPC — no networking
+  # overhead, no UDP buffering, and rtl_433 exit = ingest exit.
+  rtl433-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: rtl433-ingest
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      RTL_TCP_HOST: host.docker.internal
+      RTL_TCP_PORT: "1234"
+      ISM_FREQ: "433.92M"
+      ISM_GAIN: "40"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: ism
+      CLICKHOUSE_USER: ism
+      CLICKHOUSE_PASSWORD: ism_local
+      BATCH_SIZE: "200"
+      FLUSH_INTERVAL_SECONDS: "10"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── ClickHouse (Time Series Storage) ──────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-ism
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ism
+      CLICKHOUSE_USER: ism
+      CLICKHOUSE_PASSWORD: ism_local
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8125:8123"   # HTTP interface
+      - "9002:9000"   # native TCP
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana (Dashboards) ──────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-ism
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3002:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  clickhouse-data:
+  grafana-data:

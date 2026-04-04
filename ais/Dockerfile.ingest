@@ -1,0 +1,4 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY ais_decoder.py ais_ingest.py ./
+CMD ["python3", "-u", "ais_ingest.py"]

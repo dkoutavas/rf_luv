@@ -39,7 +39,7 @@ RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
 FREQ_START = int(os.environ.get("SCAN_FREQ_START", "88000000"))
 FREQ_END = int(os.environ.get("SCAN_FREQ_END", "470000000"))
 BIN_WIDTH = int(os.environ.get("SCAN_BIN_WIDTH", "100000"))
-GAIN_DB = float(os.environ.get("SCAN_GAIN", "40"))
+GAIN_DB = float(os.environ.get("SCAN_GAIN", "20"))
 FFT_SIZE = int(os.environ.get("SCAN_FFT_SIZE", "1024"))
 SAMPLE_RATE = int(os.environ.get("SCAN_SAMPLE_RATE", "2048000"))
 NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
@@ -291,7 +291,7 @@ def main():
         {"name": "airband", "start": AIRBAND_START, "end": AIRBAND_END, "interval": AIRBAND_INTERVAL},
     ]
 
-    log.info(f"Spectrum scanner with {len(presets)} presets:")
+    log.info(f"Spectrum scanner with {len(presets)} presets, gain: {GAIN_DB} dB")
     for p in presets:
         log.info(f"  {p['name']}: {p['start']/1e6:.1f}-{p['end']/1e6:.1f} MHz every {p['interval']}s")
 

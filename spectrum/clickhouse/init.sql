@@ -45,10 +45,20 @@ INSERT INTO spectrum.known_frequencies (freq_hz, bandwidth_hz, name, category, m
     (161975000, 25000,  'AIS Ch87',              'marine',  'digital', 'Ship positions'),
     (162025000, 25000,  'AIS Ch88',              'marine',  'digital', 'Ship positions'),
     (384000000, 25000,  'Greek TETRA',           'tetra',   'digital', 'Emergency services'),
+    (144775000, 12500,  'Greek 2m Ham',          'ham',     'NFM', 'Observed voice conversation'),
+    (148000000, 200000, 'Military/Gov VHF',      'gov',     'NFM', 'Strong persistent signal'),
+    (150500000, 200000, 'Military/Gov VHF',      'gov',     'NFM', 'Strong persistent signal'),
+    (152500000, 200000, 'Business Radio',        'business','NFM', 'Commercial repeater'),
+    (156650000, 25000,  'Marine Ch13',           'marine',  'NFM', 'Bridge-to-bridge'),
+    (169000000, 1000000,'DAB/Business VHF',      'broadcast','digital', 'Digital radio infrastructure'),
+    (177000000, 1000000,'DVB-T / DAB+',          'broadcast','digital', 'Digital TV/radio from Hymettus'),
+    (186000000, 1000000,'DVB-T Band III',        'broadcast','digital', 'Digital TV from Hymettus'),
+    (198000000, 1000000,'DVB-T Band III',        'broadcast','digital', 'Digital TV upper band'),
     (433920000, 0,      'ISM 433.92',            'ism',     'mixed',   'Sensors, remotes'),
     (446006250, 12500,  'PMR446 Ch1',            'pmr',     'NFM', 'License-free radios'),
     (446018750, 12500,  'PMR446 Ch2',            'pmr',     'NFM', 'License-free radios'),
-    (446031250, 12500,  'PMR446 Ch3',            'pmr',     'NFM', 'License-free radios');
+    (446031250, 12500,  'PMR446 Ch3',            'pmr',     'NFM', 'License-free radios'),
+    (446210000, 12500,  'PMR446 (observed)',      'pmr',     'NFM', 'Ringing preamble + transmission');
 
 -- Hourly baseline -- rolling average power per frequency bin
 -- Used for anomaly detection: "is this signal stronger than usual?"
@@ -78,3 +88,34 @@ AS SELECT
     max(timestamp) AS last_seen
 FROM spectrum.scans
 GROUP BY freq_hz;
+
+-- Detected spectral peaks -- bins significantly above their neighbors
+-- Peak detection runs in scanner.py, results stored here for dashboarding.
+-- Like peak-picking in audio spectral analysis.
+CREATE TABLE IF NOT EXISTS spectrum.peaks (
+    timestamp       DateTime64(3) DEFAULT now64(3),
+    freq_hz         UInt32,
+    power_dbfs      Float32,
+    prominence_db   Float32,        -- how far above neighboring bins
+    sweep_id        String DEFAULT ''
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (freq_hz, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 180 DAY
+SETTINGS index_granularity = 8192;
+
+-- Transient signal events -- signals that appear or disappear between sweeps
+-- Like an edge detector on the spectrum: fires when something changes.
+CREATE TABLE IF NOT EXISTS spectrum.events (
+    timestamp       DateTime64(3) DEFAULT now64(3),
+    freq_hz         UInt32,
+    event_type      String,         -- 'appeared' or 'disappeared'
+    power_dbfs      Float32,        -- current power
+    prev_power      Float32,        -- previous sweep power
+    delta_db        Float32,        -- absolute change
+    sweep_id        String DEFAULT ''
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (timestamp, freq_hz)
+TTL toDateTime(timestamp) + INTERVAL 180 DAY
+SETTINGS index_granularity = 8192;

@@ -120,6 +120,55 @@
           "format": 1
         }
       ]
+    },
+    {
+      "type": "table",
+      "title": "Detected Peaks",
+      "description": "Spectral peaks from the latest sweep - bins significantly above their neighbors",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT round(p.freq_hz / 1000000.0, 2) AS freq_mhz, round(p.power_dbfs, 1) AS power, round(p.prominence_db, 1) AS prominence_db, kf.name AS known_signal FROM spectrum.peaks p LEFT JOIN spectrum.known_frequencies kf ON abs(toInt64(p.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 100000)) WHERE p.sweep_id = (SELECT sweep_id FROM spectrum.peaks ORDER BY timestamp DESC LIMIT 1) ORDER BY p.prominence_db DESC LIMIT 25",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Signal Events",
+      "description": "Signals that appeared or disappeared between sweeps (transients)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT e.timestamp, e.event_type, round(e.freq_hz / 1000000.0, 2) AS freq_mhz, round(e.power_dbfs, 1) AS power, round(e.prev_power, 1) AS prev_power, round(e.delta_db, 1) AS delta_db, kf.name AS known_signal FROM spectrum.events e LEFT JOIN spectrum.known_frequencies kf ON abs(toInt64(e.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 100000)) ORDER BY e.timestamp DESC LIMIT 30",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Airband Activity",
+      "description": "Power at Athens ATC frequencies (fast 60s airband sweep)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 38 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND s.timestamp >= $__fromTime AND s.timestamp <= $__toTime AND kf.category = 'airband' AND s.sweep_id LIKE 'airband:%' ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 3
+          }
+        }
+      }
     }
   ],
   "refresh": "30s",

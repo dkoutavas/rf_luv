@@ -2,24 +2,22 @@
 """
 RTL-TCP Spectrum Scanner
 
-Connects to an rtl_tcp server, sweeps across a frequency range by
-retuning and capturing IQ samples at each step, computes FFT power
-spectrum, and outputs one JSON line per frequency bin to stdout.
+Connects to an rtl_tcp server, sweeps across configurable frequency ranges,
+computes FFT power spectrum, detects peaks and transient events, and outputs
+JSON lines to stdout for ClickHouse ingestion.
 
-This replaces rtl_power for setups where the dongle is accessed via
-rtl_tcp (e.g., RTL-SDR on Windows, processing in WSL/Docker).
-
-The rtl_tcp protocol is simple:
-  - 12-byte header on connect: "RTL0" + tuner_type(u32) + gain_count(u32)
-  - Client sends 5-byte commands: cmd_id(u8) + value(u32 big-endian)
-  - Server streams unsigned 8-bit IQ pairs: I0, Q0, I1, Q1, ...
+Features:
+  - Multi-preset sweeps: full band (88-470 MHz) every 5 min,
+    airband (118-137 MHz) every 60s for fast ATC capture
+  - Automatic peak detection: finds bins above their neighbors
+  - Transient event logging: detects signals appearing/disappearing
 
 DSP notes (for audio engineers):
   - IQ samples are like mid/side stereo — two channels encoding amplitude + phase
   - FFT on IQ gives a two-sided spectrum (negative and positive frequencies)
-  - fftshift centers DC, just like centering 0 Hz in a frequency analyzer
   - Hann window reduces spectral leakage, same as in audio spectrograms
-  - dBFS = dB relative to full scale of the 8-bit ADC
+  - Peak detection is like peak-picking in a spectral analyzer
+  - Transient detection is like an envelope follower edge detector
 """
 
 import os
@@ -44,13 +42,24 @@ BIN_WIDTH = int(os.environ.get("SCAN_BIN_WIDTH", "100000"))
 GAIN_DB = float(os.environ.get("SCAN_GAIN", "40"))
 FFT_SIZE = int(os.environ.get("SCAN_FFT_SIZE", "1024"))
 SAMPLE_RATE = int(os.environ.get("SCAN_SAMPLE_RATE", "2048000"))
-SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL_SECONDS", "280"))
+NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
+
+# Sweep intervals
+FULL_INTERVAL = int(os.environ.get("SCAN_INTERVAL_SECONDS", "280"))
+AIRBAND_INTERVAL = int(os.environ.get("SCAN_AIRBAND_INTERVAL", "60"))
+AIRBAND_START = int(os.environ.get("SCAN_AIRBAND_START", "118000000"))
+AIRBAND_END = int(os.environ.get("SCAN_AIRBAND_END", "137000000"))
+
+# Detection thresholds
+PEAK_THRESHOLD_DB = float(os.environ.get("SCAN_PEAK_THRESHOLD", "10"))
+PEAK_NEIGHBOR_BINS = int(os.environ.get("SCAN_PEAK_NEIGHBORS", "5"))
+TRANSIENT_THRESHOLD_DB = float(os.environ.get("SCAN_TRANSIENT_THRESHOLD", "15"))
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stderr,  # logs to stderr, data to stdout
+    stream=sys.stderr,
 )
 log = logging.getLogger("scanner")
 
@@ -82,15 +91,12 @@ class RTLTCPClient:
 
     def __init__(self, host: str, port: int):
         self.sock = socket.create_connection((host, port), timeout=10)
-        # Read 12-byte header: "RTL0" + tuner_type(u32) + gain_count(u32)
         header = self._read_exact(12)
-        magic = header[:4]
-        if magic != b"RTL0":
-            raise ConnectionError(f"Invalid rtl_tcp header: {magic}")
+        if header[:4] != b"RTL0":
+            raise ConnectionError(f"Invalid rtl_tcp header: {header[:4]}")
         log.info(f"Connected to rtl_tcp at {host}:{port}")
 
     def _read_exact(self, n: int) -> bytes:
-        """Read exactly n bytes from the socket."""
         buf = bytearray()
         while len(buf) < n:
             chunk = self.sock.recv(n - len(buf))
@@ -109,15 +115,14 @@ class RTLTCPClient:
         self.send_command(self.CMD_SET_SAMPLE_RATE, rate)
 
     def set_gain(self, gain_db: float):
-        self.send_command(self.CMD_SET_GAIN_MODE, 1)  # manual gain
-        self.send_command(self.CMD_SET_AGC, 0)  # disable AGC
+        self.send_command(self.CMD_SET_GAIN_MODE, 1)
+        self.send_command(self.CMD_SET_AGC, 0)
         self.send_command(self.CMD_SET_GAIN, int(gain_db * 10))
 
     def read_samples(self, num_bytes: int) -> bytes:
         return self._read_exact(num_bytes)
 
     def discard(self, num_bytes: int):
-        """Read and discard bytes (settling time after retune)."""
         self._read_exact(num_bytes)
 
     def close(self):
@@ -128,38 +133,22 @@ class RTLTCPClient:
 
 
 def compute_power_spectrum(iq_bytes: bytes, fft_size: int, window: np.ndarray) -> np.ndarray:
-    """
-    Convert raw unsigned 8-bit IQ bytes to power spectrum in dBFS.
-
-    Like computing one frame of a spectrogram:
-    raw samples → complex IQ → window → FFT → |X|² → 10·log10
-    """
+    """Convert raw unsigned 8-bit IQ bytes to power spectrum in dBFS."""
     raw = np.frombuffer(iq_bytes, dtype=np.uint8).astype(np.float32)
-
-    # Interleaved I,Q → complex, remove DC offset (127.5 is center of 0-255)
     iq = (raw[0::2] - 127.5) + 1j * (raw[1::2] - 127.5)
-    iq /= 127.5  # normalize to [-1, 1]
+    iq /= 127.5
 
-    # Window to reduce spectral leakage
     iq[:fft_size] *= window
-
-    # FFT → shift DC to center → power
     spectrum = np.fft.fftshift(np.fft.fft(iq[:fft_size], n=fft_size))
     power = np.abs(spectrum) ** 2 / fft_size
 
-    # To dBFS
     return 10.0 * np.log10(np.maximum(power, 1e-20))
 
 
 def downsample_bins(
     power_db: np.ndarray, center_freq: int, sample_rate: int, output_bin_hz: int
 ) -> list[dict]:
-    """
-    Average FFT bins into wider output bins.
-
-    FFT gives sample_rate/fft_size Hz per bin (e.g., 2 kHz at 2.048 MS/s with 1024-pt FFT).
-    We average groups of bins to produce output_bin_hz-wide bins (e.g., 100 kHz).
-    """
+    """Average FFT bins into wider output bins."""
     fft_size = len(power_db)
     fft_bin_hz = sample_rate / fft_size
     bins_per_output = max(1, int(output_bin_hz / fft_bin_hz))
@@ -179,29 +168,19 @@ def downsample_bins(
 # ─── Sweep ───────────────────────────────────────────────
 
 
-NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
-
-
-def sweep(client: RTLTCPClient) -> list[dict]:
-    """Perform one full frequency sweep, return list of {freq_hz, power_dbfs}."""
+def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> list[dict]:
+    """Perform a frequency sweep over the given range."""
     window = np.hanning(FFT_SIZE)
-    capture_bytes = FFT_SIZE * 2  # I + Q interleaved
+    capture_bytes = FFT_SIZE * 2
 
     all_bins = []
-    center = FREQ_START + SAMPLE_RATE // 2
+    center = freq_start + SAMPLE_RATE // 2
 
-    while center < FREQ_END + SAMPLE_RATE // 2:
+    while center < freq_end + SAMPLE_RATE // 2:
         client.set_frequency(center)
+        time.sleep(0.005)
+        client.discard(32768)
 
-        # Let PLL settle after retuning. The R820T needs 1-5ms,
-        # but we also need to drain stale samples from the TCP buffer.
-        # Sleep first (PLL lock), then discard buffered stale data.
-        time.sleep(0.005)  # 5ms PLL settle
-        client.discard(32768)  # drain ~8ms of stale buffered IQ
-
-        # Average multiple FFT frames for stable power measurement.
-        # Like averaging multiple spectrogram frames in audio — reduces
-        # variance from noise and transient effects.
         power_sum = np.zeros(FFT_SIZE)
         for _ in range(NUM_AVERAGES):
             iq_data = client.read_samples(capture_bytes)
@@ -209,9 +188,8 @@ def sweep(client: RTLTCPClient) -> list[dict]:
         power_db = power_sum / NUM_AVERAGES
 
         bins = downsample_bins(power_db, center, SAMPLE_RATE, BIN_WIDTH)
-
         for b in bins:
-            if FREQ_START <= b["freq_hz"] <= FREQ_END:
+            if freq_start <= b["freq_hz"] <= freq_end:
                 all_bins.append(b)
 
         center += SAMPLE_RATE
@@ -219,53 +197,165 @@ def sweep(client: RTLTCPClient) -> list[dict]:
     return all_bins
 
 
-# ─── Main loop ───────────────────────────────────────────
+# ─── Peak detection ──────────────────────────────────────
+
+
+def detect_peaks(bins: list[dict]) -> list[dict]:
+    """
+    Find spectral peaks — bins significantly above their neighbors.
+    Like peak-picking in an audio spectrum analyzer.
+
+    For each bin, compare against the average of PEAK_NEIGHBOR_BINS bins
+    on each side. If it exceeds the neighborhood by PEAK_THRESHOLD_DB,
+    it's a peak.
+    """
+    if len(bins) < PEAK_NEIGHBOR_BINS * 2 + 1:
+        return []
+
+    powers = np.array([b["power_dbfs"] for b in bins])
+    peaks = []
+
+    for i in range(PEAK_NEIGHBOR_BINS, len(bins) - PEAK_NEIGHBOR_BINS):
+        left = powers[i - PEAK_NEIGHBOR_BINS : i]
+        right = powers[i + 1 : i + 1 + PEAK_NEIGHBOR_BINS]
+        neighbor_avg = float(np.mean(np.concatenate([left, right])))
+        prominence = powers[i] - neighbor_avg
+
+        if prominence >= PEAK_THRESHOLD_DB:
+            peaks.append({
+                "peak": True,
+                "freq_hz": bins[i]["freq_hz"],
+                "power_dbfs": bins[i]["power_dbfs"],
+                "prominence_db": round(float(prominence), 1),
+            })
+
+    return peaks
+
+
+# ─── Transient event detection ───────────────────────────
+
+# Previous sweep power indexed by freq_hz
+_prev_sweep: dict[int, float] = {}
+
+
+def detect_transients(bins: list[dict]) -> list[dict]:
+    """
+    Detect signals that appeared or disappeared between sweeps.
+    Like an edge detector on the spectrum — fires when something changes.
+
+    Compares current power against the previous sweep at each frequency.
+    A delta exceeding TRANSIENT_THRESHOLD_DB triggers an event.
+    """
+    global _prev_sweep
+    events = []
+
+    current = {b["freq_hz"]: b["power_dbfs"] for b in bins}
+
+    if _prev_sweep:
+        for freq_hz, power in current.items():
+            prev = _prev_sweep.get(freq_hz)
+            if prev is None:
+                continue
+            delta = power - prev
+            if delta >= TRANSIENT_THRESHOLD_DB:
+                events.append({
+                    "event": True,
+                    "freq_hz": freq_hz,
+                    "event_type": "appeared",
+                    "power_dbfs": power,
+                    "prev_power": prev,
+                    "delta_db": round(delta, 1),
+                })
+            elif delta <= -TRANSIENT_THRESHOLD_DB:
+                events.append({
+                    "event": True,
+                    "freq_hz": freq_hz,
+                    "event_type": "disappeared",
+                    "power_dbfs": power,
+                    "prev_power": prev,
+                    "delta_db": round(abs(delta), 1),
+                })
+
+    _prev_sweep = current
+    return events
+
+
+# ─── Main loop with multi-preset scheduling ─────────────
 
 
 def main():
     global running
 
-    log.info(
-        f"Spectrum scanner: {FREQ_START/1e6:.1f} - {FREQ_END/1e6:.1f} MHz, "
-        f"{BIN_WIDTH/1e3:.0f} kHz bins, gain {GAIN_DB} dB, "
-        f"FFT {FFT_SIZE} pts, interval {SCAN_INTERVAL}s"
-    )
+    presets = [
+        {"name": "full", "start": FREQ_START, "end": FREQ_END, "interval": FULL_INTERVAL},
+        {"name": "airband", "start": AIRBAND_START, "end": AIRBAND_END, "interval": AIRBAND_INTERVAL},
+    ]
+
+    log.info(f"Spectrum scanner with {len(presets)} presets:")
+    for p in presets:
+        log.info(f"  {p['name']}: {p['start']/1e6:.1f}-{p['end']/1e6:.1f} MHz every {p['interval']}s")
+
+    # Track last run time for each preset
+    last_run = {p["name"]: 0.0 for p in presets}
 
     while running:
+        # Pick the most overdue preset
+        now = time.monotonic()
+        best = None
+        best_overdue = -1
+        for p in presets:
+            overdue = now - last_run[p["name"]] - p["interval"]
+            if overdue > best_overdue:
+                best_overdue = overdue
+                best = p
+
+        # If nothing is due yet, sleep 1s and check again
+        if best_overdue < 0:
+            time.sleep(1)
+            continue
+
+        preset = best
+
         try:
-            # Connect fresh for each sweep — avoids stale IQ data
-            # accumulating in the TCP socket buffer during sleep.
-            # rtl_tcp streams continuously; a 280s sleep would buffer
-            # ~1.1 GB of stale samples that pollute the next sweep.
             client = RTLTCPClient(RTL_HOST, RTL_PORT)
             client.set_sample_rate(SAMPLE_RATE)
             client.set_gain(GAIN_DB)
-            # Warmup: discard initial samples while PLL settles after connect
-            client.discard(65536)
+            client.discard(65536)  # warmup
 
-            sweep_id = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            sweep_id = f"{preset['name']}:{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
             t0 = time.monotonic()
 
-            bins = sweep(client)
+            bins = sweep(client, preset["start"], preset["end"])
             elapsed = time.monotonic() - t0
 
             client.close()
+            last_run[preset["name"]] = time.monotonic()
 
-            # Output JSON lines to stdout (picked up by scan_ingest.py)
+            # Output scan bins
             for b in bins:
                 b["sweep_id"] = sweep_id
                 print(json.dumps(b), flush=True)
 
-            # Emit flush marker so ingest flushes the final batch
+            # Peak detection
+            peaks = detect_peaks(bins)
+            for p in peaks:
+                p["sweep_id"] = sweep_id
+                print(json.dumps(p), flush=True)
+
+            # Transient event detection (only for same-range sweeps)
+            if preset["name"] == "full":
+                events = detect_transients(bins)
+                for e in events:
+                    e["sweep_id"] = sweep_id
+                    print(json.dumps(e), flush=True)
+
+            # Flush marker
             print(json.dumps({"flush": True}), flush=True)
 
-            log.info(f"Sweep complete: {len(bins)} bins in {elapsed:.1f}s")
-
-            # Sleep until next sweep
-            for _ in range(SCAN_INTERVAL):
-                if not running:
-                    break
-                time.sleep(1)
+            log.info(
+                f"[{preset['name']}] {len(bins)} bins, {len(peaks)} peaks, "
+                f"{len(events) if preset['name'] == 'full' else '-'} events in {elapsed:.1f}s"
+            )
 
         except (ConnectionRefusedError, ConnectionError, socket.error, OSError) as e:
             log.warning(f"Connection error: {e} — retrying in 10s...")

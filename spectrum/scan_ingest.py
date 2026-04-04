@@ -67,18 +67,18 @@ def clickhouse_query(query: str, data: str = "") -> str:
         raise
 
 
-def insert_batch(rows: list[dict]) -> int:
+def insert_batch(rows: list[dict], table: str = "scans") -> int:
     if not rows:
         return 0
 
     payload = "\n".join(json.dumps(row) for row in rows)
-    query = "INSERT INTO scans FORMAT JSONEachRow"
+    query = f"INSERT INTO {table} FORMAT JSONEachRow"
 
     try:
         clickhouse_query(query, payload)
         return len(rows)
     except Exception as e:
-        log.error(f"Failed to insert batch of {len(rows)}: {e}")
+        log.error(f"Failed to insert {len(rows)} into {table}: {e}")
         return 0
 
 
@@ -104,6 +104,8 @@ def main():
     total_inserted = 0
     total_read = 0
     batch: list[dict] = []
+    peak_batch: list[dict] = []
+    event_batch: list[dict] = []
     last_flush = time.monotonic()
 
     log.info("Reading JSON lines from stdin (scanner pipe)")
@@ -121,23 +123,56 @@ def main():
         except json.JSONDecodeError:
             continue
 
-        # Flush marker from scanner.py — flush remaining batch
+        # Flush marker from scanner.py — flush all batches
         if data.get("flush"):
             if batch:
-                count = insert_batch(batch)
+                count = insert_batch(batch, "scans")
                 total_inserted += count
                 if count > 0:
-                    log.info(f"Flushed {count} rows (sweep end) | read: {total_read} | inserted: {total_inserted}")
+                    log.info(f"Flushed {count} scans (sweep end) | inserted: {total_inserted}")
                 batch.clear()
-                last_flush = time.monotonic()
+            if peak_batch:
+                insert_batch(peak_batch, "peaks")
+                peak_batch.clear()
+            if event_batch:
+                insert_batch(event_batch, "events")
+                event_batch.clear()
+            last_flush = time.monotonic()
             continue
 
-        # Map fields
+        # Extract timestamp from sweep_id (format: "preset:2026-04-04 ...")
+        sweep_id = data.get("sweep_id", "")
+        ts = sweep_id.split(":", 1)[1] if ":" in sweep_id else sweep_id
+
+        # Route to appropriate table based on marker flags
+        if data.get("peak"):
+            peak_batch.append({
+                "timestamp": ts,
+                "freq_hz": data.get("freq_hz", 0),
+                "power_dbfs": data.get("power_dbfs", 0.0),
+                "prominence_db": data.get("prominence_db", 0.0),
+                "sweep_id": sweep_id,
+            })
+            continue
+
+        if data.get("event"):
+            event_batch.append({
+                "timestamp": ts,
+                "freq_hz": data.get("freq_hz", 0),
+                "event_type": data.get("event_type", ""),
+                "power_dbfs": data.get("power_dbfs", 0.0),
+                "prev_power": data.get("prev_power", 0.0),
+                "delta_db": data.get("delta_db", 0.0),
+                "sweep_id": sweep_id,
+            })
+            continue
+
+        # Regular scan bin
         row = {
-            "timestamp": data.get("sweep_id", ""),
+            "timestamp": ts,
             "freq_hz": data.get("freq_hz", 0),
             "power_dbfs": data.get("power_dbfs", 0.0),
-            "sweep_id": data.get("sweep_id", ""),
+            "sweep_id": sweep_id,
         }
 
         total_read += 1

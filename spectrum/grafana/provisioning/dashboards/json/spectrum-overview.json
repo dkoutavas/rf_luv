@@ -10,7 +10,7 @@
       "type": "stat",
       "title": "Latest Sweep",
       "description": "When the last spectrum sweep completed",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -28,7 +28,7 @@
       "type": "stat",
       "title": "Freq Bins",
       "description": "Number of frequency bins in the latest sweep",
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -41,7 +41,7 @@
       "type": "stat",
       "title": "Sweeps Today",
       "description": "Number of completed sweeps since midnight",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -49,6 +49,33 @@
           "format": 1
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Clipped Sweeps (24h)",
+      "description": "Sweeps where any bin exceeded -3 dBFS — indicates ADC saturation",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT countIf(max_power > -3) AS clipped FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 24 HOUR",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background"
+      }
     },
     {
       "type": "barchart",
@@ -74,9 +101,34 @@
     },
     {
       "type": "timeseries",
+      "title": "RF Waterfall",
+      "description": "Power over time per 10 MHz band — each line is a frequency band, color shows relative power",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS time, max(power_dbfs) AS value, concat(toString(intDiv(freq_hz, 10000000) * 10), ' MHz') AS metric FROM spectrum.scans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime AND sweep_id LIKE 'full:%' GROUP BY time, intDiv(freq_hz, 10000000) ORDER BY time, intDiv(freq_hz, 10000000)",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "gradientMode": "scheme"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
       "title": "Signal Power Over Time",
       "description": "Power at known frequencies over time",
-      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 14 },
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 26 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -99,7 +151,7 @@
       "type": "table",
       "title": "Active Known Frequencies",
       "description": "Which known signals are currently detected with their power levels",
-      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 14 },
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 26 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -110,22 +162,46 @@
     },
     {
       "type": "table",
-      "title": "Anomalies",
-      "description": "Frequency bins with power significantly above their hourly baseline",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
+      "title": "Z-Score Anomalies",
+      "description": "Frequencies with unusual power relative to their rolling 20-sweep average — z > 3 means statistically unusual",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT round(s.freq_hz / 1000000.0, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, round(avgMerge(b.avg_power), 1) AS baseline, round(s.power_dbfs - avgMerge(b.avg_power), 1) AS deviation_db FROM spectrum.scans s INNER JOIN spectrum.hourly_baseline b ON s.freq_hz = b.freq_hz AND toStartOfHour(s.timestamp) = b.hour WHERE s.sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1) GROUP BY s.freq_hz, s.power_dbfs HAVING deviation_db > 6 ORDER BY deviation_db DESC LIMIT 30",
+          "rawSql": "WITH recent AS (SELECT freq_hz, power_dbfs, timestamp, sweep_id, avg(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS mean_20, stddevPop(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS std_20 FROM spectrum.scans WHERE timestamp > now() - INTERVAL 2 HOUR AND sweep_id LIKE 'full:%') SELECT timestamp, round(freq_hz / 1000000, 2) AS freq_mhz, round(power_dbfs, 1) AS power, round(mean_20, 1) AS baseline, round(std_20, 1) AS std_dev, round((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20), 1) AS z_score FROM recent WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans WHERE sweep_id LIKE 'full:%' ORDER BY timestamp DESC LIMIT 1) AND abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) > 3 ORDER BY abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) DESC LIMIT 50",
           "format": 1
         }
-      ]
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "z_score" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "transparent", "value": null },
+                    { "color": "yellow", "value": 3 },
+                    { "color": "red", "value": 5 }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "color-background" }
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "type": "table",
       "title": "Detected Peaks",
-      "description": "Spectral peaks from the latest sweep - bins significantly above their neighbors",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "description": "Spectral peaks from the latest sweep — bins significantly above their neighbors",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -138,7 +214,7 @@
       "type": "table",
       "title": "Signal Events",
       "description": "Signals that appeared or disappeared between sweeps (transients)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -151,7 +227,7 @@
       "type": "timeseries",
       "title": "Airband Activity",
       "description": "Power at Athens ATC frequencies (fast 60s airband sweep)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 38 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -171,7 +247,7 @@
       }
     }
   ],
-  "refresh": "30s",
+  "refresh": "60s",
   "schemaVersion": 39,
   "tags": ["spectrum", "scanner", "rtl-sdr"],
   "templating": { "list": [] },

@@ -100,6 +100,17 @@ rf_luv/
 │   └── grafana/
 │       └── provisioning/       # datasource + dashboard auto-provisioning
 │
+├── spectrum/                   # Wideband spectrum scanner ("RF weather station")
+│   ├── docker-compose.yml      # scanner + ClickHouse + Grafana
+│   ├── Dockerfile.scanner      # python:3.12-slim + numpy
+│   ├── entrypoint.sh           # pipes scanner.py → scan_ingest.py
+│   ├── scanner.py              # custom rtl_tcp FFT scanner (replaces rtl_power)
+│   ├── scan_ingest.py          # JSON line reader → ClickHouse batch inserter
+│   ├── clickhouse/
+│   │   └── init.sql            # scans, peaks, events, known_frequencies tables
+│   └── grafana/
+│       └── provisioning/       # datasource + dashboard auto-provisioning
+│
 ├── scripts/
 │   ├── spectrum-scan.sh        # rtl_power wideband scanning with band presets
 │   ├── satellite-pass.sh       # NOAA/Meteor pass recording with rtl_fm
@@ -321,7 +332,7 @@ ClickHouse (ais database, :8124/:9001)
 - AIS-catcher over rtl_ais because it supports rtl_tcp input (rtl_ais requires direct USB)
 - Custom stdlib-only AIVDM decoder (ais_decoder.py) — 6-bit dearmoring, msg types 1-3/5/18/24, multi-sentence reassembly
 - UDP transport from decoder to ingest — one NMEA sentence per datagram, no framing needed
-- ship_latest view merges position data (types 1-3, 18) with identity data (types 5, 24) via argMax
+- ship_latest view uses argMaxIf to merge position data (types 1-3, 18) with identity data (types 5, 24) without NULL clobbering
 
 ## ISM Pipeline Architecture
 
@@ -347,6 +358,40 @@ ClickHouse (ism database, :8125/:9002)
 - 180-day TTL (vs 90 for ADS-B/AIS) — ISM data is interesting for seasonal device patterns
 - raw_json column stores full rtl_433 output — covers all 200+ protocols without explicit field mapping
 
+## Spectrum Scanner Pipeline Architecture
+
+```
+RTL-SDR (88-470 MHz sweep, via rtl_tcp on Windows)
+  └→ scanner.py (Docker, custom rtl_tcp FFT engine, numpy)
+       └→ JSON lines (stdout pipe) → scan_ingest.py → ClickHouse
+
+ClickHouse (spectrum database, :8126/:9003)
+  ├── scans table (MergeTree, one row per freq bin per sweep, 180-day TTL)
+  ├── peaks table (spectral peaks — bins above their neighbors)
+  ├── events table (transient signals — appeared/disappeared between sweeps)
+  ├── known_frequencies (27 Athens signals: FM, ATC, marine, TETRA, ISM, DVB-T, military)
+  ├── hourly_baseline (materialized view — avg/stddev per freq per hour)
+  └── freq_latest (materialized view — latest reading per bin)
+        └→ Grafana (:3003)
+             └── spectrum-overview dashboard (auto-provisioned)
+                 • Current power spectrum (bar chart, full 88-470 MHz)
+                 • Signal power over time at known frequencies
+                 • Active known frequencies table
+                 • Detected peaks (auto-found spectral peaks)
+                 • Signal events (transient appear/disappear)
+                 • Airband activity (60s resolution ATC traces)
+                 • Anomaly detection (signals above hourly baseline)
+```
+
+**Key design decisions:**
+- Custom Python rtl_tcp client replaces rtl_power (which can't use rtl_tcp network input)
+- Normalized data model: one row per frequency bin per sweep, ORDER BY (freq_hz, timestamp) for frequency-first queries
+- 8x FFT averaging + 5ms PLL settle + 32KB buffer drain for stable measurements (~1 dB sweep-to-sweep)
+- Multi-preset sweep scheduling: full band every 5 min, airband every 60s
+- Peak detection: bins >10 dB above their 5-neighbor average
+- Transient detection: >15 dB change between consecutive sweeps
+- Reconnect to rtl_tcp for each sweep to prevent TCP buffer stale data accumulation
+
 ## Port Allocation
 
 | Pipeline | ClickHouse HTTP | ClickHouse Native | Grafana | Extra |
@@ -354,8 +399,9 @@ ClickHouse (ism database, :8125/:9002)
 | ADS-B    | 8123           | 9000              | 3000    | tar1090: 8080 |
 | AIS      | 8124           | 9001              | 3001    | — |
 | ISM      | 8125           | 9002              | 3002    | — |
+| Spectrum | 8126           | 9003              | 3003    | — |
 
-Only one pipeline can use rtl_tcp at a time (single dongle).
+Only one pipeline can use rtl_tcp at a time (single dongle). The spectrum scanner is the best "idle mode" — maps the RF environment while not actively tracking ships or aircraft.
 
 ---
 

@@ -59,10 +59,23 @@ docker compose up -d
 # Antenna: dipole arms ~16.4 cm, vertical, at window
 ```
 
-### 7. Spectrum survey
+### 7. Spectrum scanner (RF weather station)
 
 ```bash
-# Requires direct USB access (usbipd)
+# Start rtl_tcp on Windows first, then:
+cd spectrum
+docker compose up -d
+
+# Open:
+#   http://localhost:3003  — Grafana dashboards (admin/admin)
+# Sweeps 88-470 MHz every 5 min, airband (118-137 MHz) every 60s
+# Auto-detects peaks, transient events, and anomalies
+```
+
+### 8. Spectrum survey (one-shot)
+
+```bash
+# Requires direct USB access (usbipd), not rtl_tcp
 bash scripts/spectrum-scan.sh          # VHF/UHF overview
 bash scripts/spectrum-scan.sh fm       # FM band only
 bash scripts/spectrum-scan.sh full     # 24 MHz — 1.7 GHz
@@ -74,14 +87,15 @@ bash scripts/spectrum-scan.sh full     # 24 MHz — 1.7 GHz
 
 ```
 setup/              → installation scripts and guides
-adsb/               → ADS-B tracking pipeline (Docker Compose)
-ais/                → AIS ship tracking pipeline (Docker Compose)
-ism/                → ISM band IoT monitoring pipeline (Docker Compose)
-scripts/            → utility scripts for scanning, recording
+adsb/               → ADS-B aircraft tracking (Docker Compose, Grafana :3000)
+ais/                → AIS ship tracking from Piraeus (Docker Compose, Grafana :3001)
+ism/                → ISM 433 MHz IoT monitoring (Docker Compose, Grafana :3002)
+spectrum/           → wideband spectrum scanner with anomaly detection (Grafana :3003)
+scripts/            → utility scripts for scanning, recording, listening
 config/             → SDR++ and tool configurations
 recordings/         → IQ recordings, scan CSVs, decoded images
 notes/              → signal identification notes
-CLAUDE.md           → Claude Code project context
+CLAUDE.md           → Claude Code project context (comprehensive)
 ```
 
 ## Antenna Quick Reference

@@ -1,0 +1,90 @@
+# Spectrum Scanner Pipeline
+# scanner.py (rtl_tcp FFT) → scan_ingest.py (JSON→ClickHouse) → Grafana
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:3003 for Grafana dashboards
+#
+# The RTL-SDR must be streaming via rtl_tcp on Windows:
+#   rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+#
+# Sweeps 88-470 MHz with 100 kHz bins every ~5 minutes.
+# Detects anomalies, identifies known signals, builds baseline.
+#
+# NOTE: only one pipeline can use rtl_tcp at a time.
+# Stop other pipelines first.
+
+services:
+
+  # ─── Scanner + Ingest (combined) ───────────────────────
+  # scanner.py connects to rtl_tcp, computes FFT power spectrum,
+  # pipes JSON to scan_ingest.py which batch-inserts to ClickHouse.
+  spectrum-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    container_name: spectrum-scanner
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      RTL_TCP_HOST: host.docker.internal
+      RTL_TCP_PORT: "1234"
+      SCAN_FREQ_START: "88000000"
+      SCAN_FREQ_END: "470000000"
+      SCAN_BIN_WIDTH: "100000"
+      SCAN_GAIN: "40"
+      SCAN_FFT_SIZE: "1024"
+      SCAN_SAMPLE_RATE: "2048000"
+      SCAN_INTERVAL_SECONDS: "280"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: spectrum
+      CLICKHOUSE_USER: spectrum
+      CLICKHOUSE_PASSWORD: spectrum_local
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_SECONDS: "5"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── ClickHouse (Time Series Storage) ──────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-spectrum
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: spectrum
+      CLICKHOUSE_USER: spectrum
+      CLICKHOUSE_PASSWORD: spectrum_local
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8126:8123"
+      - "9003:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana (Dashboards) ──────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-spectrum
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3003:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  clickhouse-data:
+  grafana-data:

@@ -55,9 +55,16 @@ CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 
 def clickhouse_query(query: str, data: str = "") -> str:
-    params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}&query={quote(query)}"
-    url = f"{CH_URL}?{params}"
-    req = Request(url, data=data.encode("utf-8") if data else None)
+    if data:
+        # INSERT-style: query in URL param, data in POST body
+        params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}&query={quote(query)}"
+        url = f"{CH_URL}?{params}"
+        req = Request(url, data=data.encode("utf-8"))
+    else:
+        # All other queries: send as POST body (required for ALTER TABLE, etc.)
+        params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}"
+        url = f"{CH_URL}?{params}"
+        req = Request(url, data=query.encode("utf-8"))
     req.add_header("Content-Type", "text/plain")
     try:
         with urlopen(req, timeout=10) as resp:
@@ -106,6 +113,7 @@ def main():
     batch: list[dict] = []
     peak_batch: list[dict] = []
     event_batch: list[dict] = []
+    health_batch: list[dict] = []
     last_flush = time.monotonic()
 
     log.info("Reading JSON lines from stdin (scanner pipe)")
@@ -123,6 +131,55 @@ def main():
         except json.JSONDecodeError:
             continue
 
+        # Run tracking messages
+        if data.get("run_start"):
+            try:
+                clickhouse_query(
+                    "INSERT INTO scan_runs FORMAT JSONEachRow",
+                    json.dumps({
+                        "run_id": data["run_id"],
+                        "started_at": data["started_at"],
+                        "gain_db": data["gain_db"],
+                        "antenna_position": data.get("antenna_position", ""),
+                        "antenna_arms_cm": data.get("antenna_arms_cm", 0),
+                        "antenna_orientation_deg": data.get("antenna_orientation_deg", 0),
+                        "antenna_height_m": data.get("antenna_height_m", 0),
+                        "notes": data.get("notes", ""),
+                    })
+                )
+                log.info(f"Run started: {data['run_id']} (gain={data['gain_db']}, pos={data.get('antenna_position')})")
+            except Exception as e:
+                log.error(f"Failed to insert run_start: {e}")
+            continue
+
+        if data.get("run_update"):
+            try:
+                rid = data["run_id"]
+                nf = data["noise_floor_dbfs"]
+                ps = data["peak_signal_dbfs"]
+                pf = data["peak_signal_freq_hz"]
+                clickhouse_query(
+                    f"ALTER TABLE scan_runs UPDATE "
+                    f"noise_floor_dbfs = {nf}, peak_signal_dbfs = {ps}, "
+                    f"peak_signal_freq_hz = {pf} WHERE run_id = '{rid}'"
+                )
+                log.info(f"Run updated: noise_floor={nf}, peak={ps} dBFS")
+            except Exception as e:
+                log.error(f"Failed to update run: {e}")
+            continue
+
+        if data.get("run_end"):
+            try:
+                clickhouse_query(
+                    f"ALTER TABLE scan_runs UPDATE "
+                    f"ended_at = '{data['ended_at']}' "
+                    f"WHERE run_id = '{data['run_id']}'"
+                )
+                log.info(f"Run ended: {data['run_id']}")
+            except Exception as e:
+                log.error(f"Failed to update run_end: {e}")
+            continue
+
         # Flush marker from scanner.py — flush all batches
         if data.get("flush"):
             if batch:
@@ -137,6 +194,9 @@ def main():
             if event_batch:
                 insert_batch(event_batch, "events")
                 event_batch.clear()
+            if health_batch:
+                insert_batch(health_batch, "sweep_health")
+                health_batch.clear()
             last_flush = time.monotonic()
             continue
 
@@ -152,6 +212,7 @@ def main():
                 "power_dbfs": data.get("power_dbfs", 0.0),
                 "prominence_db": data.get("prominence_db", 0.0),
                 "sweep_id": sweep_id,
+                "run_id": data.get("run_id", ""),
             })
             continue
 
@@ -164,6 +225,19 @@ def main():
                 "prev_power": data.get("prev_power", 0.0),
                 "delta_db": data.get("delta_db", 0.0),
                 "sweep_id": sweep_id,
+                "run_id": data.get("run_id", ""),
+            })
+            continue
+
+        if data.get("health"):
+            health_batch.append({
+                "timestamp": ts,
+                "sweep_id": sweep_id,
+                "preset": data.get("preset", ""),
+                "bin_count": data.get("bin_count", 0),
+                "max_power": data.get("max_power", -100.0),
+                "sweep_duration_ms": data.get("sweep_duration_ms", 0),
+                "run_id": data.get("run_id", ""),
             })
             continue
 
@@ -173,6 +247,7 @@ def main():
             "freq_hz": data.get("freq_hz", 0),
             "power_dbfs": data.get("power_dbfs", 0.0),
             "sweep_id": sweep_id,
+            "run_id": data.get("run_id", ""),
         }
 
         total_read += 1

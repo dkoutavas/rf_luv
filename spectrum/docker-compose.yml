@@ -33,13 +33,18 @@ services:
       SCAN_FREQ_START: "88000000"
       SCAN_FREQ_END: "470000000"
       SCAN_BIN_WIDTH: "100000"
-      SCAN_GAIN: "20"
+      SCAN_GAIN: "12"
       SCAN_FFT_SIZE: "1024"
       SCAN_SAMPLE_RATE: "2048000"
       SCAN_INTERVAL_SECONDS: "280"
       SCAN_AIRBAND_INTERVAL: "60"
       SCAN_PEAK_THRESHOLD: "10"
       SCAN_TRANSIENT_THRESHOLD: "15"
+      SCAN_ANTENNA_POSITION: rooftop_tripod
+      SCAN_ANTENNA_ARMS_CM: "57"
+      SCAN_ANTENNA_ORIENTATION: "165"
+      SCAN_ANTENNA_HEIGHT_M: "4"
+      SCAN_NOTES: "Rooftop tripod on patio cover, long VHF arms, gain reduced 20->12"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: spectrum

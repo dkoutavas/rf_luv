@@ -55,6 +55,13 @@ PEAK_THRESHOLD_DB = float(os.environ.get("SCAN_PEAK_THRESHOLD", "10"))
 PEAK_NEIGHBOR_BINS = int(os.environ.get("SCAN_PEAK_NEIGHBORS", "5"))
 TRANSIENT_THRESHOLD_DB = float(os.environ.get("SCAN_TRANSIENT_THRESHOLD", "15"))
 
+# Antenna / run tracking (logged with each run for A/B comparisons)
+ANTENNA_POSITION = os.environ.get("SCAN_ANTENNA_POSITION", "unknown")
+ANTENNA_ARMS_CM = float(os.environ.get("SCAN_ANTENNA_ARMS_CM", "0"))
+ANTENNA_ORIENTATION = int(os.environ.get("SCAN_ANTENNA_ORIENTATION", "0"))
+ANTENNA_HEIGHT_M = float(os.environ.get("SCAN_ANTENNA_HEIGHT_M", "0"))
+SCAN_NOTES = os.environ.get("SCAN_NOTES", "")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -298,6 +305,22 @@ def main():
     # Track last run time for each preset
     last_run = {p["name"]: 0.0 for p in presets}
 
+    # Generate run ID and emit run_start for configuration tracking
+    run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    log.info(f"Run {run_id}: gain={GAIN_DB}, antenna={ANTENNA_POSITION}, arms={ANTENNA_ARMS_CM}cm")
+    print(json.dumps({
+        "run_start": True,
+        "run_id": run_id,
+        "started_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+        "gain_db": GAIN_DB,
+        "antenna_position": ANTENNA_POSITION,
+        "antenna_arms_cm": ANTENNA_ARMS_CM,
+        "antenna_orientation_deg": ANTENNA_ORIENTATION,
+        "antenna_height_m": ANTENNA_HEIGHT_M,
+        "notes": SCAN_NOTES,
+    }), flush=True)
+    first_full_done = False
+
     while running:
         # Pick the most overdue preset
         now = time.monotonic()
@@ -334,12 +357,14 @@ def main():
             # Output scan bins
             for b in bins:
                 b["sweep_id"] = sweep_id
+                b["run_id"] = run_id
                 print(json.dumps(b), flush=True)
 
             # Peak detection
             peaks = detect_peaks(bins)
             for p in peaks:
                 p["sweep_id"] = sweep_id
+                p["run_id"] = run_id
                 print(json.dumps(p), flush=True)
 
             # Transient event detection (only for same-range sweeps)
@@ -347,7 +372,35 @@ def main():
                 events = detect_transients(bins)
                 for e in events:
                     e["sweep_id"] = sweep_id
+                    e["run_id"] = run_id
                     print(json.dumps(e), flush=True)
+
+            # Sweep health (for clipping detection)
+            max_power = max((b["power_dbfs"] for b in bins), default=-100.0)
+            print(json.dumps({
+                "health": True,
+                "sweep_id": sweep_id,
+                "run_id": run_id,
+                "preset": preset["name"],
+                "bin_count": len(bins),
+                "max_power": round(max_power, 1),
+                "sweep_duration_ms": int(elapsed * 1000),
+            }), flush=True)
+
+            # After first full sweep, report measured noise floor and peak
+            if preset["name"] == "full" and not first_full_done:
+                first_full_done = True
+                uhf_powers = [b["power_dbfs"] for b in bins if 400000000 <= b["freq_hz"] <= 470000000]
+                nf = float(np.percentile(uhf_powers, 10)) if uhf_powers else -100.0
+                peak_bin = max(bins, key=lambda b: b["power_dbfs"])
+                print(json.dumps({
+                    "run_update": True,
+                    "run_id": run_id,
+                    "noise_floor_dbfs": round(nf, 1),
+                    "peak_signal_dbfs": round(peak_bin["power_dbfs"], 1),
+                    "peak_signal_freq_hz": peak_bin["freq_hz"],
+                }), flush=True)
+                log.info(f"Run {run_id}: noise_floor={nf:.1f}, peak={peak_bin['power_dbfs']:.1f} @ {peak_bin['freq_hz']/1e6:.2f} MHz")
 
             # Flush marker
             print(json.dumps({"flush": True}), flush=True)
@@ -361,6 +414,12 @@ def main():
             log.warning(f"Connection error: {e} — retrying in 10s...")
             time.sleep(10)
 
+    # Emit run_end so ingest can close the scan_runs entry
+    print(json.dumps({
+        "run_end": True,
+        "run_id": run_id,
+        "ended_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+    }), flush=True)
     log.info("Scanner shutdown complete")
 
 

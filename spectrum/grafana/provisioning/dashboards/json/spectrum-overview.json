@@ -8,13 +8,13 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Latest Sweep",
-      "description": "When the last spectrum sweep completed",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "title": "Latest Full Sweep",
+      "description": "When the last full-band sweep (88-470 MHz) completed",
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT toUnixTimestamp64Milli(max(timestamp)) AS last_sweep FROM spectrum.scans",
+          "rawSql": "SELECT toUnixTimestamp64Milli(max(timestamp)) AS last_sweep FROM spectrum.sweep_health WHERE preset = 'full'",
           "format": 1
         }
       ],
@@ -27,12 +27,12 @@
     {
       "type": "stat",
       "title": "Freq Bins",
-      "description": "Number of frequency bins in the latest sweep",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "description": "Number of frequency bins in the latest full sweep (expected: 3917)",
+      "gridPos": { "h": 4, "w": 4, "x": 5, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT count() AS bins FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1)",
+          "rawSql": "SELECT bin_count AS bins FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1",
           "format": 1
         }
       ]
@@ -40,25 +40,25 @@
     {
       "type": "stat",
       "title": "Sweeps Today",
-      "description": "Number of completed sweeps since midnight",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "description": "Total completed sweeps since midnight (full + airband)",
+      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT uniq(sweep_id) AS sweeps FROM spectrum.scans WHERE timestamp > today()",
+          "rawSql": "SELECT uniq(sweep_id) AS sweeps FROM spectrum.sweep_health WHERE timestamp > today()",
           "format": 1
         }
       ]
     },
     {
       "type": "stat",
-      "title": "Clipped Sweeps (24h)",
-      "description": "Sweeps where any bin exceeded -3 dBFS — indicates ADC saturation",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "title": "Clipped Full Sweeps (24h)",
+      "description": "Full sweeps where any bin exceeded -3 dBFS. At the roof antenna position, Military VHF (146-152 MHz) and DVB-T (180-198 MHz) both clip at gain=20. Reduce gain to 12 dB to eliminate.",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT countIf(max_power > -3) AS clipped FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 24 HOUR",
+          "rawSql": "SELECT countIf(max_power > -3) AS clipped FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 24 HOUR AND preset = 'full'",
           "format": 1
         }
       ],
@@ -68,7 +68,7 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              { "color": "orange", "value": 1 }
             ]
           }
         }
@@ -78,67 +78,160 @@
       }
     },
     {
-      "type": "barchart",
-      "title": "Current Power Spectrum",
-      "description": "Power vs frequency from the latest sweep (88-470 MHz)",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
+      "type": "stat",
+      "title": "Sweep Duration",
+      "description": "Full sweep execution time with sparkline — expected ~2250ms",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT concat(toString(round(freq_hz / 1000000.0, 1)), ' MHz') AS freq, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1) ORDER BY freq_hz",
+          "rawSql": "SELECT timestamp AS time, sweep_duration_ms AS value FROM spectrum.sweep_health WHERE preset = 'full' AND $__timeFilter(timestamp) ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "none"
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "RF Waterfall",
+      "description": "Spectrogram: frequency (Y) vs time (X), color = max power per 5 MHz band per 5-minute interval. Dark = noise floor, bright = active signal.",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS time, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=85) AS `85`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=90) AS `90`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=95) AS `95`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=100) AS `100`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=105) AS `105`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=110) AS `110`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=115) AS `115`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=120) AS `120`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=125) AS `125`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=130) AS `130`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=135) AS `135`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=140) AS `140`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=145) AS `145`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=150) AS `150`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=155) AS `155`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=160) AS `160`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=165) AS `165`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=170) AS `170`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=175) AS `175`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=180) AS `180`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=185) AS `185`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=190) AS `190`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=195) AS `195`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=200) AS `200`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=205) AS `205`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=210) AS `210`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=215) AS `215`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=220) AS `220`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=225) AS `225`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=230) AS `230`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=235) AS `235`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=240) AS `240`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=245) AS `245`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=250) AS `250`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=255) AS `255`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=260) AS `260`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=265) AS `265`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=270) AS `270`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=275) AS `275`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=280) AS `280`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=285) AS `285`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=290) AS `290`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=295) AS `295`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=300) AS `300`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=305) AS `305`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=310) AS `310`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=315) AS `315`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=320) AS `320`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=325) AS `325`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=330) AS `330`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=335) AS `335`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=340) AS `340`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=345) AS `345`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=350) AS `350`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=355) AS `355`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=360) AS `360`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=365) AS `365`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=370) AS `370`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=375) AS `375`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=380) AS `380`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=385) AS `385`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=390) AS `390`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=395) AS `395`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=400) AS `400`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=405) AS `405`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=410) AS `410`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=415) AS `415`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=420) AS `420`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=425) AS `425`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=430) AS `430`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=435) AS `435`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=440) AS `440`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=445) AS `445`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=450) AS `450`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=455) AS `455`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=460) AS `460`, maxIf(power_dbfs, intDiv(freq_hz,5000000)*5=465) AS `465` FROM spectrum.scans WHERE $__timeFilter(timestamp) AND sweep_id LIKE 'full:%' GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": -55,
+          "max": 0,
+          "custom": {
+            "scaleDistribution": { "type": "linear" }
+          }
+        }
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "reverse": false
+        },
+        "filterValues": {
+          "le": -100
+        },
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Turbo",
+          "steps": 128,
+          "min": -55,
+          "max": 0
+        },
+        "tooltip": {
+          "show": true
+        },
+        "legend": {
+          "show": false
+        },
+        "showValue": "never"
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Current Power Spectrum",
+      "description": "Power vs frequency from the latest full sweep (88-470 MHz). Color shows signal strength: blue = noise floor, red = strong signal.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT concat(toString(round(freq_hz / 1000000.0, 1)), ' MHz') AS freq, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1) ORDER BY freq_hz",
           "format": 1
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "dBFS",
-          "color": { "mode": "continuous-BlYlRd" }
+          "min": -55,
+          "max": 0,
+          "color": { "mode": "continuous-BlYlRd" },
+          "custom": {
+            "fillOpacity": 80,
+            "gradientMode": "none"
+          }
         }
       },
       "options": {
-        "orientation": "vertical"
+        "orientation": "vertical",
+        "showValue": "never",
+        "barWidth": 0.97
       }
     },
     {
-      "type": "timeseries",
-      "title": "RF Waterfall",
-      "description": "Power over time per 10 MHz band — each line is a frequency band, color shows relative power",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 14 },
+      "type": "barchart",
+      "title": "Band Occupancy",
+      "description": "Percentage of bins above noise floor (+6 dB) per band in the latest full sweep. Noise floor = UHF Q25 (~-51 dBFS).",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 28 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS time, max(power_dbfs) AS value, concat(toString(intDiv(freq_hz, 10000000) * 10), ' MHz') AS metric FROM spectrum.scans WHERE timestamp >= $__fromTime AND timestamp <= $__toTime AND sweep_id LIKE 'full:%' GROUP BY time, intDiv(freq_hz, 10000000) ORDER BY time, intDiv(freq_hz, 10000000)",
-          "format": 0
+          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), noise AS (SELECT quantile(0.25)(power_dbfs) AS nf FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM latest) AND freq_hz BETWEEN 400000000 AND 470000000) SELECT CASE WHEN freq_hz BETWEEN 88000000 AND 108000000 THEN 'FM' WHEN freq_hz BETWEEN 108000000 AND 137000000 THEN 'Air' WHEN freq_hz BETWEEN 137000000 AND 174000000 THEN 'VHF' WHEN freq_hz BETWEEN 174000000 AND 230000000 THEN 'DVB-T' WHEN freq_hz BETWEEN 230000000 AND 380000000 THEN 'Mid' WHEN freq_hz BETWEEN 380000000 AND 470000000 THEN 'UHF' END AS band, round(countIf(power_dbfs > (SELECT nf FROM noise) + 6) * 100.0 / count(), 1) AS occupancy_pct FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM latest) GROUP BY band HAVING band IS NOT NULL ORDER BY band",
+          "format": 1
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "dBFS",
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "continuous-GrYlRd" },
           "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
             "gradientMode": "scheme"
-          },
-          "color": { "mode": "palette-classic" }
+          }
         }
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "always"
       }
     },
     {
-      "type": "timeseries",
-      "title": "Signal Power Over Time",
-      "description": "Power at known frequencies over time",
-      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 26 },
+      "type": "table",
+      "title": "Active Known Frequencies",
+      "description": "All known Athens-area signals detected in the latest full sweep with their current power levels",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 28 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND s.timestamp >= $__fromTime AND s.timestamp <= $__toTime AND kf.category IN ('airband', 'marine', 'tetra', 'ism') ORDER BY time",
+          "rawSql": "SELECT kf.name, kf.category, round(kf.freq_hz / 1000000.0, 3) AS freq_mhz, kf.modulation, round(s.power_dbfs, 1) AS power_dbfs FROM spectrum.known_frequencies kf CROSS JOIN (SELECT freq_hz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1)) s WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) ORDER BY power_dbfs DESC",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "VHF/Marine Signal Power",
+      "description": "Power at VHF infrastructure and marine frequencies over time (full sweeps). Military, business radio, marine channels, and AIS.",
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 36 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.category IN ('gov', 'business', 'marine') AND s.sweep_id LIKE 'full:%' ORDER BY time",
           "format": 0
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "dBFS",
+          "displayName": "${__field.labels.metric}",
           "custom": {
             "lineWidth": 1,
             "showPoints": "auto",
@@ -149,13 +242,87 @@
     },
     {
       "type": "table",
-      "title": "Active Known Frequencies",
-      "description": "Which known signals are currently detected with their power levels",
-      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 26 },
+      "title": "Strongest Unknown Signals",
+      "description": "Strong signals (> -35 dBFS) not matching any entry in the known_frequencies table, grouped by 1 MHz. These are candidates for identification.",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 36 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT kf.name, kf.category, round(kf.freq_hz / 1000000.0, 3) AS freq_mhz, kf.modulation, round(s.power_dbfs, 1) AS power_dbfs FROM spectrum.known_frequencies kf CROSS JOIN (SELECT freq_hz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans ORDER BY timestamp DESC LIMIT 1)) s WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) ORDER BY power_dbfs DESC",
+          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), matched_freqs AS (SELECT DISTINCT s.freq_hz FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000))) SELECT round(freq_hz / 1000000) AS freq_mhz, round(max(power_dbfs), 1) AS peak_power, count() AS bins FROM spectrum.scans s WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND s.power_dbfs > -35 AND s.freq_hz NOT IN (SELECT freq_hz FROM matched_freqs) GROUP BY freq_mhz ORDER BY peak_power DESC LIMIT 15",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Airband Activity",
+      "description": "Power at Athens ATC frequencies from fast 60s airband sweeps. Periodic dips to -48 dBFS are a known bug (PLL warmup after full sweep).",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.category = 'airband' AND s.sweep_id LIKE 'airband:%' ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "displayName": "${__field.labels.metric}",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Marine Activity",
+      "description": "Power at marine VHF frequencies over time (Ch16, Ch13, AIS, coast stations). Data from full sweeps only (~5 min resolution).",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.category = 'marine' AND s.sweep_id LIKE 'full:%' ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "displayName": "${__field.labels.metric}",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "auto",
+            "pointSize": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Detected Peaks",
+      "description": "Spectral peaks from the latest full sweep — bins significantly above their neighbors (prominence > 10 dB)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT round(p.freq_hz / 1000000.0, 2) AS freq_mhz, round(p.power_dbfs, 1) AS power, round(p.prominence_db, 1) AS prominence_db FROM spectrum.peaks p WHERE p.sweep_id = (SELECT sweep_id FROM spectrum.peaks WHERE sweep_id LIKE 'full:%' ORDER BY timestamp DESC LIMIT 1) ORDER BY p.prominence_db DESC LIMIT 25",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Signal Events",
+      "description": "Signals that appeared or disappeared between consecutive full sweeps (delta > 15 dB)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT e.timestamp, e.event_type, round(e.freq_hz / 1000000.0, 2) AS freq_mhz, round(e.power_dbfs, 1) AS power, round(e.prev_power, 1) AS prev_power, round(e.delta_db, 1) AS delta_db FROM spectrum.events e ORDER BY e.timestamp DESC LIMIT 30",
           "format": 1
         }
       ]
@@ -163,12 +330,12 @@
     {
       "type": "table",
       "title": "Z-Score Anomalies",
-      "description": "Frequencies with unusual power relative to their rolling 20-sweep average — z > 3 means statistically unusual",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "description": "Frequencies with unusual power relative to their rolling 20-sweep average. |z| > 3 is statistically unusual. Baseline adapts over ~20 sweeps (~100 min) after antenna/gain changes — expect bulk anomalies during transition.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 68 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "WITH recent AS (SELECT freq_hz, power_dbfs, timestamp, sweep_id, avg(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS mean_20, stddevPop(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS std_20 FROM spectrum.scans WHERE timestamp > now() - INTERVAL 2 HOUR AND sweep_id LIKE 'full:%') SELECT timestamp, round(freq_hz / 1000000, 2) AS freq_mhz, round(power_dbfs, 1) AS power, round(mean_20, 1) AS baseline, round(std_20, 1) AS std_dev, round((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20), 1) AS z_score FROM recent WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans WHERE sweep_id LIKE 'full:%' ORDER BY timestamp DESC LIMIT 1) AND abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) > 3 ORDER BY abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) DESC LIMIT 50",
+          "rawSql": "WITH recent AS (SELECT freq_hz, power_dbfs, timestamp, sweep_id, avg(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS mean_20, stddevPop(power_dbfs) OVER (PARTITION BY freq_hz ORDER BY timestamp ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS std_20 FROM spectrum.scans WHERE timestamp > now() - INTERVAL 2 HOUR AND sweep_id LIKE 'full:%') SELECT timestamp, round(freq_hz / 1000000, 2) AS freq_mhz, round(power_dbfs, 1) AS power, round(mean_20, 1) AS baseline, round(std_20, 1) AS std_dev, round((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20), 1) AS z_score, if((power_dbfs - mean_20) > 0, 'stronger', 'weaker') AS direction FROM recent WHERE sweep_id = (SELECT sweep_id FROM spectrum.scans WHERE sweep_id LIKE 'full:%' ORDER BY timestamp DESC LIMIT 1) AND abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) > 3 ORDER BY abs((power_dbfs - mean_20) / if(std_20 < 0.5, 0.5, std_20)) DESC LIMIT 50",
           "format": 1
         }
       ],
@@ -193,65 +360,45 @@
                 "value": { "type": "color-background" }
               }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "direction" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "color-text" }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "stronger": { "text": "stronger", "color": "red" }, "weaker": { "text": "weaker", "color": "blue" } } }
+                ]
+              }
+            ]
           }
         ]
       }
-    },
+    }
+    ,
     {
       "type": "table",
-      "title": "Detected Peaks",
-      "description": "Spectral peaks from the latest sweep — bins significantly above their neighbors",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "title": "Current Run Config",
+      "description": "Scanner configuration for the current run — antenna position, gain, measured noise floor and peak. Each scanner restart creates a new run.",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 76 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT round(p.freq_hz / 1000000.0, 2) AS freq_mhz, round(p.power_dbfs, 1) AS power, round(p.prominence_db, 1) AS prominence_db FROM spectrum.peaks p WHERE p.sweep_id = (SELECT sweep_id FROM spectrum.peaks WHERE sweep_id LIKE 'full:%' ORDER BY timestamp DESC LIMIT 1) ORDER BY p.prominence_db DESC LIMIT 25",
+          "rawSql": "SELECT run_id, started_at, gain_db, antenna_position, antenna_arms_cm, antenna_height_m, round(noise_floor_dbfs, 1) AS noise_floor, round(peak_signal_dbfs, 1) AS peak_signal, round(peak_signal_freq_hz / 1000000.0, 2) AS peak_freq_mhz, notes FROM spectrum.scan_runs ORDER BY started_at DESC LIMIT 3",
           "format": 1
         }
       ]
-    },
-    {
-      "type": "table",
-      "title": "Signal Events",
-      "description": "Signals that appeared or disappeared between sweeps (transients)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
-      "targets": [
-        {
-          "rawSql": "SELECT e.timestamp, e.event_type, round(e.freq_hz / 1000000.0, 2) AS freq_mhz, round(e.power_dbfs, 1) AS power, round(e.prev_power, 1) AS prev_power, round(e.delta_db, 1) AS delta_db FROM spectrum.events e ORDER BY e.timestamp DESC LIMIT 30",
-          "format": 1
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "Airband Activity",
-      "description": "Power at Athens ATC frequencies (fast 60s airband sweep)",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
-      "targets": [
-        {
-          "rawSql": "SELECT s.timestamp AS time, s.power_dbfs AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND s.timestamp >= $__fromTime AND s.timestamp <= $__toTime AND kf.category = 'airband' AND s.sweep_id LIKE 'airband:%' ORDER BY time",
-          "format": 0
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "dBFS",
-          "custom": {
-            "lineWidth": 1,
-            "showPoints": "auto",
-            "pointSize": 3
-          }
-        }
-      }
     }
   ],
   "refresh": "60s",
   "schemaVersion": 39,
   "tags": ["spectrum", "scanner", "rtl-sdr"],
   "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "Spectrum Scanner - 88-470 MHz",

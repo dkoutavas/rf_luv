@@ -36,3 +36,4 @@ config/sdrpp_config.json
 # Notes (personal)
 notes/*.md
 !notes/.gitkeep
+spectrum/exports/spectrum_*/

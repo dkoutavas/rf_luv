@@ -1,0 +1,334 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "description": "Compare any two scanner runs side-by-side. Select runs from the dropdowns \u2014 all panels update automatically.",
+  "panels": [
+    {
+      "type": "table",
+      "title": "Run History",
+      "description": "All scanner runs, most recent first. Use the run_id values in the dropdowns above to select runs for comparison.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT run_id, started_at, ended_at, gain_db, antenna_position, antenna_arms_cm, antenna_height_m, noise_floor_dbfs, peak_signal_dbfs, round(peak_signal_freq_hz / 1000000, 2) AS peak_mhz, dateDiff('minute', started_at, coalesce(ended_at, now())) AS duration_min, notes FROM spectrum.scan_runs ORDER BY started_at DESC LIMIT 10",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Config Diff",
+      "description": "Side-by-side configuration of the two selected runs.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN run_id = '$run_current' THEN 'CURRENT' ELSE 'COMPARE' END AS label, run_id, gain_db, antenna_position, antenna_height_m, antenna_arms_cm, noise_floor_dbfs, peak_signal_dbfs, notes FROM spectrum.scan_runs WHERE run_id IN ('$run_current', '$run_compare') ORDER BY started_at DESC",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Band Delta",
+      "description": "Average power, peak, and noise floor per band for each selected run.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN s.run_id = '$run_current' THEN 'current' ELSE 'compare' END AS run, CASE WHEN freq_hz BETWEEN 88000000 AND 108000000 THEN '1_FM' WHEN freq_hz BETWEEN 108000000 AND 137000000 THEN '2_Airband' WHEN freq_hz BETWEEN 137000000 AND 174000000 THEN '3_VHF' WHEN freq_hz BETWEEN 174000000 AND 230000000 THEN '4_DVB-T' WHEN freq_hz BETWEEN 230000000 AND 380000000 THEN '5_Mid' WHEN freq_hz BETWEEN 380000000 AND 470000000 THEN '6_UHF' END AS band, round(avg(power_dbfs), 1) AS avg_power, round(max(power_dbfs), 1) AS peak, round(quantile(0.10)(power_dbfs), 1) AS noise_floor, count(DISTINCT sweep_id) AS sweeps FROM spectrum.scans s WHERE s.sweep_id LIKE 'full:%' AND s.run_id IN ('$run_current', '$run_compare') GROUP BY run, band HAVING band IS NOT NULL ORDER BY band, run",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_power"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "peak"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "noise_floor"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Key Signals Delta",
+      "description": "Power at known frequencies for each selected run.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "WITH kf_lookup AS (SELECT s.run_id, s.freq_hz, max(k.name) AS kf_name, max(s.power_dbfs) AS power FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies k WHERE abs(toInt64(s.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000)) AND s.sweep_id LIKE 'full:%' AND s.run_id IN ('$run_current', '$run_compare') GROUP BY s.run_id, s.freq_hz, s.sweep_id) SELECT CASE WHEN run_id = '$run_current' THEN 'current' ELSE 'compare' END AS run, kf_name AS signal, round(avg(power), 1) AS avg_power, round(max(power), 1) AS peak FROM kf_lookup GROUP BY run, signal ORDER BY signal, run",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "avg_power"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "peak"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Noise Floor Comparison",
+      "description": "Noise floor statistics from the UHF quiet zone (400-470 MHz).",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN run_id = '$run_current' THEN 'current' ELSE 'compare' END AS run, round(quantile(0.10)(power_dbfs), 2) AS p10, round(quantile(0.25)(power_dbfs), 2) AS p25, round(quantile(0.50)(power_dbfs), 2) AS median FROM spectrum.scans WHERE freq_hz BETWEEN 400000000 AND 470000000 AND sweep_id LIKE 'full:%' AND run_id IN ('$run_current', '$run_compare') GROUP BY run",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p10"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p25"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "median"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Clipping Comparison",
+      "description": "ADC clipping rate per run. Clipped = any non-DVB-T bin > -3 dBFS in a sweep.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE WHEN run_id = '$run_current' THEN 'current' ELSE 'compare' END AS run, count(DISTINCT sweep_id) AS total, countIf(mp > -3) AS clipped, round(countIf(mp > -3) * 100.0 / count(DISTINCT sweep_id), 1) AS clip_pct FROM (SELECT run_id, sweep_id, max(power_dbfs) AS mp FROM spectrum.scans WHERE sweep_id LIKE 'full:%' AND run_id IN ('$run_current', '$run_compare') GROUP BY run_id, sweep_id) GROUP BY run",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Frequency-by-Frequency Delta",
+      "description": "Power difference (current minus compare) at each 1 MHz bin. Positive = current run is stronger, negative = compare run was stronger.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "WITH curr AS (SELECT round(freq_hz / 1000000) AS freq_mhz, avg(power_dbfs) AS power FROM spectrum.scans WHERE run_id = '$run_current' AND sweep_id LIKE 'full:%' GROUP BY freq_mhz), comp AS (SELECT round(freq_hz / 1000000) AS freq_mhz, avg(power_dbfs) AS power FROM spectrum.scans WHERE run_id = '$run_compare' AND sweep_id LIKE 'full:%' GROUP BY freq_mhz) SELECT toString(toUInt32(c.freq_mhz)) AS freq_mhz, round(c.power - p.power, 1) AS delta_db FROM curr c JOIN comp p ON c.freq_mhz = p.freq_mhz ORDER BY c.freq_mhz",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dB",
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "custom": {
+            "gradientMode": "scheme",
+            "fillOpacity": 80
+          }
+        }
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "never",
+        "barWidth": 0.95
+      }
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "spectrum",
+    "comparison",
+    "rtl-sdr"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "run_current",
+        "label": "Current Run",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "query": "SELECT run_id FROM spectrum.scan_runs ORDER BY started_at DESC",
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      },
+      {
+        "name": "run_compare",
+        "label": "Compare To",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "PDEE91DDB90597936"
+        },
+        "query": "SELECT run_id FROM spectrum.scan_runs ORDER BY started_at DESC",
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      }
+    ]
+  },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Run Comparison",
+  "uid": "run-comparison"
+}

@@ -172,13 +172,18 @@ SELECT * FROM (
 WHERE (SELECT count() FROM spectrum.known_frequencies) = 0;
 
 -- Listening log -- operator notes from active monitoring sessions
--- Insert via CLI: clickhouse-client --query "INSERT INTO spectrum.listening_log ..."
+-- Insert via browser form on the Listening Playbook dashboard,
+-- or via CLI: curl 'http://localhost:8126/?user=spectrum&password=spectrum_local' \
+--   --data-binary "INSERT INTO spectrum.listening_log (...) VALUES (...)"
 CREATE TABLE IF NOT EXISTS spectrum.listening_log (
+    id          String DEFAULT generateUUIDv4(),
     timestamp   DateTime64(3) DEFAULT now64(3),
-    freq_hz     UInt32,
-    mode        String DEFAULT '',
+    freq_mhz    Float32,
+    mode        String DEFAULT 'NFM',
     heard       String DEFAULT '',
+    signal_type String DEFAULT '',
     language    String DEFAULT '',
-    notes       String DEFAULT ''
+    notes       String DEFAULT '',
+    confirmed   Bool DEFAULT false
 ) ENGINE = MergeTree()
 ORDER BY timestamp;

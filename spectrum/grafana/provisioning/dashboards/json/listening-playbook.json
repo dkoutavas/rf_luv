@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -11,8 +13,16 @@
       "type": "table",
       "title": "Tune To These",
       "description": "Most interesting frequencies right now, ranked by unusual activity, burstiness, and signal strength. Based on latest full sweep vs 24h history.",
-      "gridPos": { "h": 14, "w": 16, "x": 0, "y": 0 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "gridPos": {
+        "h": 14,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
           "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), latest_data AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, freq_hz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM latest)), history AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, avg(power_dbfs) AS historical_avg, stddevPop(power_dbfs) AS historical_std, countIf(power_dbfs > -40) * 100.0 / count() AS activity_pct FROM spectrum.scans WHERE sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 24 HOUR GROUP BY freq_bin), kf_lookup AS (SELECT l.freq_hz, max(k.name) AS kf_name, max(k.modulation) AS kf_modulation FROM latest_data l CROSS JOIN spectrum.known_frequencies k WHERE abs(toInt64(l.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000)) GROUP BY l.freq_hz) SELECT round(l.freq_hz / 1000000, 3) AS freq_mhz, round(l.power_dbfs, 1) AS current_power, round(h.historical_avg, 1) AS avg_24h, round(l.power_dbfs - h.historical_avg, 1) AS above_normal, round(h.activity_pct, 0) AS activity_pct_24h, CASE WHEN m.kf_name IS NOT NULL THEN m.kf_name WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'Airband (unidentified)' WHEN l.freq_hz BETWEEN 137000000 AND 156000000 THEN 'VHF Gov/Business' WHEN l.freq_hz BETWEEN 156000000 AND 163000000 THEN 'Marine VHF' WHEN l.freq_hz BETWEEN 163000000 AND 170000000 THEN 'Land Mobile' ELSE 'Unknown' END AS likely_id, CASE WHEN m.kf_modulation IS NOT NULL THEN m.kf_modulation WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'AM' ELSE 'NFM' END AS mode, CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 'UNUSUAL' WHEN l.power_dbfs > -15 THEN 'STRONG' WHEN h.activity_pct > 80 THEN 'ALWAYS ON' WHEN h.historical_std > 5 THEN 'BURSTY' ELSE '' END AS status FROM latest_data l JOIN history h ON l.freq_bin = h.freq_bin LEFT JOIN kf_lookup m ON l.freq_hz = m.freq_hz WHERE l.power_dbfs > -40 AND l.freq_hz NOT BETWEEN 174000000 AND 230000000 AND l.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 0 WHEN h.historical_std > 5 THEN 1 WHEN l.power_dbfs > -15 THEN 2 ELSE 3 END, l.power_dbfs DESC LIMIT 20",
@@ -22,7 +32,10 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "status" },
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
             "properties": [
               {
                 "id": "mappings",
@@ -30,36 +43,68 @@
                   {
                     "type": "value",
                     "options": {
-                      "UNUSUAL": { "text": "UNUSUAL", "color": "red" },
-                      "STRONG": { "text": "STRONG", "color": "yellow" },
-                      "ALWAYS ON": { "text": "ALWAYS ON", "color": "green" },
-                      "BURSTY": { "text": "BURSTY", "color": "blue" }
+                      "UNUSUAL": {
+                        "text": "UNUSUAL",
+                        "color": "red"
+                      },
+                      "STRONG": {
+                        "text": "STRONG",
+                        "color": "yellow"
+                      },
+                      "ALWAYS ON": {
+                        "text": "ALWAYS ON",
+                        "color": "green"
+                      },
+                      "BURSTY": {
+                        "text": "BURSTY",
+                        "color": "blue"
+                      }
                     }
                   }
                 ]
               },
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-text" }
+                "value": {
+                  "type": "color-text"
+                }
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "current_power" },
+            "matcher": {
+              "id": "byName",
+              "options": "current_power"
+            },
             "properties": [
-              { "id": "unit", "value": "dBFS" }
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "avg_24h" },
+            "matcher": {
+              "id": "byName",
+              "options": "avg_24h"
+            },
             "properties": [
-              { "id": "unit", "value": "dBFS" }
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "above_normal" },
+            "matcher": {
+              "id": "byName",
+              "options": "above_normal"
+            },
             "properties": [
-              { "id": "unit", "value": "dB" }
+              {
+                "id": "unit",
+                "value": "dB"
+              }
             ]
           }
         ]
@@ -69,8 +114,16 @@
       "type": "table",
       "title": "Quick Frequency Guide",
       "description": "Key Athens frequencies and what mode to use in your SDR software.",
-      "gridPos": { "h": 14, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "gridPos": {
+        "h": 14,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
           "rawSql": "SELECT name, round(freq_hz / 1000000, 3) AS freq_mhz, modulation AS mode, category, notes FROM spectrum.known_frequencies WHERE category IN ('airband', 'marine', 'gov', 'business') ORDER BY CASE category WHEN 'airband' THEN 1 WHEN 'marine' THEN 2 WHEN 'gov' THEN 3 WHEN 'business' THEN 4 END, freq_hz",
@@ -79,11 +132,55 @@
       ]
     },
     {
+      "type": "text",
+      "title": "Signal Logger",
+      "description": "Log what you hear. Submits directly to ClickHouse.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "options": {
+        "mode": "html",
+        "content": "<div style=\"font-family: sans-serif; padding: 10px;\">\n<h3 style=\"color: #ccc; margin-top: 0;\">Log Signal</h3>\n<div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;\">\n<div><label style=\"color: #aaa; font-size: 12px;\">Frequency (MHz)</label>\n<input id=\"log-freq\" type=\"number\" step=\"0.001\" placeholder=\"166.770\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\"></div>\n<div><label style=\"color: #aaa; font-size: 12px;\">Mode</label>\n<select id=\"log-mode\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\">\n<option value=\"NFM\">NFM</option><option value=\"AM\">AM</option><option value=\"WFM\">WFM</option>\n<option value=\"USB\">USB</option><option value=\"LSB\">LSB</option><option value=\"CW\">CW</option>\n<option value=\"digital\">Digital</option></select></div>\n</div>\n<div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;\">\n<div><label style=\"color: #aaa; font-size: 12px;\">Signal Type</label>\n<select id=\"log-type\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\">\n<option value=\"\">select</option><option value=\"voice_dispatch\">Voice dispatch</option>\n<option value=\"voice_conversation\">Voice conversation</option><option value=\"repeater_idle\">Repeater (idle carrier)</option>\n<option value=\"data_digital\">Data/digital signal</option><option value=\"broadcast\">Broadcast</option>\n<option value=\"noise\">Noise/interference</option><option value=\"unknown\">Unknown modulation</option>\n<option value=\"silence\">Silent carrier</option></select></div>\n<div><label style=\"color: #aaa; font-size: 12px;\">Language</label>\n<select id=\"log-lang\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\">\n<option value=\"\">select</option><option value=\"Greek\">Greek</option><option value=\"English\">English</option>\n<option value=\"mixed\">Mixed</option><option value=\"n/a\">N/A (data/carrier)</option></select></div>\n</div>\n<div style=\"margin-bottom: 8px;\"><label style=\"color: #aaa; font-size: 12px;\">What did you hear?</label>\n<input id=\"log-heard\" type=\"text\" placeholder=\"e.g. Greek voices coordinating ship berthing\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\"></div>\n<div style=\"margin-bottom: 12px;\"><label style=\"color: #aaa; font-size: 12px;\">Notes</label>\n<input id=\"log-notes\" type=\"text\" placeholder=\"e.g. Sounds like port authority, multiple operators\" style=\"width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #444; border-radius: 4px;\"></div>\n<button onclick=\"submitLog()\" style=\"padding: 8px 20px; background: #ff4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;\">LOG SIGNAL</button>\n<span id=\"log-status\" style=\"color: #aaa; margin-left: 10px; font-size: 12px;\"></span>\n</div>\n<script>\nasync function submitLog() {\n  var freq = document.getElementById('log-freq').value;\n  var mode = document.getElementById('log-mode').value;\n  var heard = document.getElementById('log-heard').value;\n  var lang = document.getElementById('log-lang').value;\n  var stype = document.getElementById('log-type').value;\n  var notes = document.getElementById('log-notes').value;\n  var status = document.getElementById('log-status');\n  if (!freq || !heard) {\n    status.textContent = 'Need frequency and what you heard!';\n    status.style.color = '#ff6666';\n    return;\n  }\n  var esc = function(s) { return s.replace(/'/g, \"\\\\'\"); };\n  var query = \"INSERT INTO spectrum.listening_log (freq_mhz, mode, heard, language, signal_type, notes) VALUES (\" + freq + \", '\" + esc(mode) + \"', '\" + esc(heard) + \"', '\" + esc(lang) + \"', '\" + esc(stype) + \"', '\" + esc(notes) + \"')\";\n  try {\n    var resp = await fetch('http://192.168.2.10:8126/?user=spectrum&password=spectrum_local', {method: 'POST', body: query});\n    if (resp.ok) {\n      status.textContent = 'Logged at ' + new Date().toLocaleTimeString();\n      status.style.color = '#44ff44';\n      document.getElementById('log-heard').value = '';\n      document.getElementById('log-notes').value = '';\n    } else {\n      var txt = await resp.text();\n      status.textContent = 'Error: ' + txt.substring(0, 80);\n      status.style.color = '#ff6666';\n    }\n  } catch (e) {\n    status.textContent = 'Connection failed - is ClickHouse accessible at :8126?';\n    status.style.color = '#ff6666';\n  }\n}\n</script>"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Listening Log",
+      "description": "Recent signal identifications from monitoring sessions.",
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, freq_mhz, mode, signal_type, heard, language, notes FROM spectrum.listening_log ORDER BY timestamp DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    },
+    {
       "type": "timeseries",
-      "title": "Last Hour — Signal Activity",
+      "title": "Last Hour \u2014 Signal Activity",
       "description": "Max power per minute for key signal groups. Shows what's been happening while you set up.",
-      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 14 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
           "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS time, maxIf(power_dbfs, freq_hz BETWEEN 118000000 AND 122000000) AS ATC, maxIf(power_dbfs, freq_hz BETWEEN 146000000 AND 153000000) AS Military_VHF, maxIf(power_dbfs, freq_hz BETWEEN 156000000 AND 163000000) AS Marine, maxIf(power_dbfs, freq_hz BETWEEN 164000000 AND 170000000) AS Land_Mobile FROM spectrum.scans WHERE (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 1 HOUR GROUP BY time ORDER BY time",
@@ -103,10 +200,18 @@
     },
     {
       "type": "table",
-      "title": "Burst Radar — Last 30 min",
-      "description": "Signals that just spiked — active voice traffic, dispatch, or new transmissions. These are the most interesting things to tune to.",
-      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 14 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "title": "Burst Radar \u2014 Last 30 min",
+      "description": "Signals that just spiked \u2014 active voice traffic, dispatch, or new transmissions. These are the most interesting things to tune to.",
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 24
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
           "rawSql": "WITH kf_lookup AS (SELECT DISTINCT e.freq_hz, max(k.name) AS kf_name FROM spectrum.events e CROSS JOIN spectrum.known_frequencies k WHERE abs(toInt64(e.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000)) AND e.event_type = 'appeared' AND e.timestamp > now() - INTERVAL 30 MINUTE GROUP BY e.freq_hz) SELECT e.timestamp, round(e.freq_hz / 1000000, 2) AS freq_mhz, round(e.power_dbfs, 1) AS power, round(e.prev_power, 1) AS was, round(e.delta_db, 1) AS jump_db, ifNull(m.kf_name, 'Unknown') AS signal_name, CASE WHEN e.freq_hz BETWEEN 118000000 AND 137000000 THEN 'AM' ELSE 'NFM' END AS tune_mode FROM spectrum.events e LEFT JOIN kf_lookup m ON e.freq_hz = m.freq_hz WHERE e.event_type = 'appeared' AND e.timestamp > now() - INTERVAL 30 MINUTE ORDER BY e.timestamp DESC LIMIT 15",
@@ -116,21 +221,39 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "power" },
+            "matcher": {
+              "id": "byName",
+              "options": "power"
+            },
             "properties": [
-              { "id": "unit", "value": "dBFS" }
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "was" },
+            "matcher": {
+              "id": "byName",
+              "options": "was"
+            },
             "properties": [
-              { "id": "unit", "value": "dBFS" }
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "jump_db" },
+            "matcher": {
+              "id": "byName",
+              "options": "jump_db"
+            },
             "properties": [
-              { "id": "unit", "value": "dB" }
+              {
+                "id": "unit",
+                "value": "dB"
+              }
             ]
           }
         ]
@@ -139,19 +262,30 @@
     {
       "type": "table",
       "title": "Airband Status",
-      "description": "Current airband conditions: ATIS presence and ATC burst activity in the last 15 minutes.",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 22 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "description": "Current airband conditions: ATIS presence and ATC burst activity.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
-          "rawSql": "SELECT 'ATIS' AS signal, round(max(power_dbfs), 1) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 136000000 AND 136300000 AND sweep_id LIKE 'airband:%' AND timestamp > now() - INTERVAL 5 MINUTE UNION ALL SELECT 'ATC Bursts (15m)' AS signal, count() AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 118000000 AND 137000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE",
+          "rawSql": "SELECT 'ATIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 136000000 AND 136300000 AND (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'ATC Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 118000000 AND 137000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE",
           "format": 1
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "status" },
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
             "properties": [
               {
                 "id": "mappings",
@@ -159,16 +293,27 @@
                   {
                     "type": "value",
                     "options": {
-                      "ACTIVE": { "text": "ACTIVE", "color": "green" },
-                      "BUSY": { "text": "BUSY", "color": "orange" },
-                      "QUIET": { "text": "QUIET", "color": "text" }
+                      "ACTIVE": {
+                        "text": "ACTIVE",
+                        "color": "green"
+                      },
+                      "BUSY": {
+                        "text": "BUSY",
+                        "color": "orange"
+                      },
+                      "QUIET": {
+                        "text": "QUIET",
+                        "color": "text"
+                      }
                     }
                   }
                 ]
               },
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-text" }
+                "value": {
+                  "type": "color-text"
+                }
               }
             ]
           }
@@ -179,18 +324,29 @@
       "type": "table",
       "title": "Marine Status",
       "description": "Current marine band conditions: Ch16, AIS, and marine burst activity.",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 22 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
-          "rawSql": "SELECT 'Ch16 Distress' AS signal, round(max(power_dbfs), 1) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 156700000 AND 156900000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 10 MINUTE UNION ALL SELECT 'Marine Bursts (15m)' AS signal, count() AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 156000000 AND 163000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'AIS' AS signal, round(max(power_dbfs), 1) AS current_power, CASE WHEN max(power_dbfs) > -45 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 161900000 AND 162100000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 10 MINUTE",
+          "rawSql": "SELECT 'Ch16 Distress' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 156700000 AND 156900000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'Marine Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 156000000 AND 163000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'AIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -45 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 161900000 AND 162100000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE",
           "format": 1
         }
       ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "status" },
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
             "properties": [
               {
                 "id": "mappings",
@@ -198,16 +354,27 @@
                   {
                     "type": "value",
                     "options": {
-                      "ACTIVE": { "text": "ACTIVE", "color": "green" },
-                      "BUSY": { "text": "BUSY", "color": "orange" },
-                      "QUIET": { "text": "QUIET", "color": "text" }
+                      "ACTIVE": {
+                        "text": "ACTIVE",
+                        "color": "green"
+                      },
+                      "BUSY": {
+                        "text": "BUSY",
+                        "color": "orange"
+                      },
+                      "QUIET": {
+                        "text": "QUIET",
+                        "color": "text"
+                      }
                     }
                   }
                 ]
               },
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-text" }
+                "value": {
+                  "type": "color-text"
+                }
               }
             ]
           }
@@ -217,9 +384,17 @@
     {
       "type": "table",
       "title": "Mystery Signals",
-      "description": "Strong unidentified signals (> -30 dBFS) not in the known_frequencies table. Tune in and identify! Excludes FM broadcast and DVB-T.",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 22 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "description": "Strong unidentified signals (> -30 dBFS) not in the known_frequencies table. Tune in and identify!",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
       "targets": [
         {
           "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), kf_match AS (SELECT DISTINCT s.freq_hz FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies k WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND abs(toInt64(s.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000))) SELECT round(s.freq_hz / 1000000, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, 'NFM' AS try_mode FROM spectrum.scans s WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND s.freq_hz NOT IN (SELECT freq_hz FROM kf_match) AND s.power_dbfs > -30 AND s.freq_hz NOT BETWEEN 174000000 AND 230000000 AND s.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY s.power_dbfs DESC LIMIT 10",
@@ -229,33 +404,35 @@
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "power" },
+            "matcher": {
+              "id": "byName",
+              "options": "power"
+            },
             "properties": [
-              { "id": "unit", "value": "dBFS" }
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
             ]
           }
         ]
       }
-    },
-    {
-      "type": "table",
-      "title": "Listening Log",
-      "description": "Session notes from active monitoring. Log entries via CLI:\ncurl 'http://192.168.2.10:8126/?user=spectrum&password=spectrum_local' --data-binary \"INSERT INTO spectrum.listening_log (freq_hz, mode, heard, notes) VALUES (156800000, 'NFM', 'Greek voice traffic', 'Ch16 distress relay')\"",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 30 },
-      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
-      "targets": [
-        {
-          "rawSql": "SELECT timestamp, round(freq_hz / 1000000, 3) AS freq_mhz, mode, heard, language, notes FROM spectrum.listening_log ORDER BY timestamp DESC LIMIT 20",
-          "format": 1
-        }
-      ]
     }
   ],
   "refresh": "60s",
   "schemaVersion": 39,
-  "tags": ["spectrum", "listening", "rtl-sdr"],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": [
+    "spectrum",
+    "listening",
+    "rtl-sdr"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Listening Playbook",

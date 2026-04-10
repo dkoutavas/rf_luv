@@ -43,11 +43,11 @@ services:
       SCAN_AIRBAND_INTERVAL: "60"
       SCAN_PEAK_THRESHOLD: "10"
       SCAN_TRANSIENT_THRESHOLD: "15"
-      SCAN_ANTENNA_POSITION: roof_cover_patio
+      SCAN_ANTENNA_POSITION: rooftop_tripod
       SCAN_ANTENNA_ARMS_CM: "57"
       SCAN_ANTENNA_ORIENTATION: "165"
       SCAN_ANTENNA_HEIGHT_M: "3"
-      SCAN_NOTES: "Stock dipole on roof cover patio, 3m height, same arm config"
+      SCAN_NOTES: "Stock dipole on rooftop tripod, 3m height, same arm config"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: spectrum

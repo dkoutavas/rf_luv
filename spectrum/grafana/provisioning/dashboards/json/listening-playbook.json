@@ -136,14 +136,14 @@
       "title": "Signal Logger",
       "description": "Log what you hear. Submits directly to ClickHouse.",
       "gridPos": {
-        "h": 10,
+        "h": 6,
         "w": 12,
         "x": 0,
         "y": 14
       },
       "options": {
-        "mode": "html",
-        "content": "<iframe src=\"http://192.168.2.10:8084\" style=\"width:100%;height:100%;border:none;background:#181b1f;\"></iframe>"
+        "mode": "markdown",
+        "content": "# [Open Signal Logger](http://192.168.2.10:8084)\n\nLog what you hear during active monitoring sessions.\n\nThe form submits directly to ClickHouse \u2014 entries appear in the Listening Log panel to the right.\n\n**Tip:** You can also bookmark the logger page or keep it in a separate tab."
       }
     },
     {
@@ -151,7 +151,7 @@
       "title": "Listening Log",
       "description": "Recent signal identifications from monitoring sessions.",
       "gridPos": {
-        "h": 10,
+        "h": 6,
         "w": 12,
         "x": 12,
         "y": 14
@@ -175,7 +175,7 @@
         "h": 8,
         "w": 14,
         "x": 0,
-        "y": 24
+        "y": 20
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -206,7 +206,7 @@
         "h": 8,
         "w": 10,
         "x": 14,
-        "y": 24
+        "y": 20
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -267,7 +267,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 32
+        "y": 28
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -328,7 +328,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 32
+        "y": 28
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -389,7 +389,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 32
+        "y": 28
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",

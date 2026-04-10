@@ -170,3 +170,15 @@ SELECT * FROM (
     UNION ALL SELECT 446210000, 12500, 'PMR446 (observed)', 'pmr', 'NFM', 'Ringing preamble + transmission'
 ) AS seed
 WHERE (SELECT count() FROM spectrum.known_frequencies) = 0;
+
+-- Listening log -- operator notes from active monitoring sessions
+-- Insert via CLI: clickhouse-client --query "INSERT INTO spectrum.listening_log ..."
+CREATE TABLE IF NOT EXISTS spectrum.listening_log (
+    timestamp   DateTime64(3) DEFAULT now64(3),
+    freq_hz     UInt32,
+    mode        String DEFAULT '',
+    heard       String DEFAULT '',
+    language    String DEFAULT '',
+    notes       String DEFAULT ''
+) ENGINE = MergeTree()
+ORDER BY timestamp;

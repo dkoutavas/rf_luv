@@ -52,9 +52,9 @@
     },
     {
       "type": "stat",
-      "title": "Clipped Full Sweeps (24h)",
-      "description": "Full sweeps where any bin exceeded -3 dBFS. At the roof antenna position, Military VHF (146-152 MHz) and DVB-T (180-198 MHz) both clip at gain=20. Reduce gain to 12 dB to eliminate.",
-      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "title": "Clipped Sweeps (24h)",
+      "description": "Full sweeps where any non-DVB-T bin exceeded -3 dBFS. DVB-T (174-230 MHz) is excluded — clipping there is accepted due to strong Hymettus transmitters.",
+      "gridPos": { "h": 4, "w": 3, "x": 14, "y": 0 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
@@ -69,6 +69,33 @@
             "steps": [
               { "color": "green", "value": null },
               { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "DVB-T Clip",
+      "description": "Peak power in DVB-T range (174-230 MHz). Clipping here is expected — Hymettus transmitters saturate the 8-bit ADC at any gain setting.",
+      "gridPos": { "h": 4, "w": 2, "x": 17, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT round(max(max_power_dvbt), 1) AS dvbt_peak FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 24 HOUR AND preset = 'full'",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
             ]
           }
         }

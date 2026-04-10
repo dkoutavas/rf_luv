@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS spectrum.sweep_health (
     preset          String,
     bin_count       UInt32,
     max_power       Float32,
+    max_power_dvbt  Float32 DEFAULT -100.0,
     sweep_duration_ms UInt32,
     run_id          String DEFAULT ''
 ) ENGINE = MergeTree()

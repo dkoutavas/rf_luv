@@ -391,7 +391,14 @@ def main():
                     print(json.dumps(e), flush=True)
 
             # Sweep health (for clipping detection)
-            max_power = max((b["power_dbfs"] for b in bins), default=-100.0)
+            # Exclude DVB-T range (174-230 MHz) — clipping there is a known
+            # accepted condition due to strong Hymettus transmitters.
+            non_dvbt = [b["power_dbfs"] for b in bins
+                        if not (174000000 <= b["freq_hz"] <= 230000000)]
+            max_power = max(non_dvbt, default=-100.0)
+            max_power_dvbt = max(
+                (b["power_dbfs"] for b in bins if 174000000 <= b["freq_hz"] <= 230000000),
+                default=-100.0)
             print(json.dumps({
                 "health": True,
                 "sweep_id": sweep_id,
@@ -399,6 +406,7 @@ def main():
                 "preset": preset["name"],
                 "bin_count": len(bins),
                 "max_power": round(max_power, 1),
+                "max_power_dvbt": round(max_power_dvbt, 1),
                 "sweep_duration_ms": int(elapsed * 1000),
             }), flush=True)
 

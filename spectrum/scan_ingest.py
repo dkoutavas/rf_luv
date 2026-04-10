@@ -236,6 +236,7 @@ def main():
                 "preset": data.get("preset", ""),
                 "bin_count": data.get("bin_count", 0),
                 "max_power": data.get("max_power", -100.0),
+                "max_power_dvbt": data.get("max_power_dvbt", -100.0),
                 "sweep_duration_ms": data.get("sweep_duration_ms", 0),
                 "run_id": data.get("run_id", ""),
             })

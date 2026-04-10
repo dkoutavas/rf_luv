@@ -175,24 +175,25 @@
     {
       "type": "barchart",
       "title": "Current Power Spectrum",
-      "description": "Power vs frequency from the latest full sweep (88-470 MHz). Color shows signal strength: blue = noise floor, red = strong signal.",
+      "description": "Power vs frequency from the latest full sweep (88-470 MHz). Scale: 0 = noise floor (-55 dBFS), 55 = ADC full scale (0 dBFS). Taller bars = stronger signals.",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
         {
-          "rawSql": "SELECT concat(toString(round(freq_hz / 1000000.0, 1)), ' MHz') AS freq, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1) ORDER BY freq_hz",
+          "rawSql": "SELECT concat(toString(round(freq_hz / 1000000.0, 1)), ' MHz') AS freq, round(power_dbfs + 55, 1) AS power FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1) ORDER BY freq_hz",
           "format": 1
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "dBFS",
-          "min": -55,
-          "max": 0,
+          "unit": "none",
+          "min": 0,
+          "max": 55,
           "color": { "mode": "fixed", "fixedColor": "dark-blue" },
           "custom": {
-            "fillOpacity": 15,
-            "gradientMode": "none"
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "axisLabel": "dB above noise floor"
           }
         }
       },

@@ -5,8 +5,11 @@
 #   docker compose up -d
 #   open http://localhost:3003 for Grafana dashboards
 #
-# The RTL-SDR must be streaming via rtl_tcp on Windows:
-#   rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+# RTL-SDR must be streaming via rtl_tcp on the host:
+#   Linux:    rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+#   Windows:  rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
+#
+# See README.md for USB/driver setup per platform.
 #
 # Sweeps 88-470 MHz with 100 kHz bins every ~5 minutes.
 # Detects anomalies, identifies known signals, builds baseline.
@@ -52,6 +55,7 @@ services:
       CLICKHOUSE_PASSWORD: spectrum_local
       BATCH_SIZE: "500"
       FLUSH_INTERVAL_SECONDS: "5"
+    # Maps host.docker.internal to host IP. Works on Linux Docker 20.10+ and WSL/Docker Desktop.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

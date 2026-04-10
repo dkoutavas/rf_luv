@@ -96,7 +96,7 @@ cat << 'HEADER'
 # Frequency Investigation Checklist
 
 ## How to use
-1. Open SDR++ (or SDR Console) on Windows
+1. Open SDR++ on your host machine (Linux or Windows)
 2. Source: RTL-SDR, sample rate 2.048 MHz
 3. For each frequency below:
    - Tune to the listed frequency

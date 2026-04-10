@@ -34,6 +34,7 @@ import numpy as np
 
 # ─── Config ──────────────────────────────────────────────
 
+# Default works in Docker on both Linux (20.10+ with extra_hosts) and WSL/Docker Desktop
 RTL_HOST = os.environ.get("RTL_TCP_HOST", "host.docker.internal")
 RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
 FREQ_START = int(os.environ.get("SCAN_FREQ_START", "88000000"))

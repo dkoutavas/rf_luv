@@ -162,9 +162,9 @@
           "unit": "dBFS",
           "min": -55,
           "max": 0,
-          "color": { "mode": "continuous-BlYlRd" },
+          "color": { "mode": "fixed", "fixedColor": "dark-blue" },
           "custom": {
-            "fillOpacity": 80,
+            "fillOpacity": 60,
             "gradientMode": "none"
           }
         }
@@ -256,7 +256,7 @@
     {
       "type": "timeseries",
       "title": "Airband Activity",
-      "description": "Power at Athens ATC frequencies from fast 60s airband sweeps. Periodic dips to -48 dBFS are a known bug (PLL warmup after full sweep).",
+      "description": "Power at Athens ATC frequencies from fast 60s airband sweeps (118-137 MHz, 60s resolution).",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
       "targets": [
@@ -392,6 +392,77 @@
           "format": 1
         }
       ]
+    },
+    {
+      "type": "table",
+      "title": "Signal Persistence Classification",
+      "description": "Every detected frequency classified by how often it appears above noise floor (+6 dB) over the last 72 hours. always_on = infrastructure/broadcast, frequent = repeaters, intermittent = voice dispatch, rare = transient events.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 80 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "WITH signal_presence AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, sweep_id, max(power_dbfs) AS power, max(power_dbfs) > -44.8 AS is_present FROM spectrum.scans WHERE sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 72 HOUR GROUP BY freq_bin, sweep_id) SELECT freq_bin / 1000000 AS freq_mhz, countIf(is_present) AS present, count() AS total_sweeps, round(countIf(is_present) * 100.0 / count(), 1) AS presence_pct, round(avgIf(power, is_present), 1) AS avg_power, multiIf(countIf(is_present) * 100.0 / count() > 95, 'always_on', countIf(is_present) * 100.0 / count() > 50, 'frequent', countIf(is_present) * 100.0 / count() > 10, 'intermittent', 'rare') AS class FROM signal_presence GROUP BY freq_bin HAVING countIf(is_present) > 0 ORDER BY class, presence_pct DESC LIMIT 80",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "class" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "always_on": { "text": "always_on", "color": "green" }, "frequent": { "text": "frequent", "color": "yellow" }, "intermittent": { "text": "intermittent", "color": "orange" }, "rare": { "text": "rare", "color": "red" } } }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": { "type": "color-text" }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "table",
+      "title": "Burst Event Summary",
+      "description": "Frequencies with the most transient events (appeared/disappeared >15 dB between consecutive sweeps) in the last 72 hours. High counts = bursty/intermittent signals like voice comms or radar.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 92 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT round(freq_hz / 1000000.0, 2) AS freq_mhz, event_type, count() AS events, round(avg(delta_db), 1) AS avg_delta_db, round(max(delta_db), 1) AS max_delta_db, max(timestamp) AS last_event FROM spectrum.events WHERE timestamp > now() - INTERVAL 72 HOUR GROUP BY freq_hz, event_type ORDER BY events DESC LIMIT 30",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "24-Hour Activity Pattern",
+      "description": "Average signal power by hour of day for key signal groups. Shows diurnal patterns — ATC peaks during flight operations, marine follows shipping schedules. Based on last 72 hours of full sweeps.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 102 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "PDEE91DDB90597936" },
+      "targets": [
+        {
+          "rawSql": "SELECT toString(toHour(timestamp)) AS hour, round(avgIf(power_dbfs, freq_hz BETWEEN 118000000 AND 137000000), 1) AS Airband, round(avgIf(power_dbfs, freq_hz BETWEEN 146000000 AND 153000000), 1) AS Military_VHF, round(avgIf(power_dbfs, freq_hz BETWEEN 156000000 AND 163000000), 1) AS Marine_VHF, round(avgIf(power_dbfs, freq_hz BETWEEN 164000000 AND 170000000), 1) AS Unknown_165_169 FROM spectrum.scans WHERE sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 72 HOUR GROUP BY hour ORDER BY toUInt8(hour)",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBFS",
+          "min": -45,
+          "max": -25
+        }
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "never",
+        "barWidth": 0.8,
+        "groupWidth": 0.7
+      }
     }
   ],
   "refresh": "60s",

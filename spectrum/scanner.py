@@ -140,17 +140,26 @@ class RTLTCPClient:
 # ─── DSP ─────────────────────────────────────────────────
 
 
-def compute_power_spectrum(iq_bytes: bytes, fft_size: int, window: np.ndarray) -> np.ndarray:
-    """Convert raw unsigned 8-bit IQ bytes to power spectrum in dBFS."""
+def compute_linear_power(iq_bytes: bytes, fft_size: int, window: np.ndarray) -> np.ndarray:
+    """Convert raw unsigned 8-bit IQ bytes to LINEAR power spectrum.
+
+    Returns linear power (not dB) so multiple captures can be averaged
+    correctly in the linear domain before converting to dB.
+    Averaging in dB domain (log scale) underestimates bursty signals
+    due to Jensen's inequality — same issue as RMS vs average in audio.
+    """
     raw = np.frombuffer(iq_bytes, dtype=np.uint8).astype(np.float32)
     iq = (raw[0::2] - 127.5) + 1j * (raw[1::2] - 127.5)
     iq /= 127.5
 
     iq[:fft_size] *= window
     spectrum = np.fft.fftshift(np.fft.fft(iq[:fft_size], n=fft_size))
-    power = np.abs(spectrum) ** 2 / fft_size
+    return np.abs(spectrum) ** 2 / fft_size
 
-    return 10.0 * np.log10(np.maximum(power, 1e-20))
+
+def linear_to_db(power_linear: np.ndarray) -> np.ndarray:
+    """Convert linear power array to dBFS."""
+    return 10.0 * np.log10(np.maximum(power_linear, 1e-20))
 
 
 def downsample_bins(
@@ -166,7 +175,7 @@ def downsample_bins(
 
     for i in range(0, fft_size, bins_per_output):
         chunk = power_db[i : i + bins_per_output]
-        avg_db = float(np.mean(chunk))
+        avg_db = float(10.0 * np.log10(np.maximum(np.mean(10.0 ** (chunk / 10.0)), 1e-20)))
         bin_center = int(freq_start + (i + bins_per_output // 2) * fft_bin_hz)
         results.append({"freq_hz": bin_center, "power_dbfs": round(avg_db, 1)})
 
@@ -192,8 +201,8 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> list[dict]:
         power_sum = np.zeros(FFT_SIZE)
         for _ in range(NUM_AVERAGES):
             iq_data = client.read_samples(capture_bytes)
-            power_sum += compute_power_spectrum(iq_data, FFT_SIZE, window)
-        power_db = power_sum / NUM_AVERAGES
+            power_sum += compute_linear_power(iq_data, FFT_SIZE, window)
+        power_db = linear_to_db(power_sum / NUM_AVERAGES)
 
         bins = downsample_bins(power_db, center, SAMPLE_RATE, BIN_WIDTH)
         for b in bins:
@@ -344,7 +353,12 @@ def main():
             client = RTLTCPClient(RTL_HOST, RTL_PORT)
             client.set_sample_rate(SAMPLE_RATE)
             client.set_gain(GAIN_DB)
-            client.discard(65536)  # warmup
+            # Warmup: tune to sweep start frequency and discard enough
+            # for PLL to settle after large frequency jump (e.g. 470→118 MHz).
+            # 131072 bytes = 64K IQ samples = ~32ms at 2.048 MS/s.
+            client.set_frequency(preset["start"] + SAMPLE_RATE // 2)
+            time.sleep(0.010)
+            client.discard(131072)
 
             sweep_id = f"{preset['name']}:{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
             t0 = time.monotonic()

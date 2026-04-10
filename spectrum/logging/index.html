@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Signal Logger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #181b1f; color: #ccc; font-family: Inter, sans-serif; padding: 16px; }
+  h3 { color: #ddd; margin-bottom: 12px; font-size: 15px; }
+  label { color: #999; font-size: 11px; display: block; margin-bottom: 3px; }
+  input, select { width: 100%; padding: 6px 8px; background: #111217; color: #eee;
+    border: 1px solid #333; border-radius: 4px; font-size: 13px; margin-bottom: 10px; }
+  select { appearance: auto; }
+  input:focus, select:focus { border-color: #555; outline: none; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { padding: 8px 24px; background: #e03030; color: white; border: none;
+    border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  button:hover { background: #c02020; }
+  button:active { background: #a01818; }
+  #status { margin-left: 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h3>Log Signal</h3>
+
+<div class="row">
+  <div>
+    <label>Frequency (MHz)</label>
+    <input id="freq" type="number" step="0.001" placeholder="166.770">
+  </div>
+  <div>
+    <label>Mode</label>
+    <select id="mode">
+      <option value="NFM">NFM</option>
+      <option value="AM">AM</option>
+      <option value="WFM">WFM</option>
+      <option value="USB">USB</option>
+      <option value="LSB">LSB</option>
+      <option value="CW">CW</option>
+      <option value="digital">Digital</option>
+    </select>
+  </div>
+</div>
+
+<div class="row">
+  <div>
+    <label>Signal Type</label>
+    <select id="stype">
+      <option value="">-- select --</option>
+      <option value="voice_dispatch">Voice dispatch</option>
+      <option value="voice_conversation">Voice conversation</option>
+      <option value="repeater_idle">Repeater (idle carrier)</option>
+      <option value="data_digital">Data/digital signal</option>
+      <option value="broadcast">Broadcast</option>
+      <option value="noise">Noise/interference</option>
+      <option value="unknown">Unknown modulation</option>
+      <option value="silence">Silent carrier</option>
+    </select>
+  </div>
+  <div>
+    <label>Language</label>
+    <select id="lang">
+      <option value="">-- select --</option>
+      <option value="Greek">Greek</option>
+      <option value="English">English</option>
+      <option value="mixed">Mixed</option>
+      <option value="n/a">N/A (data/carrier)</option>
+    </select>
+  </div>
+</div>
+
+<label>What did you hear?</label>
+<input id="heard" type="text" placeholder="e.g. Greek voices coordinating ship berthing">
+
+<label>Notes</label>
+<input id="notes" type="text" placeholder="e.g. Sounds like port authority, multiple operators">
+
+<div style="margin-top: 4px;">
+  <button onclick="submitLog()">LOG SIGNAL</button>
+  <span id="status"></span>
+</div>
+
+<script>
+var CH = 'http://192.168.2.10:8126/?user=spectrum&password=spectrum_local';
+
+function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
+async function submitLog() {
+  var freq = document.getElementById('freq').value;
+  var mode = document.getElementById('mode').value;
+  var heard = document.getElementById('heard').value;
+  var lang = document.getElementById('lang').value;
+  var stype = document.getElementById('stype').value;
+  var notes = document.getElementById('notes').value;
+  var st = document.getElementById('status');
+
+  if (!freq || !heard) {
+    st.textContent = 'Need frequency and description';
+    st.style.color = '#ff6666';
+    return;
+  }
+
+  var sql = "INSERT INTO spectrum.listening_log (freq_mhz, mode, heard, language, signal_type, notes) VALUES ("
+    + freq + ", '" + esc(mode) + "', '" + esc(heard) + "', '" + esc(lang) + "', '" + esc(stype) + "', '" + esc(notes) + "')";
+
+  try {
+    var r = await fetch(CH, { method: 'POST', body: sql });
+    if (r.ok) {
+      st.textContent = 'Logged ' + new Date().toLocaleTimeString();
+      st.style.color = '#44cc44';
+      document.getElementById('heard').value = '';
+      document.getElementById('notes').value = '';
+    } else {
+      var t = await r.text();
+      st.textContent = 'Error: ' + t.substring(0, 80);
+      st.style.color = '#ff6666';
+    }
+  } catch (e) {
+    st.textContent = 'Connection failed - ClickHouse :8126 reachable?';
+    st.style.color = '#ff6666';
+  }
+}
+
+// Submit on Enter in the notes field
+document.getElementById('notes').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitLog();
+});
+</script>
+</body>
+</html>

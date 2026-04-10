@@ -99,6 +99,19 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
 
+  # ─── Signal Logger (static form) ────────────────────
+  # Serves the listening log HTML form for the Playbook dashboard.
+  # Grafana's text panel strips <script> tags, so the form
+  # runs standalone and is embedded via iframe.
+  logging-form:
+    image: nginx:1.27-alpine
+    container_name: logging-form
+    restart: unless-stopped
+    ports:
+      - "8084:80"
+    volumes:
+      - ./logging/index.html:/usr/share/nginx/html/index.html:ro
+
 volumes:
   clickhouse-data:
   grafana-data:

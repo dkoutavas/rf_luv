@@ -78,7 +78,9 @@ TTL toDateTime(timestamp) + INTERVAL 180 DAY
 SETTINGS index_granularity = 8192;
 
 -- Sweep health -- per-sweep metadata for clipping detection and monitoring
--- One row per sweep. max_power > -3 dBFS indicates ADC clipping.
+-- One row per sweep. clipped=1 means ADC saturation was detected in raw IQ samples.
+-- max_clip_fraction is the worst-case ratio of clipped samples (0 or 255) across
+-- all captures in the sweep. >5% indicates gain is too high for that frequency.
 CREATE TABLE IF NOT EXISTS spectrum.sweep_health (
     timestamp       DateTime64(3) DEFAULT now64(3),
     sweep_id        String,
@@ -87,6 +89,11 @@ CREATE TABLE IF NOT EXISTS spectrum.sweep_health (
     max_power       Float32,
     max_power_dvbt  Float32 DEFAULT -100.0,
     sweep_duration_ms UInt32,
+    clipped         Bool DEFAULT false,
+    max_clip_fraction Float32 DEFAULT 0.0,
+    worst_clip_freq_hz UInt32 DEFAULT 0,
+    clipped_captures UInt32 DEFAULT 0,
+    total_captures  UInt32 DEFAULT 0,
     run_id          String DEFAULT ''
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)

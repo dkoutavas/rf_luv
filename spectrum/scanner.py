@@ -182,15 +182,52 @@ def downsample_bins(
     return results
 
 
+def detect_clipping(iq_bytes: bytes, threshold: float = 0.05) -> dict:
+    """Check raw IQ bytes for ADC saturation (clipping at 0 or 255).
+
+    The RTL-SDR's 8-bit ADC clips when gain is too high or strong signals
+    overload the frontend. Clipped data corrupts FFT results — it creates
+    phantom harmonics across the spectrum, like hard clipping in audio.
+
+    Args:
+        iq_bytes: Raw interleaved IQ bytes from RTL-SDR.
+        threshold: Fraction of clipped samples above which data is considered
+                   unreliable (default 5%).
+
+    Returns:
+        Dict with clipping stats: clipped (bool), clip_fraction, n_clipped, n_samples.
+    """
+    if not iq_bytes:
+        return {"clipped": False, "clip_fraction": 0.0, "n_clipped": 0, "n_samples": 0}
+    raw = np.frombuffer(iq_bytes, dtype=np.uint8)
+    n_clipped = int(np.sum((raw == 0) | (raw == 255)))
+    clip_fraction = n_clipped / len(raw)
+    return {
+        "clipped": clip_fraction > threshold,
+        "clip_fraction": round(clip_fraction, 4),
+        "n_clipped": n_clipped,
+        "n_samples": len(raw),
+    }
+
+
 # ─── Sweep ───────────────────────────────────────────────
 
 
-def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> list[dict]:
-    """Perform a frequency sweep over the given range."""
+def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> tuple[list[dict], dict]:
+    """Perform a frequency sweep over the given range.
+
+    Returns:
+        (bins, clipping) where bins is the list of frequency/power dicts
+        and clipping summarizes ADC saturation across the sweep.
+    """
     window = np.hanning(FFT_SIZE)
     capture_bytes = FFT_SIZE * 2
 
     all_bins = []
+    worst_clip = 0.0
+    worst_clip_freq = 0
+    total_captures = 0
+    clipped_captures = 0
     center = freq_start + SAMPLE_RATE // 2
 
     while center < freq_end + SAMPLE_RATE // 2:
@@ -201,6 +238,13 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> list[dict]:
         power_sum = np.zeros(FFT_SIZE)
         for _ in range(NUM_AVERAGES):
             iq_data = client.read_samples(capture_bytes)
+            clip = detect_clipping(iq_data)
+            total_captures += 1
+            if clip["clipped"]:
+                clipped_captures += 1
+            if clip["clip_fraction"] > worst_clip:
+                worst_clip = clip["clip_fraction"]
+                worst_clip_freq = center
             power_sum += compute_linear_power(iq_data, FFT_SIZE, window)
         power_db = linear_to_db(power_sum / NUM_AVERAGES)
 
@@ -211,7 +255,14 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> list[dict]:
 
         center += SAMPLE_RATE
 
-    return all_bins
+    clipping = {
+        "max_clip_fraction": round(worst_clip, 4),
+        "worst_clip_freq_hz": worst_clip_freq,
+        "clipped_captures": clipped_captures,
+        "total_captures": total_captures,
+        "clipped": worst_clip > 0.05,
+    }
+    return all_bins, clipping
 
 
 # ─── Peak detection ──────────────────────────────────────
@@ -363,7 +414,7 @@ def main():
             sweep_id = f"{preset['name']}:{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
             t0 = time.monotonic()
 
-            bins = sweep(client, preset["start"], preset["end"])
+            bins, clipping = sweep(client, preset["start"], preset["end"])
             elapsed = time.monotonic() - t0
 
             client.close()
@@ -408,7 +459,20 @@ def main():
                 "max_power": round(max_power, 1),
                 "max_power_dvbt": round(max_power_dvbt, 1),
                 "sweep_duration_ms": int(elapsed * 1000),
+                "clipped": clipping["clipped"],
+                "max_clip_fraction": clipping["max_clip_fraction"],
+                "worst_clip_freq_hz": clipping["worst_clip_freq_hz"],
+                "clipped_captures": clipping["clipped_captures"],
+                "total_captures": clipping["total_captures"],
             }), flush=True)
+
+            if clipping["clipped"]:
+                log.warning(
+                    f"[{preset['name']}] ADC CLIPPING detected! "
+                    f"{clipping['max_clip_fraction']*100:.1f}% samples clipped "
+                    f"near {clipping['worst_clip_freq_hz']/1e6:.1f} MHz — "
+                    f"consider reducing gain (currently {GAIN_DB} dB)"
+                )
 
             # After first full sweep, report measured noise floor and peak
             if preset["name"] == "full" and not first_full_done:
@@ -428,9 +492,11 @@ def main():
             # Flush marker
             print(json.dumps({"flush": True}), flush=True)
 
+            clip_pct = f"{clipping['max_clip_fraction']*100:.1f}%"
             log.info(
                 f"[{preset['name']}] {len(bins)} bins, {len(peaks)} peaks, "
-                f"{len(events) if preset['name'] == 'full' else '-'} events in {elapsed:.1f}s"
+                f"{len(events) if preset['name'] == 'full' else '-'} events, "
+                f"clip={clip_pct} in {elapsed:.1f}s"
             )
 
         except (ConnectionRefusedError, ConnectionError, socket.error, OSError) as e:

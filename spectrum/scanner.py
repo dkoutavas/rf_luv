@@ -56,6 +56,10 @@ PEAK_THRESHOLD_DB = float(os.environ.get("SCAN_PEAK_THRESHOLD", "10"))
 PEAK_NEIGHBOR_BINS = int(os.environ.get("SCAN_PEAK_NEIGHBORS", "5"))
 TRANSIENT_THRESHOLD_DB = float(os.environ.get("SCAN_TRANSIENT_THRESHOLD", "15"))
 
+# Adaptive gain: auto-reduce when ADC clips, floor at GAIN_MIN
+GAIN_MIN = float(os.environ.get("SCAN_GAIN_MIN", "0"))
+GAIN_STEP_DB = float(os.environ.get("SCAN_GAIN_STEP", "2"))
+
 # Antenna / run tracking (logged with each run for A/B comparisons)
 ANTENNA_POSITION = os.environ.get("SCAN_ANTENNA_POSITION", "unknown")
 ANTENNA_ARMS_CM = float(os.environ.get("SCAN_ANTENNA_ARMS_CM", "0"))
@@ -210,6 +214,29 @@ def detect_clipping(iq_bytes: bytes, threshold: float = 0.05) -> dict:
     }
 
 
+# ─── Adaptive gain ──────────────────────────────────────
+
+
+def adapt_gain(effective_gain: float, clipped: bool, gain_min: float, gain_step: float) -> float:
+    """Compute next gain after a sweep. Reduces by gain_step if clipping detected.
+
+    Pure function — no side effects, no logging. The caller handles logging
+    and tracking the returned value.
+
+    Args:
+        effective_gain: Current gain in dB.
+        clipped: Whether the last sweep detected ADC clipping.
+        gain_min: Floor gain in dB (won't reduce below this).
+        gain_step: How many dB to reduce per clipping event.
+
+    Returns:
+        New gain value in dB.
+    """
+    if clipped:
+        return max(gain_min, effective_gain - gain_step)
+    return effective_gain
+
+
 # ─── Sweep ───────────────────────────────────────────────
 
 
@@ -359,7 +386,9 @@ def main():
         {"name": "airband", "start": AIRBAND_START, "end": AIRBAND_END, "interval": AIRBAND_INTERVAL},
     ]
 
-    log.info(f"Spectrum scanner with {len(presets)} presets, gain: {GAIN_DB} dB")
+    effective_gain = GAIN_DB
+
+    log.info(f"Spectrum scanner with {len(presets)} presets, gain: {GAIN_DB} dB (min: {GAIN_MIN} dB, step: {GAIN_STEP_DB} dB)")
     for p in presets:
         log.info(f"  {p['name']}: {p['start']/1e6:.1f}-{p['end']/1e6:.1f} MHz every {p['interval']}s")
 
@@ -368,12 +397,12 @@ def main():
 
     # Generate run ID and emit run_start for configuration tracking
     run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    log.info(f"Run {run_id}: gain={GAIN_DB}, antenna={ANTENNA_POSITION}, arms={ANTENNA_ARMS_CM}cm")
+    log.info(f"Run {run_id}: gain={effective_gain}, antenna={ANTENNA_POSITION}, arms={ANTENNA_ARMS_CM}cm")
     print(json.dumps({
         "run_start": True,
         "run_id": run_id,
         "started_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-        "gain_db": GAIN_DB,
+        "gain_db": effective_gain,
         "antenna_position": ANTENNA_POSITION,
         "antenna_arms_cm": ANTENNA_ARMS_CM,
         "antenna_orientation_deg": ANTENNA_ORIENTATION,
@@ -403,7 +432,7 @@ def main():
         try:
             client = RTLTCPClient(RTL_HOST, RTL_PORT)
             client.set_sample_rate(SAMPLE_RATE)
-            client.set_gain(GAIN_DB)
+            client.set_gain(effective_gain)
             # Warmup: tune to sweep start frequency and discard enough
             # for PLL to settle after large frequency jump (e.g. 470→118 MHz).
             # 131072 bytes = 64K IQ samples = ~32ms at 2.048 MS/s.
@@ -459,6 +488,7 @@ def main():
                 "max_power": round(max_power, 1),
                 "max_power_dvbt": round(max_power_dvbt, 1),
                 "sweep_duration_ms": int(elapsed * 1000),
+                "gain_db": effective_gain,
                 "clipped": clipping["clipped"],
                 "max_clip_fraction": clipping["max_clip_fraction"],
                 "worst_clip_freq_hz": clipping["worst_clip_freq_hz"],
@@ -466,12 +496,21 @@ def main():
                 "total_captures": clipping["total_captures"],
             }), flush=True)
 
-            if clipping["clipped"]:
+            new_gain = adapt_gain(effective_gain, clipping["clipped"], GAIN_MIN, GAIN_STEP_DB)
+            if new_gain < effective_gain:
                 log.warning(
-                    f"[{preset['name']}] ADC CLIPPING detected! "
-                    f"{clipping['max_clip_fraction']*100:.1f}% samples clipped "
-                    f"near {clipping['worst_clip_freq_hz']/1e6:.1f} MHz — "
-                    f"consider reducing gain (currently {GAIN_DB} dB)"
+                    f"[{preset['name']}] ADC CLIPPING: "
+                    f"{clipping['max_clip_fraction']*100:.1f}% near "
+                    f"{clipping['worst_clip_freq_hz']/1e6:.1f} MHz — "
+                    f"reducing gain {effective_gain} → {new_gain} dB"
+                )
+                effective_gain = new_gain
+            elif clipping["clipped"]:
+                log.warning(
+                    f"[{preset['name']}] ADC CLIPPING: "
+                    f"{clipping['max_clip_fraction']*100:.1f}% near "
+                    f"{clipping['worst_clip_freq_hz']/1e6:.1f} MHz — "
+                    f"already at minimum gain ({GAIN_MIN} dB)"
                 )
 
             # After first full sweep, report measured noise floor and peak

@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS spectrum.sweep_health (
     max_power       Float32,
     max_power_dvbt  Float32 DEFAULT -100.0,
     sweep_duration_ms UInt32,
+    gain_db         Float32 DEFAULT 0.0,
     clipped         Bool DEFAULT false,
     max_clip_fraction Float32 DEFAULT 0.0,
     worst_clip_freq_hz UInt32 DEFAULT 0,

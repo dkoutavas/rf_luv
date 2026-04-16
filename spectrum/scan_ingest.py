@@ -238,6 +238,7 @@ def main():
                 "max_power": data.get("max_power", -100.0),
                 "max_power_dvbt": data.get("max_power_dvbt", -100.0),
                 "sweep_duration_ms": data.get("sweep_duration_ms", 0),
+                "gain_db": data.get("gain_db", 0.0),
                 "clipped": data.get("clipped", False),
                 "max_clip_fraction": data.get("max_clip_fraction", 0.0),
                 "worst_clip_freq_hz": data.get("worst_clip_freq_hz", 0),

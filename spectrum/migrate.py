@@ -21,6 +21,7 @@ import re
 import time
 import logging
 from pathlib import Path
+from urllib.parse import quote
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
@@ -47,7 +48,7 @@ def ch_query(query: str, data: str = "") -> str:
     """Execute a ClickHouse query via HTTP API."""
     params = f"user={CH_USER}&password={CH_PASSWORD}&database={CH_DB}"
     if data:
-        url = f"{CH_URL}/?{params}&query={query}"
+        url = f"{CH_URL}/?{params}&query={quote(query)}"
         body = data.encode()
     else:
         url = f"{CH_URL}/?{params}"

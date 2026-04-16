@@ -1,0 +1,10 @@
+clickhouse/data/
+grafana/data/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+exports/
+logging/
+*.md
+.venv/

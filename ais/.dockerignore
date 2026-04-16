@@ -1,0 +1,7 @@
+clickhouse/data/
+grafana/data/
+__pycache__/
+*.pyc
+*.md
+*.sql
+!clickhouse/init.sql

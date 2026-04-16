@@ -37,6 +37,9 @@ def dearmor(payload: str, fill_bits: int) -> list[int]:
         val = ord(ch) - 48
         if val > 40:
             val -= 8
+        if not (0 <= val <= 63):
+            log.debug(f"Invalid 6-bit ASCII char {ch!r} (val={val}) in payload")
+            return []
         for i in range(5, -1, -1):
             bits.append((val >> i) & 1)
 

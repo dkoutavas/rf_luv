@@ -60,6 +60,11 @@ TRANSIENT_THRESHOLD_DB = float(os.environ.get("SCAN_TRANSIENT_THRESHOLD", "15"))
 GAIN_MIN = float(os.environ.get("SCAN_GAIN_MIN", "0"))
 GAIN_STEP_DB = float(os.environ.get("SCAN_GAIN_STEP", "2"))
 
+# DVB-T exclusion range for sweep health (strong local transmitters).
+# Default covers VHF Band III (174-230 MHz) used for DVB-T in Athens.
+DVBT_EXCLUDE_START = int(os.environ.get("SCAN_DVBT_EXCLUDE_START", "174000000"))
+DVBT_EXCLUDE_END = int(os.environ.get("SCAN_DVBT_EXCLUDE_END", "230000000"))
+
 # Antenna / run tracking (logged with each run for A/B comparisons)
 ANTENNA_POSITION = os.environ.get("SCAN_ANTENNA_POSITION", "unknown")
 ANTENNA_ARMS_CM = float(os.environ.get("SCAN_ANTENNA_ARMS_CM", "0"))
@@ -440,7 +445,8 @@ def main():
             time.sleep(0.010)
             client.discard(131072)
 
-            sweep_id = f"{preset['name']}:{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
+            sweep_ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            sweep_id = f"{preset['name']}:{sweep_ts}"
             t0 = time.monotonic()
 
             bins, clipping = sweep(client, preset["start"], preset["end"])
@@ -452,6 +458,7 @@ def main():
             # Output scan bins
             for b in bins:
                 b["sweep_id"] = sweep_id
+                b["timestamp"] = sweep_ts
                 b["run_id"] = run_id
                 print(json.dumps(b), flush=True)
 
@@ -459,6 +466,7 @@ def main():
             peaks = detect_peaks(bins)
             for p in peaks:
                 p["sweep_id"] = sweep_id
+                p["timestamp"] = sweep_ts
                 p["run_id"] = run_id
                 print(json.dumps(p), flush=True)
 
@@ -467,21 +475,23 @@ def main():
                 events = detect_transients(bins)
                 for e in events:
                     e["sweep_id"] = sweep_id
+                    e["timestamp"] = sweep_ts
                     e["run_id"] = run_id
                     print(json.dumps(e), flush=True)
 
             # Sweep health (for clipping detection)
-            # Exclude DVB-T range (174-230 MHz) — clipping there is a known
-            # accepted condition due to strong Hymettus transmitters.
+            # Exclude DVB-T range — clipping there is a known accepted
+            # condition due to strong local transmitters (configurable via env).
             non_dvbt = [b["power_dbfs"] for b in bins
-                        if not (174000000 <= b["freq_hz"] <= 230000000)]
+                        if not (DVBT_EXCLUDE_START <= b["freq_hz"] <= DVBT_EXCLUDE_END)]
             max_power = max(non_dvbt, default=-100.0)
             max_power_dvbt = max(
-                (b["power_dbfs"] for b in bins if 174000000 <= b["freq_hz"] <= 230000000),
+                (b["power_dbfs"] for b in bins if DVBT_EXCLUDE_START <= b["freq_hz"] <= DVBT_EXCLUDE_END),
                 default=-100.0)
             print(json.dumps({
                 "health": True,
                 "sweep_id": sweep_id,
+                "timestamp": sweep_ts,
                 "run_id": run_id,
                 "preset": preset["name"],
                 "bin_count": len(bins),

@@ -200,9 +200,9 @@ def main():
             last_flush = time.monotonic()
             continue
 
-        # Extract timestamp from sweep_id (format: "preset:2026-04-04 ...")
+        # Prefer explicit timestamp field; fall back to parsing sweep_id
         sweep_id = data.get("sweep_id", "")
-        ts = sweep_id.split(":", 1)[1] if ":" in sweep_id else sweep_id
+        ts = data.get("timestamp") or (sweep_id.split(":", 1)[1] if ":" in sweep_id else sweep_id)
 
         # Route to appropriate table based on marker flags
         if data.get("peak"):

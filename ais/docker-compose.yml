@@ -41,7 +41,8 @@ services:
     container_name: ais-ingest
     restart: unless-stopped
     depends_on:
-      - clickhouse
+      clickhouse:
+        condition: service_healthy
     environment:
       AIS_UDP_PORT: "10110"
       CLICKHOUSE_HOST: clickhouse
@@ -68,6 +69,11 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     ulimits:
       nofile:
         soft: 262144
@@ -79,7 +85,8 @@ services:
     container_name: grafana-ais
     restart: unless-stopped
     depends_on:
-      - clickhouse
+      clickhouse:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -89,6 +96,11 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   clickhouse-data:

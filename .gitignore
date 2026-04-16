@@ -26,6 +26,10 @@ __pycache__/
 *.pyc
 .venv/
 
+# Environment files (credentials)
+.env
+*.env
+
 # OS
 .DS_Store
 Thumbs.db

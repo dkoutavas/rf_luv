@@ -194,4 +194,6 @@ CREATE TABLE IF NOT EXISTS spectrum.listening_log (
     notes       String DEFAULT '',
     confirmed   Bool DEFAULT false
 ) ENGINE = MergeTree()
-ORDER BY timestamp;
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY timestamp
+TTL toDateTime(timestamp) + INTERVAL 365 DAY;

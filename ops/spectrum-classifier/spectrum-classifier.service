@@ -1,0 +1,17 @@
+[Unit]
+Description=rf_luv rule-based signal classifier (one-shot)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/spectrum/classifier.py
+Environment=CLICKHOUSE_HOST=localhost
+Environment=CLICKHOUSE_PORT=8126
+Environment=CLICKHOUSE_DB=spectrum
+Environment=CLICKHOUSE_USER=spectrum
+Environment=CLICKHOUSE_PASSWORD=spectrum_local
+TimeoutStartSec=120
+Restart=no
+
+[Install]
+WantedBy=default.target

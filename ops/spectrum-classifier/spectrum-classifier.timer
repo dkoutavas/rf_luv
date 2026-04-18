@@ -1,0 +1,13 @@
+[Unit]
+Description=Run rf_luv classifier 30s after every feature extractor pass
+
+[Timer]
+# Feature extractor fires at :00 / :05 / :10 / ... (OnUnitActiveSec=5min,
+# OnBootSec=2min). Classifier fires 30 s later on a wall-clock schedule so
+# it always sees fresh peak_features. *:0/5:30 = every 5 min at :30 seconds.
+OnCalendar=*:0/5:30
+Unit=spectrum-classifier.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

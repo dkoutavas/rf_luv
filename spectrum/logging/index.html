@@ -44,17 +44,9 @@
 
 <div class="row">
   <div>
-    <label>Signal Type</label>
+    <label>Signal Class</label>
     <select id="stype">
-      <option value="">-- select --</option>
-      <option value="voice_dispatch">Voice dispatch</option>
-      <option value="voice_conversation">Voice conversation</option>
-      <option value="repeater_idle">Repeater (idle carrier)</option>
-      <option value="data_digital">Data/digital signal</option>
-      <option value="broadcast">Broadcast</option>
-      <option value="noise">Noise/interference</option>
-      <option value="unknown">Unknown modulation</option>
-      <option value="silence">Silent carrier</option>
+      <option value="">-- loading from signal_classes --</option>
     </select>
   </div>
   <div>
@@ -100,8 +92,12 @@ async function submitLog() {
     return;
   }
 
-  var sql = "INSERT INTO spectrum.listening_log (freq_mhz, mode, heard, language, class_id, notes) VALUES ("
-    + freq + ", '" + esc(mode) + "', '" + esc(heard) + "', '" + esc(lang) + "', '" + esc(stype) + "', '" + esc(notes) + "')";
+  // confirmed_freq_hz = freq_mhz * 1e6, rounded. Needed by classifier to fire
+  // an operator-override (requires class_id != '' AND confirmed_freq_hz != 0).
+  var confirmedHz = Math.round(parseFloat(freq) * 1000000);
+
+  var sql = "INSERT INTO spectrum.listening_log (freq_mhz, confirmed_freq_hz, mode, heard, language, class_id, notes) VALUES ("
+    + freq + ", " + confirmedHz + ", '" + esc(mode) + "', '" + esc(heard) + "', '" + esc(lang) + "', '" + esc(stype) + "', '" + esc(notes) + "')";
 
   try {
     var r = await fetch(CH, { method: 'POST', body: sql });
@@ -125,6 +121,29 @@ async function submitLog() {
 document.getElementById('notes').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitLog();
 });
+
+// Populate the class_id dropdown from signal_classes at load time so the
+// vocabulary stays in sync with migrations and any later additions. Falls
+// back silently to "-- select --" if ClickHouse is unreachable.
+(async function loadClasses() {
+  var sel = document.getElementById('stype');
+  try {
+    var r = await fetch(CH + "&query=" + encodeURIComponent(
+      "SELECT class_id, name FROM spectrum.signal_classes FINAL ORDER BY class_id FORMAT JSONEachRow"));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var txt = await r.text();
+    sel.innerHTML = '<option value="">-- select --</option>';
+    txt.split('\n').filter(Boolean).forEach(function(line) {
+      var row = JSON.parse(line);
+      var opt = document.createElement('option');
+      opt.value = row.class_id;
+      opt.textContent = row.class_id + ' — ' + row.name;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="">-- failed to load classes --</option>';
+  }
+})();
 </script>
 </body>
 </html>

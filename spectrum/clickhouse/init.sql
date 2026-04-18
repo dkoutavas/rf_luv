@@ -199,6 +199,18 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY timestamp
 TTL toDateTime(timestamp) + INTERVAL 365 DAY;
 
+-- Classifier decisions -- computed by spectrum/classifier.py
+-- See migration 007; one row per freq_hz per run, collapsed by classified_at
+CREATE TABLE IF NOT EXISTS spectrum.signal_classifications (
+    freq_hz            UInt32,
+    class_id           String,
+    confidence         Float32,
+    reasoning          String,
+    features_snapshot  String,
+    classified_at      DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(classified_at)
+ORDER BY freq_hz;
+
 -- Per-peak features -- computed by spectrum/feature_extractor.py
 -- See migration 004 for full doc; one row per freq_hz per run, collapsed by computed_at
 CREATE TABLE IF NOT EXISTS spectrum.peak_features (

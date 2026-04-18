@@ -417,6 +417,83 @@
           }
         ]
       }
+    },
+    {
+      "type": "table",
+      "title": "Unknowns Ranked by Interest",
+      "description": "Peaks that classified as unknown or with low confidence, sorted by activity. Pick from the top and use the Signal Logger to confirm.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT   round(pf.freq_hz / 1000000.0, 3) AS freq_mhz,   sc.class_id AS current_class,   sc.confidence AS confidence,   round(pf.duty_cycle_24h, 3) AS duty_24h,   pf.bandwidth_hz AS bandwidth_hz,   round(pf.power_mean_dbfs, 1) AS power_mean_dbfs,   pf.sweeps_observed_24h AS sweeps_observed FROM spectrum.peak_features FINAL pf LEFT JOIN spectrum.signal_classifications FINAL sc ON sc.freq_hz = pf.freq_hz WHERE pf.sweeps_observed_24h > 5   AND (sc.class_id LIKE 'unknown_%' OR sc.confidence < 0.5) ORDER BY duty_24h DESC LIMIT 20",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "freq_mhz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "MHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duty_24h"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bandwidth_hz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Hz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "power_mean_dbfs"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dBFS"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ],
   "refresh": "60s",

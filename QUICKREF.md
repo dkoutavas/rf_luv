@@ -23,10 +23,18 @@ rtl_fm -d tcp:127.0.0.1:1234 ...
 rtl_fm -M wfm -f 99.6M -s 200000 -r 48000 - | aplay -r 48000 -f S16_LE
 ```
 
-### Quick spectrum scan (5 min)
+### Quick spectrum scan (5 min, one-shot)
 ```bash
 rtl_power -f 80M:500M:10k -i 10 -g 40 -e 300 scan.csv
 python3 ~/.local/bin/heatmap.py scan.csv scan.png
+```
+
+### Continuous spectrum monitoring (Docker, with history + Grafana)
+```bash
+# rtl_tcp must be running on the host (ops/rtl-tcp/install.sh on Linux)
+cd spectrum && docker compose up -d
+# Grafana: http://localhost:3003 (admin/admin)
+# Full 88–470 MHz sweep every ~5 min, airband every 60s, peaks + transients stored
 ```
 
 ### Decode pagers (POCSAG)

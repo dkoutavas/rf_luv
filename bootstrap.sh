@@ -2,20 +2,20 @@
 set -euo pipefail
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║  rf_luv bootstrap — organize files & prep environment   ║
+# ║  rf_luv bootstrap — prep a fresh clone                  ║
 # ║  Run once: bash bootstrap.sh                            ║
 # ╚══════════════════════════════════════════════════════════╝
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
-info()  { echo -e "${GREEN}[✓]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
+info() { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# ─── 1. Kill Zone.Identifier files ──────────────────────
+# ─── 1. Strip WSL/Windows Zone.Identifier metadata ───────
 echo ""
 echo "=== Cleaning Zone.Identifier files ==="
 ZI_COUNT=$(find . -name '*:Zone.Identifier' 2>/dev/null | wc -l)
@@ -26,60 +26,13 @@ else
     info "No Zone.Identifier files found"
 fi
 
-# ─── 2. Create directory structure ──────────────────────
-echo ""
-echo "=== Creating directory structure ==="
-mkdir -p setup
-mkdir -p adsb/clickhouse
-mkdir -p adsb/grafana/provisioning/datasources
-mkdir -p adsb/grafana/provisioning/dashboards/json
-mkdir -p scripts
-mkdir -p config
-mkdir -p recordings
-mkdir -p notes
-info "Directories created"
-
-# ─── 3. Move files to correct locations ─────────────────
-echo ""
-echo "=== Organizing files ==="
-
-move_if_flat() {
-    local file="$1"
-    local dest="$2"
-    # Only move if file exists at root AND destination doesn't already have it
-    if [ -f "$SCRIPT_DIR/$file" ] && [ "$SCRIPT_DIR/$file" != "$SCRIPT_DIR/$dest" ]; then
-        mv "$SCRIPT_DIR/$file" "$SCRIPT_DIR/$dest"
-        info "Moved $file → $dest"
-    fi
-}
-
-# Setup files
-move_if_flat "install-wsl.sh" "setup/install-wsl.sh"
-move_if_flat "install-windows.md" "setup/install-windows.md"
-
-# ADS-B pipeline
-move_if_flat "docker-compose.yml" "adsb/docker-compose.yml"
-move_if_flat "Dockerfile.ingest" "adsb/Dockerfile.ingest"
-move_if_flat "ingest.py" "adsb/ingest.py"
-move_if_flat "init.sql" "adsb/clickhouse/init.sql"
-move_if_flat "clickhouse.yml" "adsb/grafana/provisioning/datasources/clickhouse.yml"
-move_if_flat "dashboards.yml" "adsb/grafana/provisioning/dashboards/dashboards.yml"
-move_if_flat "adsb-overview.json" "adsb/grafana/provisioning/dashboards/json/adsb-overview.json"
-
-# Scripts
-move_if_flat "spectrum-scan.sh" "scripts/spectrum-scan.sh"
-move_if_flat "satellite-pass.sh" "scripts/satellite-pass.sh"
-move_if_flat "ism-monitor.sh" "scripts/ism-monitor.sh"
-move_if_flat "ais-monitor.sh" "scripts/ais-monitor.sh"
-move_if_flat "airband-listen.sh" "scripts/airband-listen.sh"
-
-# ─── 4. Set permissions ────────────────────────────────
+# ─── 2. Mark shell scripts executable ────────────────────
 echo ""
 echo "=== Setting permissions ==="
-find . -name '*.sh' -exec chmod +x {} \;
+find . -name '*.sh' -not -path './.git/*' -exec chmod +x {} \;
 info "All .sh files marked executable"
 
-# ─── 5. Git init (if not already) ──────────────────────
+# ─── 3. Git init (if not already) ────────────────────────
 echo ""
 echo "=== Git ==="
 if [ ! -d ".git" ]; then
@@ -89,24 +42,21 @@ else
     info "Git repo already exists"
 fi
 
-# ─── 6. Verify structure ───────────────────────────────
-echo ""
-echo "=== Final structure ==="
-find . -type f -not -path './.git/*' -not -name '*.gitkeep' | sort | \
-    sed 's|^\./||' | while read -r f; do echo "  $f"; done
-
+# ─── 4. Next steps ───────────────────────────────────────
 echo ""
 info "Bootstrap complete. Next steps:"
 echo ""
-echo "  Before dongle arrives:"
-echo "    bash setup/install-wsl.sh          # install SDR packages"
-echo "    # Install SDR++ and Zadig on Windows (see setup/install-windows.md)"
+echo "  Host (where the RTL-SDR is plugged in):"
+echo "    Linux:   bash ops/rtl-tcp/install.sh    # systemd rtl_tcp + watchdog"
+echo "    Windows: follow setup/install-windows.md (Zadig → WinUSB → rtl_tcp.exe)"
 echo ""
-echo "  When dongle arrives:"
-echo "    # 1. Zadig → WinUSB driver"
-echo "    # 2. SDR++ → tune 100 MHz → hear FM"
-echo "    # 3. Start ADS-B pipeline:"
-echo "    #    Windows: rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000"
-echo "    #    WSL:     cd adsb && docker compose up -d"
-echo "    #    Browser: localhost:8080 (map) / localhost:3000 (grafana)"
+echo "  Client (Docker host running the pipeline, can be same machine):"
+echo "    bash setup/install-wsl.sh               # WSL/openSUSE toolchain (optional)"
+echo "    cd spectrum && docker compose up -d     # primary spectrum pipeline"
+echo "    open http://localhost:3003              # Grafana dashboards"
+echo ""
+echo "  Companion pipelines (one at a time — single dongle):"
+echo "    cd adsb  && docker compose up -d        # aircraft (tar1090 :8080, Grafana :3000)"
+echo "    cd ais   && docker compose up -d        # ships (Grafana :3001)"
+echo "    cd ism   && docker compose up -d        # ISM 433 MHz (Grafana :3002)"
 echo ""

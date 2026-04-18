@@ -2,6 +2,20 @@
 
 Personal RTL-SDR Blog V3 exploration project, based in Athens, Greece. The repo started as a general-purpose SDR playground with pipelines for aircraft (ADS-B), ships (AIS), and ISM devices; it has since converged on the **spectrum scanner** as the primary, continuously-tested workload. The other pipelines are kept as companion experiments and are documented in their own directories.
 
+## Quick start
+
+The spectrum pipeline needs two things running: `rtl_tcp` on the host that owns the USB dongle, and a Docker stack anywhere that can reach it over TCP.
+
+1. **Clone + bootstrap** (one-time): `bash bootstrap.sh` — strips WSL metadata, marks scripts executable, inits git.
+2. **Host side — rtl_tcp**:
+   - Linux: `bash ops/rtl-tcp/install.sh` — installs systemd user unit + 30 s watchdog.
+   - Windows: follow [`setup/install-windows.md`](setup/install-windows.md) (Zadig → WinUSB → run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`).
+3. **Client side — pipeline**: `cd spectrum && docker compose up -d` (migrations auto-apply).
+4. **Dashboards**: <http://localhost:3003> (admin/admin). First full sweep completes in ~4 minutes; airband sweeps every 60 s.
+5. **Antenna**: stock dipole, arms sized for the band of interest (see table below), vertical, outdoors if possible.
+
+If you're on WSL/openSUSE and want the local CLI toolchain (`rtl_433`, `multimon-ng`, `gpredict`, etc.): `bash setup/install-wsl.sh`. Not required for the Docker pipeline — only for ad-hoc CLI experiments.
+
 ## Architecture
 
 ```

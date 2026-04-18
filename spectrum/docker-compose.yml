@@ -79,7 +79,11 @@ services:
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./clickhouse/cors.xml:/etc/clickhouse-server/config.d/cors.xml:ro
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      # busybox wget in the ClickHouse image resolves localhost to something
+      # ClickHouse isn't bound to (connection refused observed on leap even
+      # though HTTP from other containers works). clickhouse-client sidesteps
+      # the HTTP resolution path and matches upstream ops docs.
+      test: ["CMD", "clickhouse-client", "--user", "spectrum", "--password", "spectrum_local", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 5

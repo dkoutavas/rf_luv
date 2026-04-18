@@ -290,10 +290,17 @@ def build_feature_row(
         p_std = 0.0
 
     actives_24h = [p > thresh for _, p in series_24h]
-    bursts = run_length_bursts_s(actives_24h, sweep_interval_s(freq_hz))
-    if len(bursts) >= MIN_BURSTS_STATS:
-        b_p50: float | None = percentile(bursts, 50)
-        b_p95: float | None = percentile(bursts, 95)
+    interval = sweep_interval_s(freq_hz)
+    bursts = run_length_bursts_s(actives_24h, interval)
+    # Filter single-sweep "bursts": a continuous signal that briefly dips below
+    # threshold for one sample creates a 1-sample run with duration == interval.
+    # Real bursts span multiple samples. Observed fragility on 136.254 ATIS —
+    # confidence flipped 0.6↔0.8 depending on whether 3+ single-sample pseudo-
+    # bursts accumulated, which enabled am_airband_atc's burst_p50_s bonus.
+    multi_sweep_bursts = [b for b in bursts if b > interval]
+    if len(multi_sweep_bursts) >= MIN_BURSTS_STATS:
+        b_p50: float | None = percentile(multi_sweep_bursts, 50)
+        b_p95: float | None = percentile(multi_sweep_bursts, 95)
     else:
         b_p50 = None
         b_p95 = None

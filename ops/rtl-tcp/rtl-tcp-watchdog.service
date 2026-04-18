@@ -1,0 +1,7 @@
+[Unit]
+Description=Probe rtl_tcp; recover on sample starvation
+After=rtl_tcp.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rtl-tcp-watchdog.py

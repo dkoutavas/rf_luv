@@ -192,17 +192,51 @@ def bandwidth_from_neighbors(
     return (left_n + right_n + 1) * BIN_WIDTH_HZ
 
 
-def detect_harmonic(freq_hz: int, peak_powers: dict[int, float]) -> int | None:
-    """Return base frequency if freq_hz is a 2×/3×/4× of a stronger peak."""
+def allocation_service_for(freq_hz: int, allocations: list[dict]) -> str | None:
+    """Return the allocation service that covers freq_hz, or None if outside all."""
+    for a in allocations:
+        if int(a["freq_start_hz"]) <= freq_hz < int(a["freq_end_hz"]):
+            return a["service"]
+    return None
+
+
+def detect_harmonic(
+    freq_hz: int,
+    peak_powers: dict[int, float],
+    allocations: list[dict],
+) -> int | None:
+    """Return base frequency if freq_hz is a 2×/3×/4× of a stronger peak AND both
+    sit in the same regulatory allocation.
+
+    Why the allocation check: step 3 audit found DVB-T at 182.2 MHz flagged as
+    2× of FM at 91.1 MHz — coincidental integer ratio between independent
+    transmitters in separate allocations, not an actual harmonic relationship.
+    Flagging cross-allocation ratios caused real DVB-T bins to be cap-capped
+    at 0.4 confidence in the classifier. Same-allocation harmonics (e.g. a
+    spur at 2× a strong airband carrier within the airband band) remain
+    detected.
+
+    Skip entirely if either side has no allocation — we don't flag
+    unallocated frequencies as harmonics of anything.
+    """
     p_self = peak_powers.get(freq_hz)
     if p_self is None:
+        return None
+    peak_service = allocation_service_for(freq_hz, allocations)
+    if peak_service is None:
         return None
     for n in (2, 3, 4):
         base = freq_hz // n
         tol_hz = int(base * HARMONIC_TOLERANCE)
         for cand, p in peak_powers.items():
-            if abs(cand - base) <= tol_hz and (p - p_self) >= HARMONIC_POWER_REL_DB:
-                return cand
+            if abs(cand - base) > tol_hz:
+                continue
+            if (p - p_self) < HARMONIC_POWER_REL_DB:
+                continue
+            base_service = allocation_service_for(cand, allocations)
+            if base_service != peak_service:
+                continue
+            return cand
     return None
 
 
@@ -215,6 +249,7 @@ def build_feature_row(
     latest_freqs_sorted: list[int],
     latest_powers: list[float],
     peak_powers: dict[int, float],
+    allocations: list[dict],
     now: datetime,
 ) -> dict | None:
     """Compute one peak_features row for a single bin."""
@@ -288,7 +323,7 @@ def build_feature_row(
     ]
 
     bw = bandwidth_from_neighbors(freq_hz, latest_freqs_sorted, latest_powers)
-    harm = detect_harmonic(freq_hz, peak_powers)
+    harm = detect_harmonic(freq_hz, peak_powers, allocations)
 
     return {
         "freq_hz": freq_hz,
@@ -377,6 +412,13 @@ def main() -> None:
     )
     peak_powers = {r["freq_hz"]: float(r["power_dbfs"]) for r in peaks}
 
+    # 4b. Allocations — used by harmonic detection to reject cross-allocation
+    # false positives (DVB-T at 182 MHz is not a true 2× of FM at 91 MHz; they
+    # are independent real transmitters in different allocations).
+    allocations = ch_rows(
+        "SELECT freq_start_hz, freq_end_hz, service FROM spectrum.allocations"
+    )
+
     # 5. Build feature rows
     now = datetime.now(timezone.utc)
     rows_out = []
@@ -387,6 +429,7 @@ def main() -> None:
             latest_freqs_sorted,
             latest_powers,
             peak_powers,
+            allocations,
             now,
         )
         if row is not None:

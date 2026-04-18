@@ -3,7 +3,7 @@
 -- allocations      — regulatory / observed frequency ranges (Greek/EU priors + local obs)
 -- signal_classes   — canonical feature signatures per signal category (classifier targets)
 -- known_frequencies.category  → renamed to class_id (same vocabulary as signal_classes)
--- listening_log.signal_type   → renamed to class_id; confirmed_freq_hz added; confirmed Bool dropped
+-- listening_log.signal_type   → renamed to class_id, confirmed_freq_hz added, confirmed Bool dropped
 --
 -- Known dangling refs after this migration: existing known_frequencies rows have
 -- class_id values like 'fm', 'airband', 'satcom', 'marine', 'ham', 'gov', 'business',

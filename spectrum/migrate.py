@@ -125,14 +125,14 @@ def apply_migration(version: str, name: str, path: Path):
     sql = path.read_text()
     log.info(f"Applying migration {version}: {name}")
 
-    # Split on semicolons and run each statement
-    # (ClickHouse HTTP API only runs one statement per query)
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
+    # Strip full-line -- comments BEFORE splitting on ;
+    # A naive split on `;` would otherwise slice through semicolons inside
+    # comments and feed comment fragments to ClickHouse as SQL (seen 2026-04-18).
+    sql_no_comments = "\n".join(
+        l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--")
+    )
+    statements = [s.strip() for s in sql_no_comments.split(";") if s.strip()]
     for i, stmt in enumerate(statements):
-        # Skip comment-only blocks
-        lines = [l for l in stmt.split("\n") if l.strip() and not l.strip().startswith("--")]
-        if not lines:
-            continue
         try:
             ch_query(stmt)
         except Exception as e:

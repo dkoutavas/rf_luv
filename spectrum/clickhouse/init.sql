@@ -199,6 +199,30 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY timestamp
 TTL toDateTime(timestamp) + INTERVAL 365 DAY;
 
+-- Classifier health -- one row per classifier_health.py run; see migration 009
+CREATE TABLE IF NOT EXISTS spectrum.classifier_health (
+    computed_at                       DateTime DEFAULT now(),
+    total_classifications             UInt32,
+    classifier_runtime_seconds        Nullable(Float32),
+    confidence_distinct_values        UInt16,
+    confidence_precision_tail_count   UInt32,
+    harmonic_flags_total              UInt32,
+    harmonic_flags_cross_allocation   UInt32,
+    atis_confidence_current           Float32,
+    continuous_signals_with_bursts    UInt32,
+    class_distribution_json           String,
+    unknowns_ratio                    Float32,
+    confidence_mean                   Float32,
+    known_good_passing                UInt8,
+    known_good_total                  UInt8,
+    known_good_failing_json           String,
+    seconds_since_last_classification Float32,
+    seconds_since_last_peak_features  Float32,
+    seconds_since_last_sweep          Float32
+) ENGINE = MergeTree()
+ORDER BY computed_at
+TTL computed_at + INTERVAL 180 DAY;
+
 -- Classifier decisions -- computed by spectrum/classifier.py
 -- See migration 007; one row per freq_hz per run, collapsed by classified_at
 CREATE TABLE IF NOT EXISTS spectrum.signal_classifications (

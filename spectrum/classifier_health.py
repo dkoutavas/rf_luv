@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+rf_luv — Classifier health monitor
+
+Writes one row per run to spectrum.classifier_health capturing:
+  * Precision sentinels (catches fd5016e regression — Float32 wobble)
+  * Harmonic filter sentinels (catches 2b12a70 regression — cross-alloc FPs)
+  * Burst filter sentinels (catches 43744b6 regression — single-sweep bursts)
+  * Distribution shape (unknowns ratio, mean confidence, class histogram)
+  * Known-good acceptance alignment (8 reference bins from step-3 acceptance)
+  * Pipeline liveness (seconds since last sweep / features / classification)
+
+No alerting here — visibility only. Grafana reads this table.
+Scheduler: systemd user timer at *:0/5:45 (45 s after classifier's *:0/5:30).
+stdlib only; matches classifier.py / feature_extractor.py posture.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from urllib.error import HTTPError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+# ─── Config ─────────────────────────────────────────────────
+
+CH_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
+CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
+CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
+CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
+CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
+CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
+
+FREQ_MATCH_TOLERANCE_HZ = 150_000
+
+# Step-3 acceptance reference bins (name, freq_hz, expected_class, min_conf).
+# Match by nearest-bin tolerance ±150 kHz because scanner bins don't snap to
+# canonical service frequencies (documented step-2 reality).
+REFERENCE_BINS = [
+    ("ATIS",           136_254_000, "am_airband_atis",    0.8),
+    ("ATC_Tower",      118_422_000, "am_airband_atc",     0.6),
+    ("ATC_Approach",   118_522_000, "am_airband_atc",     0.6),
+    ("Gov_VHF_1",      150_490_000, "nfm_voice_repeater", 0.6),
+    ("FM_1",            99_590_000, "broadcast_fm",       0.7),
+    ("FM_2",            99_690_000, "broadcast_fm",       0.7),
+    ("FM_3",           105_734_000, "broadcast_fm",       0.7),
+    ("Marine_Ch_area", 156_834_000, "marine_vhf_channel", 0.5),
+]
+ATIS_FREQ_HZ = 136_254_000
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stderr,
+)
+log = logging.getLogger("classifier_health")
+
+
+# ─── ClickHouse helpers ─────────────────────────────────────
+
+
+def ch_call(query: str, data: str | None = None, timeout: int = 30) -> str:
+    params = f"user={CH_USER}&password={CH_PASS}&database={CH_DB}"
+    if data is not None:
+        url = f"{CH_URL}?{params}&query={quote(query)}"
+        body = data.encode()
+    else:
+        url = f"{CH_URL}?{params}"
+        body = query.encode()
+    req = Request(url, data=body)
+    req.add_header("Content-Type", "text/plain")
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode()
+    except HTTPError as e:
+        err_body = e.read().decode() if e.fp else ""
+        log.error(f"ClickHouse HTTP {e.code}: {err_body[:300]}")
+        raise
+
+
+def ch_rows(sql: str) -> list[dict]:
+    out = ch_call(sql + " FORMAT JSONEachRow")
+    return [json.loads(line) for line in out.splitlines() if line]
+
+
+def ch_scalar(sql: str):
+    """Return first column of first row, or None if empty."""
+    rows = ch_rows(sql)
+    if not rows:
+        return None
+    first_row = rows[0]
+    return next(iter(first_row.values()), None)
+
+
+# ─── Metric computation ─────────────────────────────────────
+
+
+def latest_run_stats(latest_classified_at: str) -> dict:
+    """Aggregate stats over the classifier's latest batch."""
+    rows = ch_rows(
+        f"SELECT count() AS total, "
+        f"  uniqExact(confidence) AS distinct_confs, "
+        f"  countIf(abs(confidence - round(confidence, 1)) > 0.001) AS precision_tails, "
+        f"  avg(confidence) AS mean_conf, "
+        f"  countIf(class_id LIKE 'unknown_%' OR confidence < 0.5) AS unknowns_count "
+        f"FROM spectrum.signal_classifications FINAL "
+        f"WHERE classified_at = toDateTime('{latest_classified_at}')"
+    )
+    return rows[0] if rows else {}
+
+
+def class_distribution(latest_classified_at: str) -> dict[str, int]:
+    rows = ch_rows(
+        f"SELECT class_id, count() AS n "
+        f"FROM spectrum.signal_classifications FINAL "
+        f"WHERE classified_at = toDateTime('{latest_classified_at}') "
+        f"GROUP BY class_id ORDER BY n DESC"
+    )
+    return {r["class_id"]: int(r["n"]) for r in rows}
+
+
+def harmonic_flag_counts() -> tuple[int, int]:
+    """(total flagged in last 1h, cross-allocation flagged in last 1h)."""
+    total = int(ch_scalar(
+        "SELECT count() FROM spectrum.peak_features FINAL "
+        "WHERE harmonic_of_hz IS NOT NULL AND computed_at > now() - INTERVAL 1 HOUR"
+    ) or 0)
+    # CROSS JOIN with WHERE — ClickHouse's JOIN analyzer rejects BETWEEN in ON,
+    # but the pre-analyzer comma-join form works.
+    xalloc = int(ch_scalar(
+        "SELECT count() FROM "
+        "(SELECT freq_hz, harmonic_of_hz FROM spectrum.peak_features FINAL "
+        " WHERE harmonic_of_hz IS NOT NULL AND computed_at > now() - INTERVAL 1 HOUR) pf, "
+        "spectrum.allocations AS a1, spectrum.allocations AS a2 "
+        "WHERE pf.freq_hz BETWEEN a1.freq_start_hz AND a1.freq_end_hz "
+        "  AND pf.harmonic_of_hz BETWEEN a2.freq_start_hz AND a2.freq_end_hz "
+        "  AND a1.service != a2.service"
+    ) or 0)
+    return total, xalloc
+
+
+def continuous_with_bursts_count() -> int:
+    return int(ch_scalar(
+        "SELECT count() FROM spectrum.peak_features FINAL "
+        "WHERE duty_cycle_24h > 0.85 AND burst_p50_s IS NOT NULL"
+    ) or 0)
+
+
+def liveness_seconds() -> tuple[float, float, float]:
+    """Age in seconds of latest row in each of (classifications, features, scans)."""
+    sec_classif = float(ch_scalar(
+        "SELECT dateDiff('second', max(classified_at), now()) "
+        "FROM spectrum.signal_classifications FINAL"
+    ) or 0)
+    sec_features = float(ch_scalar(
+        "SELECT dateDiff('second', max(computed_at), now()) "
+        "FROM spectrum.peak_features FINAL"
+    ) or 0)
+    sec_scans = float(ch_scalar(
+        "SELECT dateDiff('second', max(timestamp), now()) FROM spectrum.scans"
+    ) or 0)
+    return sec_classif, sec_features, sec_scans
+
+
+def nearest_classification(target_freq_hz: int) -> dict | None:
+    """Nearest signal_classifications row within tolerance, or None."""
+    lo = target_freq_hz - FREQ_MATCH_TOLERANCE_HZ
+    hi = target_freq_hz + FREQ_MATCH_TOLERANCE_HZ
+    rows = ch_rows(
+        f"SELECT freq_hz, class_id, confidence "
+        f"FROM spectrum.signal_classifications FINAL "
+        f"WHERE freq_hz BETWEEN {lo} AND {hi} "
+        f"ORDER BY abs(toInt64(freq_hz) - toInt64({target_freq_hz})) LIMIT 1"
+    )
+    return rows[0] if rows else None
+
+
+def known_good_assessment() -> tuple[int, list[dict], float | None]:
+    """For each reference bin: resolve nearest classification, compare to
+    threshold. Return (passing_count, failing_list, atis_confidence_or_None).
+
+    No-data bins count as passing per spec (so "sweeper hasn't run yet"
+    doesn't look like a regression)."""
+    passing = 0
+    failing: list[dict] = []
+    atis_conf: float | None = None
+    for name, target_freq, expected_class, min_conf in REFERENCE_BINS:
+        row = nearest_classification(target_freq)
+        if row is None:
+            passing += 1
+            failing.append({"name": name, "status": "no_data"})
+            continue
+        cls = row["class_id"]
+        conf = float(row["confidence"])
+        if name == "ATIS":
+            atis_conf = conf
+        if cls == expected_class and conf >= min_conf:
+            passing += 1
+        else:
+            failing.append({
+                "name": name,
+                "class_id": cls,
+                "confidence": round(conf, 2),
+                "expected_class": expected_class,
+                "min_conf": min_conf,
+            })
+    return passing, failing, atis_conf
+
+
+# ─── Main ───────────────────────────────────────────────────
+
+
+def main() -> None:
+    t0 = time.monotonic()
+    log.info(f"classifier_health starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+
+    latest_classified_at = ch_scalar(
+        "SELECT toString(max(classified_at)) FROM spectrum.signal_classifications FINAL"
+    )
+    if not latest_classified_at or latest_classified_at == "1970-01-01 00:00:00":
+        log.error("No classifications present — classifier hasn't run yet")
+        sys.exit(1)
+
+    stats = latest_run_stats(latest_classified_at)
+    class_dist = class_distribution(latest_classified_at)
+    h_total, h_xalloc = harmonic_flag_counts()
+    cwb = continuous_with_bursts_count()
+    sec_classif, sec_features, sec_scans = liveness_seconds()
+    passing, failing, atis_conf = known_good_assessment()
+
+    total = int(stats.get("total", 0))
+    unknowns_ratio = (
+        int(stats.get("unknowns_count", 0)) / total if total > 0 else 0.0
+    )
+
+    row = {
+        "computed_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "total_classifications": total,
+        "classifier_runtime_seconds": None,  # see module docstring / migration 009
+        "confidence_distinct_values": int(stats.get("distinct_confs", 0)),
+        "confidence_precision_tail_count": int(stats.get("precision_tails", 0)),
+        "harmonic_flags_total": h_total,
+        "harmonic_flags_cross_allocation": h_xalloc,
+        "atis_confidence_current": float(atis_conf) if atis_conf is not None else 0.0,
+        "continuous_signals_with_bursts": cwb,
+        "class_distribution_json": json.dumps(class_dist, separators=(",", ":")),
+        "unknowns_ratio": round(unknowns_ratio, 4),
+        "confidence_mean": round(float(stats.get("mean_conf", 0.0)), 4),
+        "known_good_passing": passing,
+        "known_good_total": len(REFERENCE_BINS),
+        "known_good_failing_json": json.dumps(failing, separators=(",", ":")),
+        "seconds_since_last_classification": sec_classif,
+        "seconds_since_last_peak_features": sec_features,
+        "seconds_since_last_sweep": sec_scans,
+    }
+
+    payload = json.dumps(row, separators=(",", ":"))
+    ch_call("INSERT INTO spectrum.classifier_health FORMAT JSONEachRow", data=payload)
+
+    elapsed = time.monotonic() - t0
+    log.info(
+        f"Wrote 1 health row in {elapsed:.2f}s | "
+        f"passing={passing}/{len(REFERENCE_BINS)} | "
+        f"unknowns_ratio={unknowns_ratio:.3f} | "
+        f"sentinels: tails={row['confidence_precision_tail_count']}, "
+        f"xalloc={h_xalloc}, cwb={cwb}, "
+        f"distinct_conf={row['confidence_distinct_values']}"
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        log.exception("classifier_health failed")
+        sys.exit(1)

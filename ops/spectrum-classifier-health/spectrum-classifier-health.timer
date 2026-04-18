@@ -1,0 +1,13 @@
+[Unit]
+Description=Run rf_luv classifier health monitor 45s after each classifier pass
+
+[Timer]
+# feature_extractor fires every 5 min, classifier fires at *:0/5:30
+# (30 s later), health fires at *:0/5:45 (another 15 s later) so the
+# metrics reflect the classifier's just-completed run.
+OnCalendar=*:0/5:45
+Unit=spectrum-classifier-health.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -29,10 +29,6 @@ if ! command -v rtl_tcp >/dev/null 2>&1; then
     err "rtl_tcp not in PATH"; exit 1
 fi
 
-step "Stop any manual rtl_tcp"
-pkill -TERM rtl_tcp 2>/dev/null || true
-sleep 1
-
 step "Install user systemd units"
 mkdir -p "$USER_UNIT_DIR"
 install -m 0644 "$SRC_DIR/rtl_tcp.service"          "$USER_UNIT_DIR/"
@@ -40,6 +36,15 @@ install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.service" "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.timer"   "$USER_UNIT_DIR/"
 systemctl --user daemon-reload
 info "$USER_UNIT_DIR"
+
+step "Stop any running rtl_tcp (systemd + strays)"
+# Unit must exist before we can stop it — that's why this runs AFTER the install.
+# Bare pkill races with Restart=always and leaves escaped processes holding :1234.
+systemctl --user stop rtl_tcp.service 2>/dev/null || true
+pkill -TERM rtl_tcp 2>/dev/null || true
+sleep 1
+pkill -9 rtl_tcp 2>/dev/null || true
+sleep 1
 
 step "Install watchdog + USB-reset helper"
 sudo install -m 0755 "$SRC_DIR/rtl-tcp-watchdog.py" "$WATCHDOG_BIN"
@@ -64,6 +69,16 @@ if loginctl show-user "$USER" 2>/dev/null | grep -q "Linger=yes"; then
 else
     sudo loginctl enable-linger "$USER"
     info "linger enabled"
+fi
+
+step "Grant journal read access to $USER"
+# journalctl --user -u <service> returns "No journal files were opened" when the
+# user isn't in systemd-journal. Takes effect after next login.
+if id -nG "$USER" | tr ' ' '\n' | grep -qx systemd-journal; then
+    info "$USER already in systemd-journal"
+else
+    sudo usermod -aG systemd-journal "$USER"
+    warn "$USER added to systemd-journal — log out and back in for journalctl --user to work"
 fi
 
 step "Enable and start services"

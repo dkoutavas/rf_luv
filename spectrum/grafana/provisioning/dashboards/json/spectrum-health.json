@@ -189,7 +189,7 @@
     {
       "type": "stat",
       "title": "Known-good passing",
-      "description": "Reference bins from step-3 acceptance currently classifying at or above their spec'd confidence. Green at 8/8, yellow 7/8, red \u22646/8. Tooltip/logs show which bins fail via known_good_failing_json.",
+      "description": "Canonical-class reference bins from known_frequencies passing their per-row min_confidence. Green at 30/30 (1.0), yellow for 28-29/30 (1-2 failing), red below (3+ failing or total changed). Tooltip/logs show which bins fail via known_good_failing_json.",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -218,7 +218,7 @@
               },
               {
                 "color": "yellow",
-                "value": 0.86
+                "value": 0.93
               },
               {
                 "color": "green",

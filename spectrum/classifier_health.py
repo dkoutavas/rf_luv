@@ -37,21 +37,14 @@ CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
 CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 FREQ_MATCH_TOLERANCE_HZ = 150_000
+ATIS_CLASS_ID = "am_airband_atis"  # for the dedicated atis_confidence_current metric
 
-# Step-3 acceptance reference bins (name, freq_hz, expected_class, min_conf).
-# Match by nearest-bin tolerance ±150 kHz because scanner bins don't snap to
-# canonical service frequencies (documented step-2 reality).
-REFERENCE_BINS = [
-    ("ATIS",           136_254_000, "am_airband_atis",    0.8),
-    ("ATC_Tower",      118_422_000, "am_airband_atc",     0.6),
-    ("ATC_Approach",   118_522_000, "am_airband_atc",     0.6),
-    ("Gov_VHF_1",      150_490_000, "nfm_voice_repeater", 0.6),
-    ("FM_1",            99_590_000, "broadcast_fm",       0.7),
-    ("FM_2",            99_690_000, "broadcast_fm",       0.7),
-    ("FM_3",           105_734_000, "broadcast_fm",       0.7),
-    ("Marine_Ch_area", 156_834_000, "marine_vhf_channel", 0.5),
-]
-ATIS_FREQ_HZ = 136_254_000
+# Reference bins for the known-good check come from spectrum.known_frequencies
+# (rows whose class_id is a canonical signal_classes value). Each row carries
+# its own min_confidence (migration 010). Hardcoded list retired 2026-04-18
+# after the sanity check found the ATIS target (136_254_000) was pointing at
+# the wrong bin — the canonical 136_125_000 resolves through ±150 kHz
+# tolerance to the 136.034 MHz bin that actually carries ATIS here.
 
 logging.basicConfig(
     level=logging.INFO,
@@ -181,36 +174,63 @@ def nearest_classification(target_freq_hz: int) -> dict | None:
     return rows[0] if rows else None
 
 
-def known_good_assessment() -> tuple[int, list[dict], float | None]:
-    """For each reference bin: resolve nearest classification, compare to
-    threshold. Return (passing_count, failing_list, atis_confidence_or_None).
+def load_reference_bins() -> list[dict]:
+    """Pull reference bins from spectrum.known_frequencies, restricted to rows
+    whose class_id maps to a canonical signal_classes entry (skip legacy
+    danglers like 'satcom'/'ism'/'broadcast' that don't match any class).
 
-    No-data bins count as passing per spec (so "sweeper hasn't run yet"
+    Excludes unknown_* fallback classes — they're not real-signal targets."""
+    return ch_rows(
+        "SELECT freq_hz, name, class_id, min_confidence "
+        "FROM spectrum.known_frequencies "
+        "WHERE class_id IN ("
+        "  SELECT class_id FROM spectrum.signal_classes "
+        "  WHERE class_id NOT LIKE 'unknown_%'"
+        ") "
+        "ORDER BY freq_hz"
+    )
+
+
+def known_good_assessment() -> tuple[int, list[dict], float | None, int]:
+    """For every canonical-class row in known_frequencies, resolve the nearest
+    classification within ±150 kHz and compare to the row's min_confidence.
+
+    Returns (passing, failing, atis_conf, total). ATIS confidence is tracked
+    from the nearest-bin match on the am_airband_atis row specifically —
+    preserves the atis_confidence_current metric's shape for Grafana.
+
+    No-data bins count as passing per spec (so 'sweeper hasn't run yet'
     doesn't look like a regression)."""
+    refs = load_reference_bins()
     passing = 0
     failing: list[dict] = []
     atis_conf: float | None = None
-    for name, target_freq, expected_class, min_conf in REFERENCE_BINS:
-        row = nearest_classification(target_freq)
-        if row is None:
+    for r in refs:
+        target_freq = int(r["freq_hz"])
+        expected_class = r["class_id"]
+        min_conf = float(r["min_confidence"])
+        name = r["name"]
+        match = nearest_classification(target_freq)
+        if match is None:
             passing += 1
             failing.append({"name": name, "status": "no_data"})
             continue
-        cls = row["class_id"]
-        conf = float(row["confidence"])
-        if name == "ATIS":
+        cls = match["class_id"]
+        conf = float(match["confidence"])
+        if expected_class == ATIS_CLASS_ID and atis_conf is None:
             atis_conf = conf
         if cls == expected_class and conf >= min_conf:
             passing += 1
         else:
             failing.append({
                 "name": name,
+                "freq_mhz": round(target_freq / 1e6, 3),
                 "class_id": cls,
                 "confidence": round(conf, 2),
                 "expected_class": expected_class,
                 "min_conf": min_conf,
             })
-    return passing, failing, atis_conf
+    return passing, failing, atis_conf, len(refs)
 
 
 # ─── Main ───────────────────────────────────────────────────
@@ -232,7 +252,7 @@ def main() -> None:
     h_total, h_xalloc = harmonic_flag_counts()
     cwb = continuous_with_bursts_count()
     sec_classif, sec_features, sec_scans = liveness_seconds()
-    passing, failing, atis_conf = known_good_assessment()
+    passing, failing, atis_conf, known_good_total = known_good_assessment()
 
     total = int(stats.get("total", 0))
     unknowns_ratio = (
@@ -253,7 +273,7 @@ def main() -> None:
         "unknowns_ratio": round(unknowns_ratio, 4),
         "confidence_mean": round(float(stats.get("mean_conf", 0.0)), 4),
         "known_good_passing": passing,
-        "known_good_total": len(REFERENCE_BINS),
+        "known_good_total": known_good_total,
         "known_good_failing_json": json.dumps(failing, separators=(",", ":")),
         "seconds_since_last_classification": sec_classif,
         "seconds_since_last_peak_features": sec_features,
@@ -266,7 +286,7 @@ def main() -> None:
     elapsed = time.monotonic() - t0
     log.info(
         f"Wrote 1 health row in {elapsed:.2f}s | "
-        f"passing={passing}/{len(REFERENCE_BINS)} | "
+        f"passing={passing}/{known_good_total} | "
         f"unknowns_ratio={unknowns_ratio:.3f} | "
         f"sentinels: tails={row['confidence_precision_tail_count']}, "
         f"xalloc={h_xalloc}, cwb={cwb}, "

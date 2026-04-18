@@ -17,6 +17,10 @@ rolloff meter applied over long time windows — the features the classifier
 to fingerprint signal identity beyond raw center frequency.
 """
 
+# Defer type-hint evaluation so modern generic/union syntax (dict[...], X | None)
+# is inert at runtime — script runs on any Python 3.7+ without importing typing.
+from __future__ import annotations
+
 import json
 import logging
 import os

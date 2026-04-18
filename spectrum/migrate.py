@@ -123,40 +123,76 @@ def compute_checksum(path: Path) -> str:
 def split_sql_statements(sql: str) -> list[str]:
     """Split a SQL file into statements on ; while respecting comments and strings.
 
-    - Full-line `-- comments` are stripped first so any ; inside them is invisible.
-    - Semicolons inside single-quoted strings are not treated as terminators;
-      '' (doubled single quote) is the SQL-standard embedded-quote escape.
+    Small state machine with three states:
+      - in_string:   inside '...'; respects '' as SQL-standard embedded-quote
+      - in_comment:  inside -- ... end-of-line
+      - (neither)
 
-    Both bugs were discovered applying migration 003 (2026-04-18): a ; inside
-    a comment chopped the statement list, and a ; inside an allocations `notes`
-    string chopped an INSERT in half.
+    Both bugs discovered applying migrations 003 and 004 (2026-04-18): a `;`
+    inside a full-line comment and a `;` inside an INLINE end-of-line comment
+    trailing a CREATE TABLE column — both chopped statements. Tracking `--`
+    state properly catches both. Also filters post-split statements that are
+    pure comments/whitespace (ClickHouse would 400 on those).
     """
-    sql = "\n".join(l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--"))
-    statements = []
-    buf = []
+    statements: list[str] = []
+    buf: list[str] = []
     in_string = False
+    in_comment = False
     i = 0
-    while i < len(sql):
+    n = len(sql)
+    while i < n:
         ch = sql[i]
-        if ch == "'":
-            if in_string and i + 1 < len(sql) and sql[i + 1] == "'":
-                buf.append("''")
-                i += 2
-                continue
-            in_string = not in_string
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_comment:
             buf.append(ch)
-        elif ch == ";" and not in_string:
+            if ch == "\n":
+                in_comment = False
+            i += 1
+            continue
+
+        if in_string:
+            buf.append(ch)
+            if ch == "'":
+                if nxt == "'":
+                    buf.append("'")
+                    i += 2
+                    continue
+                in_string = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_string = True
+            buf.append(ch)
+        elif ch == "-" and nxt == "-":
+            in_comment = True
+            buf.append(ch)
+            buf.append(nxt)
+            i += 2
+            continue
+        elif ch == ";":
             stmt = "".join(buf).strip()
-            if stmt:
+            if _has_sql(stmt):
                 statements.append(stmt)
             buf = []
         else:
             buf.append(ch)
         i += 1
+
     stmt = "".join(buf).strip()
-    if stmt:
+    if _has_sql(stmt):
         statements.append(stmt)
     return statements
+
+
+def _has_sql(stmt: str) -> bool:
+    """True if stmt contains any non-comment, non-whitespace content."""
+    for line in stmt.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("--"):
+            return True
+    return False
 
 
 def apply_migration(version: str, name: str, path: Path):

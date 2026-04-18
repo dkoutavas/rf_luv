@@ -61,4 +61,4 @@ systemctl --user --no-pager status spectrum-features.service | head -10 || true
 
 echo
 echo "Logs:   journalctl --user -u spectrum-features -f"
-echo "Manual: /usr/bin/python3 $SCRIPT"
+echo "Manual: /usr/bin/python3.11 $SCRIPT"

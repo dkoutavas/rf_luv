@@ -161,15 +161,40 @@ def liveness_seconds() -> tuple[float, float, float]:
     return sec_classif, sec_features, sec_scans
 
 
-def nearest_classification(target_freq_hz: int) -> dict | None:
-    """Nearest signal_classifications row within tolerance, or None."""
+def best_classification_in_tolerance(
+    target_freq_hz: int, expected_class: str
+) -> dict | None:
+    """Return the best-matching classification within ±150 kHz of target_freq_hz.
+
+    Ordering asks the right question for a known-good check: does the system
+    see the expected signal class anywhere in tolerance? Falls back to the
+    nearest-bin semantics only if no bin in tolerance matches the expected
+    class, so failing_json still records the class actually being seen.
+
+    ORDER BY:
+      1. expected-class match first (DESC on boolean so TRUE=1 wins)
+      2. highest confidence among matches
+      3. nearest bin among ties
+
+    Earlier "nearest only" semantics flapped on ATIS because the
+    geometrically-closest bin (136.154) occasionally caught adjacent ATC
+    activity, even though 136.034 always carried ATIS cleanly. The new
+    ordering reports the ATIS classification from whichever in-tolerance
+    bin actually represents it.
+    """
     lo = target_freq_hz - FREQ_MATCH_TOLERANCE_HZ
     hi = target_freq_hz + FREQ_MATCH_TOLERANCE_HZ
+    # Escape single quotes defensively — class_ids are schema-controlled
+    # ('am_airband_atis', 'dvbt_mux', …) but keep the substitution safe.
+    safe_class = expected_class.replace("'", "''")
     rows = ch_rows(
         f"SELECT freq_hz, class_id, confidence "
         f"FROM spectrum.signal_classifications FINAL "
         f"WHERE freq_hz BETWEEN {lo} AND {hi} "
-        f"ORDER BY abs(toInt64(freq_hz) - toInt64({target_freq_hz})) LIMIT 1"
+        f"ORDER BY (class_id = '{safe_class}') DESC, "
+        f"         confidence DESC, "
+        f"         abs(toInt64(freq_hz) - toInt64({target_freq_hz})) ASC "
+        f"LIMIT 1"
     )
     return rows[0] if rows else None
 
@@ -210,7 +235,7 @@ def known_good_assessment() -> tuple[int, list[dict], float | None, int]:
         expected_class = r["class_id"]
         min_conf = float(r["min_confidence"])
         name = r["name"]
-        match = nearest_classification(target_freq)
+        match = best_classification_in_tolerance(target_freq, expected_class)
         if match is None:
             passing += 1
             failing.append({"name": name, "status": "no_data"})

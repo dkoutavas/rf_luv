@@ -6,6 +6,22 @@ Wideband RF spectrum scanner: sweeps 88-470 MHz, detects peaks and transients, b
 RTL-SDR (via rtl_tcp) -> scanner.py (FFT) -> scan_ingest.py (JSON) -> ClickHouse -> Grafana
 ```
 
+## What the scanner actually does
+
+`rtl_power` — the usual tool for wideband sweeping — only speaks direct USB, so `scanner.py` is a custom Python `rtl_tcp` client that replaces it. Both components are intentionally thin: numpy for DSP, stdlib HTTP for ClickHouse.
+
+**DSP pipeline** — for each tuning step: read IQ bytes → convert unsigned-8-bit to complex baseband → Hann window → FFT → take `|X|²` to get linear power → average N=8 captures in the **linear** domain (averaging dB underestimates bursty signals, same as RMS vs. average in audio) → convert to dBFS → downsample FFT bins into 100 kHz output bins.
+
+**Scheduler** — two presets share the dongle: a full 88–470 MHz sweep every ~280 s and an airband 118–137 MHz sweep every 60 s. The loop picks whichever preset is most overdue, reconnects to `rtl_tcp` for every sweep (to flush stale TCP buffers), and discards an initial 128 KB to let the tuner PLL settle after large frequency jumps.
+
+**Signal intelligence** — two detectors run on every sweep:
+- *Peaks*: bins ≥10 dB above the average of their ±5 neighbors (spectral prominence, like peak-picking in an audio analyzer).
+- *Transients*: ≥15 dB delta vs. the same bin in the previous full sweep (edge detection in frequency space, marked `appeared` / `disappeared`).
+
+**Data-quality guards** — raw IQ is checked for ADC clipping (samples pinned at 0 or 255); >5 % clipping triggers a gain reduction with a configurable floor (`SCAN_GAIN_MIN`). DVB-T range (174–230 MHz) is excluded from the sweep-health max-power calc since strong local transmitters there are expected.
+
+**Output contract** — one JSON line per bin, plus separate lines for peaks, transient events, sweep health, and run-start / run-update / run-end markers. `scan_ingest.py` reads the stream, routes each message type to its table, and batch-inserts on size-or-interval.
+
 ## Setup
 
 ### Option A: Native Linux

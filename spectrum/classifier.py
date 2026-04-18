@@ -281,6 +281,22 @@ def classify_peak(
         top_trace = traces.get(top_cls, top_trace)
         confidence = 0.2
 
+    # Post-scoring cap: harmonic-flagged peaks cannot be high-confidence real
+    # classes. The −3 per-candidate penalty during scoring can be outweighed
+    # by strong kf_match + allocation + duty priors for real signals that
+    # coincidentally land at 2x/3x/4x of a stronger carrier in a DIFFERENT
+    # allocation (observed: DVB-T bins at 0.8 harmonically flagged by FM
+    # broadcast). The correct fix is in feature_extractor — skip the flag
+    # when candidate and base are in different allocations — but spec
+    # prohibits step-3 feature_extractor changes. Cap enforces the spec's
+    # acceptance semantically. Operator-confirmed overrides are unaffected
+    # because they return early above.
+    harmonic_cap_applied = False
+    if feat.get("harmonic_of_hz") is not None and not top_cls.startswith("unknown_"):
+        if confidence > 0.4:
+            confidence = 0.4
+            harmonic_cap_applied = True
+
     reasoning = {
         "derived_pattern": derived_pattern,
         "alloc": alloc["service"] if alloc else None,
@@ -291,6 +307,8 @@ def classify_peak(
         "second": [ranked[1][0] if len(ranked) > 1 else None, second_score],
         "trace": top_trace,
     }
+    if harmonic_cap_applied:
+        reasoning["harmonic_cap"] = feat["harmonic_of_hz"]
     return top_cls, confidence, reasoning
 
 

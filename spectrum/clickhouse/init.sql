@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS spectrum.known_frequencies (
     name            String,
     class_id        String,
     modulation      String DEFAULT '',
-    notes           String DEFAULT ''
+    notes           String DEFAULT '',
+    min_confidence  Float32 DEFAULT 0.6       -- see migration 010
 ) ENGINE = MergeTree()
 ORDER BY freq_hz;
 

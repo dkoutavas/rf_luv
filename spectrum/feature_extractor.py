@@ -21,6 +21,7 @@ to fingerprint signal identity beyond raw center frequency.
 # is inert at runtime — script runs on any Python 3.7+ without importing typing.
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import os
@@ -148,24 +149,41 @@ def run_length_bursts_s(actives: list[bool], interval_s: int) -> list[float]:
     return bursts
 
 
-def bandwidth_from_neighbors(freq_hz: int, latest: dict[int, float]) -> int:
+def bandwidth_from_neighbors(
+    freq_hz: int,
+    latest_freqs_sorted: list[int],
+    latest_powers: list[float],
+) -> int:
     """Estimate FWHM-like bandwidth from ±1..±5 neighbor bins of the peak.
 
-    Return BANDWIDTH_SENTINEL if no 3 dB drop found on either side within ±5 bins —
-    DVB-T muxes and other wideband signals will hit this, which is itself useful.
+    Uses index-based neighbors in the sorted full-sweep bin list. Peaks may
+    come from the airband preset (different grid), so look up the CLOSEST bin
+    in the full-sweep grid and walk ±5 positions from there. If no 3 dB drop
+    within ±5 bins on either side, return BANDWIDTH_SENTINEL — DVB-T muxes
+    and other wideband signals will hit this, which is itself classifier signal.
     """
-    p_center = latest.get(freq_hz)
-    if p_center is None:
+    if not latest_freqs_sorted:
         return BANDWIDTH_SENTINEL
-    left_n = right_n = None
+    idx = bisect.bisect_left(latest_freqs_sorted, freq_hz)
+    # Snap to nearest actual bin if peak's exact freq isn't in full-sweep grid
+    if idx == len(latest_freqs_sorted):
+        idx -= 1
+    elif idx > 0 and abs(latest_freqs_sorted[idx] - freq_hz) > abs(
+        latest_freqs_sorted[idx - 1] - freq_hz
+    ):
+        idx -= 1
+    p_center = latest_powers[idx]
+
+    left_n: int | None = None
+    right_n: int | None = None
     for n in range(1, BANDWIDTH_MAX_NBR + 1):
-        if left_n is None:
-            lp = latest.get(freq_hz - n * BIN_WIDTH_HZ)
-            if lp is not None and (p_center - lp) >= BANDWIDTH_DROP_DB:
+        li = idx - n
+        ri = idx + n
+        if left_n is None and li >= 0:
+            if (p_center - latest_powers[li]) >= BANDWIDTH_DROP_DB:
                 left_n = n
-        if right_n is None:
-            rp = latest.get(freq_hz + n * BIN_WIDTH_HZ)
-            if rp is not None and (p_center - rp) >= BANDWIDTH_DROP_DB:
+        if right_n is None and ri < len(latest_freqs_sorted):
+            if (p_center - latest_powers[ri]) >= BANDWIDTH_DROP_DB:
                 right_n = n
         if left_n is not None and right_n is not None:
             break
@@ -194,7 +212,8 @@ def detect_harmonic(freq_hz: int, peak_powers: dict[int, float]) -> int | None:
 def build_feature_row(
     freq_hz: int,
     series: list[tuple[datetime, float]],
-    latest_power: dict[int, float],
+    latest_freqs_sorted: list[int],
+    latest_powers: list[float],
     peak_powers: dict[int, float],
     now: datetime,
 ) -> dict | None:
@@ -268,7 +287,7 @@ def build_feature_row(
         weekday[i] / weekday_tot[i] if weekday_tot[i] > 0 else 0.0 for i in range(7)
     ]
 
-    bw = bandwidth_from_neighbors(freq_hz, latest_power)
+    bw = bandwidth_from_neighbors(freq_hz, latest_freqs_sorted, latest_powers)
     harm = detect_harmonic(freq_hz, peak_powers)
 
     return {
@@ -319,8 +338,10 @@ def main() -> None:
 
     # 2. Pull 14d scan history for all active bins in one query
     log.info("Fetching 14d scan history...")
+    # JSONEachRow serialises DateTime64 as 'YYYY-MM-DD HH:MM:SS.fff' — no cast needed.
+    # Aliasing with `AS timestamp` collides with the column name in ORDER BY, so leave as-is.
     scans = ch_rows(
-        f"SELECT freq_hz, toString(timestamp) AS timestamp, power_dbfs "
+        f"SELECT freq_hz, timestamp, power_dbfs "
         f"FROM spectrum.scans "
         f"WHERE freq_hz IN ({bins_csv}) "
         f"  AND timestamp > now() - INTERVAL 14 DAY "
@@ -334,15 +355,19 @@ def main() -> None:
             (parse_ch_datetime(r["timestamp"]), float(r["power_dbfs"]))
         )
 
-    # 3. Latest full-sweep power snapshot for bandwidth estimation
+    # 3. Latest full-sweep power snapshot for bandwidth estimation.
+    # Server-side ORDER BY freq_hz so we can walk the bins by index; peak freqs
+    # from airband preset won't be in this grid, we bisect to the nearest bin.
     log.info("Fetching latest full-sweep snapshot for bandwidth...")
     latest = ch_rows(
         "SELECT freq_hz, power_dbfs FROM spectrum.scans "
         "WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
-        "                   WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1)"
+        "                   WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1) "
+        "ORDER BY freq_hz"
     )
-    latest_power = {r["freq_hz"]: float(r["power_dbfs"]) for r in latest}
-    log.info(f"  {len(latest_power)} bins in latest full sweep")
+    latest_freqs_sorted = [r["freq_hz"] for r in latest]
+    latest_powers = [float(r["power_dbfs"]) for r in latest]
+    log.info(f"  {len(latest_freqs_sorted)} bins in latest full sweep")
 
     # 4. Max peak power per bin over 24h for harmonic detection
     log.info("Fetching peak-power snapshot for harmonic detection...")
@@ -357,7 +382,12 @@ def main() -> None:
     rows_out = []
     for freq in active_bins:
         row = build_feature_row(
-            freq, by_bin.get(freq, []), latest_power, peak_powers, now
+            freq,
+            by_bin.get(freq, []),
+            latest_freqs_sorted,
+            latest_powers,
+            peak_powers,
+            now,
         )
         if row is not None:
             rows_out.append(row)

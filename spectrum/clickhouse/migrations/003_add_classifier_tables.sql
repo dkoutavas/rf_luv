@@ -49,13 +49,13 @@ INSERT INTO spectrum.allocations (freq_start_hz, freq_end_hz, service, region, s
 SELECT * FROM (
     SELECT  87500000 AS freq_start_hz, 108000000 AS freq_end_hz, 'broadcast_fm' AS service,         'GR' AS region, 'ECC' AS source,  'WFM, strong Lycabettus/Hymettus transmitters' AS notes
     UNION ALL SELECT 108000000, 117975000, 'aviation_navigation',  'EU', 'ECC',  'VOR/ILS'
-    UNION ALL SELECT 118000000, 137000000, 'aviation_voice',       'EU', 'ECC',  'AM airband; Athens Tower/Approach/ATIS live here'
+    UNION ALL SELECT 118000000, 137000000, 'aviation_voice',       'EU', 'ECC',  'AM airband — Athens Tower/Approach/ATIS live here'
     UNION ALL SELECT 144000000, 146000000, 'amateur_2m',           'EU', 'IARU', 'SV ham 2m band'
     UNION ALL SELECT 146000000, 150000000, 'gov_military_vhf_gr',  'GR', 'obs',  'Observed repeaters 146.39/148.44/150.49'
     UNION ALL SELECT 150000000, 156000000, 'land_mobile_business', 'EU', 'ECC',  'PMR/business radio'
-    UNION ALL SELECT 156000000, 162025000, 'marine_vhf',           'EU', 'ITU',  'Marine channels; AIS at 161.975 and 162.025'
+    UNION ALL SELECT 156000000, 162025000, 'marine_vhf',           'EU', 'ITU',  'Marine channels — AIS at 161.975 and 162.025'
     UNION ALL SELECT 162050000, 174000000, 'land_mobile_safety',   'EU', 'ECC',  'Public safety / utility (50 kHz buffer past marine AIS Ch88)'
-    UNION ALL SELECT 174000000, 230000000, 'dvb_t_gr',             'GR', 'GR',   'Digital TV; 174-206 strong from Hymettus'
+    UNION ALL SELECT 174000000, 230000000, 'dvb_t_gr',             'GR', 'GR',   'Digital TV — 174-206 strong from Hymettus'
     UNION ALL SELECT 380000000, 400000000, 'tetra_gr',             'GR', 'GR',   'Emergency services — encrypted, do not decode'
     UNION ALL SELECT 430000000, 440000000, 'amateur_70cm',         'EU', 'IARU', 'SV ham 70cm band'
     UNION ALL SELECT 446000000, 446200000, 'pmr446',               'EU', 'CEPT', 'License-free handhelds'

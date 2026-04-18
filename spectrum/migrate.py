@@ -120,18 +120,51 @@ def compute_checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
+def split_sql_statements(sql: str) -> list[str]:
+    """Split a SQL file into statements on ; while respecting comments and strings.
+
+    - Full-line `-- comments` are stripped first so any ; inside them is invisible.
+    - Semicolons inside single-quoted strings are not treated as terminators;
+      '' (doubled single quote) is the SQL-standard embedded-quote escape.
+
+    Both bugs were discovered applying migration 003 (2026-04-18): a ; inside
+    a comment chopped the statement list, and a ; inside an allocations `notes`
+    string chopped an INSERT in half.
+    """
+    sql = "\n".join(l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--"))
+    statements = []
+    buf = []
+    in_string = False
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'":
+            if in_string and i + 1 < len(sql) and sql[i + 1] == "'":
+                buf.append("''")
+                i += 2
+                continue
+            in_string = not in_string
+            buf.append(ch)
+        elif ch == ";" and not in_string:
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    stmt = "".join(buf).strip()
+    if stmt:
+        statements.append(stmt)
+    return statements
+
+
 def apply_migration(version: str, name: str, path: Path):
     """Run a single migration file and record it."""
     sql = path.read_text()
     log.info(f"Applying migration {version}: {name}")
 
-    # Strip full-line -- comments BEFORE splitting on ;
-    # A naive split on `;` would otherwise slice through semicolons inside
-    # comments and feed comment fragments to ClickHouse as SQL (seen 2026-04-18).
-    sql_no_comments = "\n".join(
-        l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--")
-    )
-    statements = [s.strip() for s in sql_no_comments.split(";") if s.strip()]
+    statements = split_sql_statements(sql)
     for i, stmt in enumerate(statements):
         try:
             ch_query(stmt)

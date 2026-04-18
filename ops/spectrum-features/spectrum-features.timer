@@ -1,0 +1,13 @@
+[Unit]
+Description=Run rf_luv feature extractor every 5 minutes
+
+[Timer]
+# 2-min stagger on boot so ClickHouse is healthy; then every 5 min from last run.
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=spectrum-features.service
+# If the host was down when a fire was due, run once on resume (not every missed fire).
+Persistent=true
+
+[Install]
+WantedBy=timers.target

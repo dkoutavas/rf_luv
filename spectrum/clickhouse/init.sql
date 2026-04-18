@@ -198,3 +198,24 @@ CREATE TABLE IF NOT EXISTS spectrum.listening_log (
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY timestamp
 TTL toDateTime(timestamp) + INTERVAL 365 DAY;
+
+-- Per-peak features -- computed by spectrum/feature_extractor.py
+-- See migration 004 for full doc; one row per freq_hz per run, collapsed by computed_at
+CREATE TABLE IF NOT EXISTS spectrum.peak_features (
+    freq_hz             UInt32,
+    bandwidth_hz        UInt32,
+    duty_cycle_1h       Float32,
+    duty_cycle_24h      Float32,
+    duty_cycle_7d       Float32,
+    burst_p50_s         Nullable(Float32),
+    burst_p95_s         Nullable(Float32),
+    diurnal_pattern     Array(Float32),
+    weekday_pattern     Array(Float32),
+    harmonic_of_hz      Nullable(UInt32),
+    power_mean_dbfs     Float32,
+    power_p95_dbfs      Float32,
+    power_std_db        Float32,
+    sweeps_observed_24h UInt32,
+    computed_at         DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(computed_at)
+ORDER BY freq_hz;

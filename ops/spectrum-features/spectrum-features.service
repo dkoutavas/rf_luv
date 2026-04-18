@@ -1,0 +1,21 @@
+[Unit]
+Description=rf_luv per-peak feature extractor (one-shot)
+# Only run if ClickHouse is reachable; the timer will retry on next fire if not.
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Path is resolved via %h = $HOME (leap: /home/dio_nysis/dev/rf_luv)
+ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/feature_extractor.py
+Environment=CLICKHOUSE_HOST=localhost
+Environment=CLICKHOUSE_PORT=8126
+Environment=CLICKHOUSE_DB=spectrum
+Environment=CLICKHOUSE_USER=spectrum
+Environment=CLICKHOUSE_PASSWORD=spectrum_local
+# Fail fast if the run exceeds 4 minutes — next timer fire in 1 min catches up.
+TimeoutStartSec=240
+# Don't spam restart on failure; the timer reschedules us.
+Restart=no
+
+[Install]
+WantedBy=default.target

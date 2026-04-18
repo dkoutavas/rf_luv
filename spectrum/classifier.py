@@ -313,8 +313,11 @@ def main() -> None:
         "SELECT toUInt32(freq_hz) AS freq_hz, name, class_id "
         "FROM spectrum.known_frequencies"
     )
+    # signal_classes is a plain MergeTree (FINAL would illegal-final here).
+    # ALTER TABLE ... UPDATE from migration 006 applies lazily on merge;
+    # reads are eventually consistent, which is fine for a reference table.
     signal_classes = ch_rows(
-        "SELECT class_id, evidence_rules FROM spectrum.signal_classes FINAL"
+        "SELECT class_id, evidence_rules FROM spectrum.signal_classes"
     )
     # Parse evidence_rules JSON once
     for sc in signal_classes:

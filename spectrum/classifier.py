@@ -88,6 +88,18 @@ def ch_rows(sql: str) -> list[dict]:
 # ─── Helpers ────────────────────────────────────────────────
 
 
+def round_confidence(value: float) -> float:
+    """Round confidence to 2 decimal places before writing.
+
+    Float32 storage turns literal 0.4 into ~0.40000000596, which is stable
+    but breaks naive `confidence > 0.4` comparisons (saw this in the step 3
+    audit — Q3 had to relax `> 0.6` to `>= 0.5`). Rounding here gives a
+    deterministic small discrete set {0.2, 0.4, 0.6, 0.8, 1.0} that survives
+    the Float32 round-trip cleanly. Storage type unchanged.
+    """
+    return round(float(value), 2)
+
+
 def derive_duty_pattern(duty_24h: float) -> str:
     """Spec's derivation: >0.5 continuous, [0.1,0.5] bursty_high, <0.1 bursty_low."""
     if duty_24h > DUTY_CONTINUOUS_THRESHOLD:
@@ -235,7 +247,7 @@ def classify_peak(
     # Step 1: operator-confirmation override
     for c in confirmations:
         if abs(int(c["confirmed_freq_hz"]) - freq) <= FREQ_MATCH_TOLERANCE_HZ:
-            return c["class_id"], 1.0, {
+            return c["class_id"], round_confidence(1.0), {
                 "override": "operator-confirmed",
                 "listening_log_id": c["id"],
                 "confirmed_freq_hz": c["confirmed_freq_hz"],
@@ -267,11 +279,11 @@ def classify_peak(
 
     # Step 5: confidence tiers (per spec)
     if top_score >= 6 and top_score - second_score >= 2:
-        confidence = 0.8
+        confidence = round_confidence(0.8)
     elif top_score >= 4 and top_score - second_score >= 1:
-        confidence = 0.6
+        confidence = round_confidence(0.6)
     elif top_score >= 3:
-        confidence = 0.4
+        confidence = round_confidence(0.4)
     else:
         # Fall back to unknown bucket by derived pattern
         top_cls = (
@@ -279,22 +291,20 @@ def classify_peak(
         )
         top_score = scores.get(top_cls, top_score)
         top_trace = traces.get(top_cls, top_trace)
-        confidence = 0.2
+        confidence = round_confidence(0.2)
 
     # Post-scoring cap: harmonic-flagged peaks cannot be high-confidence real
     # classes. The −3 per-candidate penalty during scoring can be outweighed
     # by strong kf_match + allocation + duty priors for real signals that
     # coincidentally land at 2x/3x/4x of a stronger carrier in a DIFFERENT
-    # allocation (observed: DVB-T bins at 0.8 harmonically flagged by FM
-    # broadcast). The correct fix is in feature_extractor — skip the flag
-    # when candidate and base are in different allocations — but spec
-    # prohibits step-3 feature_extractor changes. Cap enforces the spec's
-    # acceptance semantically. Operator-confirmed overrides are unaffected
-    # because they return early above.
+    # allocation. Issue 3 fixes this at the feature_extractor layer by not
+    # flagging cross-allocation ratios; this cap remains as defensive code
+    # and should stop firing once Issue 3 lands. Operator-confirmed overrides
+    # are unaffected because they return early above.
     harmonic_cap_applied = False
     if feat.get("harmonic_of_hz") is not None and not top_cls.startswith("unknown_"):
         if confidence > 0.4:
-            confidence = 0.4
+            confidence = round_confidence(0.4)
             harmonic_cap_applied = True
 
     reasoning = {
@@ -376,7 +386,7 @@ def main() -> None:
         rows_out.append({
             "freq_hz": int(feat["freq_hz"]),
             "class_id": cls,
-            "confidence": round(float(conf), 3),
+            "confidence": round_confidence(conf),
             "reasoning": json.dumps(reasoning, separators=(",", ":")),
             "features_snapshot": json.dumps(feat, separators=(",", ":")),
             "classified_at": now_str,

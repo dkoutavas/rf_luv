@@ -763,7 +763,7 @@
       },
       "targets": [
         {
-          "rawSql": "WITH classified AS (  SELECT freq_hz, class_id, confidence, classified_at   FROM spectrum.signal_classifications FINAL   WHERE classified_at > now() - INTERVAL 24 HOUR) SELECT   round(c.freq_hz / 1000000.0, 3) AS freq_mhz,   c.class_id AS class_id,   c.confidence AS confidence,   anyIf(kf.name, abs(toInt64(kf.freq_hz) - toInt64(c.freq_hz)) <= 150000) AS known_name,   any(pf.duty_cycle_24h) AS duty_24h,   any(pf.bandwidth_hz) AS bandwidth_hz,   max(c.classified_at) AS last_classified FROM classified c LEFT JOIN spectrum.peak_features FINAL pf ON pf.freq_hz = c.freq_hz LEFT JOIN spectrum.known_frequencies kf ON 1=1 GROUP BY c.freq_hz, c.class_id, c.confidence ORDER BY c.confidence DESC, c.freq_hz",
+          "rawSql": "SELECT   round(c.freq_hz / 1000000.0, 3) AS freq_mhz,   c.class_id AS class_id,   c.confidence AS confidence,   anyIf(kf.name, abs(toInt64(kf.freq_hz) - toInt64(c.freq_hz)) <= 150000) AS known_name,   any(pf.duty_cycle_24h) AS duty_24h,   any(pf.bandwidth_hz) AS bandwidth_hz,   max(c.classified_at) AS last_classified FROM (SELECT freq_hz, class_id, confidence, classified_at FROM spectrum.signal_classifications FINAL       WHERE classified_at > now() - INTERVAL 24 HOUR) AS c LEFT JOIN (SELECT freq_hz, duty_cycle_24h, bandwidth_hz FROM spectrum.peak_features FINAL) AS pf   ON pf.freq_hz = c.freq_hz LEFT JOIN spectrum.known_frequencies AS kf ON 1=1 GROUP BY c.freq_hz, c.class_id, c.confidence ORDER BY c.confidence DESC, c.freq_hz",
           "format": 1
         }
       ],

@@ -434,7 +434,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT   round(pf.freq_hz / 1000000.0, 3) AS freq_mhz,   sc.class_id AS current_class,   sc.confidence AS confidence,   round(pf.duty_cycle_24h, 3) AS duty_24h,   pf.bandwidth_hz AS bandwidth_hz,   round(pf.power_mean_dbfs, 1) AS power_mean_dbfs,   pf.sweeps_observed_24h AS sweeps_observed FROM spectrum.peak_features FINAL pf LEFT JOIN spectrum.signal_classifications FINAL sc ON sc.freq_hz = pf.freq_hz WHERE pf.sweeps_observed_24h > 5   AND (sc.class_id LIKE 'unknown_%' OR sc.confidence < 0.5) ORDER BY duty_24h DESC LIMIT 20",
+          "rawSql": "SELECT   round(pf.freq_hz / 1000000.0, 3) AS freq_mhz,   sc.class_id AS current_class,   sc.confidence AS confidence,   round(pf.duty_cycle_24h, 3) AS duty_24h,   pf.bandwidth_hz AS bandwidth_hz,   round(pf.power_mean_dbfs, 1) AS power_mean_dbfs,   pf.sweeps_observed_24h AS sweeps_observed FROM (SELECT freq_hz, duty_cycle_24h, bandwidth_hz, power_mean_dbfs, sweeps_observed_24h       FROM spectrum.peak_features FINAL) AS pf LEFT JOIN (SELECT freq_hz, class_id, confidence FROM spectrum.signal_classifications FINAL) AS sc   ON sc.freq_hz = pf.freq_hz WHERE pf.sweeps_observed_24h > 5   AND (sc.class_id LIKE 'unknown_%' OR sc.confidence < 0.5) ORDER BY duty_24h DESC LIMIT 20",
           "format": 1
         }
       ],

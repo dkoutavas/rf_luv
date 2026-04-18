@@ -122,7 +122,7 @@ query_csv "$OUT/sweep_health.csv" \
 
 # known_frequencies is a reference table — no time filter
 query_csv "$OUT/known_freqs.csv" \
-    "SELECT freq_hz, bandwidth_hz, name, category, modulation, notes FROM spectrum.known_frequencies ORDER BY freq_hz" \
+    "SELECT freq_hz, bandwidth_hz, name, class_id, modulation, notes FROM spectrum.known_frequencies ORDER BY freq_hz" \
     "known_freqs"
 
 # --- Hourly baseline (aggregated, useful for anomaly context) ---

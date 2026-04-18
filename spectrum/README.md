@@ -123,6 +123,13 @@ All set in `docker-compose.yml` under the `spectrum-scanner` service:
 | ClickHouse HTTP | 8126 | Query API (used by export scripts) |
 | ClickHouse Native | 9003 | Used by Grafana datasource |
 
+## Classifier reference tables
+
+Two read-only lookup tables seeded by migration `003_add_classifier_tables.sql`:
+
+- `allocations` — regulatory / observed frequency ranges (`freq_start_hz`, `freq_end_hz`, `service`, `region`, `source`, `notes`). Covers 87.5 MHz–446.2 MHz with Greek/EU priors plus local observations. Use with a range lookup (`WHERE freq_start_hz <= X AND freq_end_hz > X`).
+- `signal_classes` — canonical feature signatures for a forthcoming rule-based classifier (`class_id`, `bw_min_hz`, `bw_max_hz`, `modulation`, `duty_pattern`, burst durations, `evidence_rules` JSON). Loosely matched by `known_frequencies.class_id` and `listening_log.class_id`; no FK enforcement.
+
 ## Helper Scripts
 
 - `export-data.sh` — export scan data from ClickHouse to CSV/markdown reports

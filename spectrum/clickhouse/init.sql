@@ -21,12 +21,13 @@ TTL toDateTime(timestamp) + INTERVAL 180 DAY
 SETTINGS index_granularity = 8192;
 
 -- Known frequencies -- reference table for signal identification
--- Pre-populated with Athens-area frequencies
+-- Pre-populated with Athens-area frequencies. class_id loosely matches
+-- spectrum.signal_classes but is not FK-enforced; see migration 003.
 CREATE TABLE IF NOT EXISTS spectrum.known_frequencies (
     freq_hz         UInt32,
     bandwidth_hz    UInt32 DEFAULT 0,
     name            String,
-    category        String,
+    class_id        String,
     modulation      String DEFAULT '',
     notes           String DEFAULT ''
 ) ENGINE = MergeTree()
@@ -139,9 +140,9 @@ CREATE TABLE IF NOT EXISTS spectrum.scan_runs (
 ORDER BY started_at;
 
 -- Seed known frequencies (only if table is empty)
-INSERT INTO spectrum.known_frequencies (freq_hz, bandwidth_hz, name, category, modulation, notes)
+INSERT INTO spectrum.known_frequencies (freq_hz, bandwidth_hz, name, class_id, modulation, notes)
 SELECT * FROM (
-    SELECT 99600000 AS freq_hz, 200000 AS bandwidth_hz, 'Kosmos FM 99.6' AS name, 'fm' AS category, 'WFM' AS modulation, 'Strong local FM' AS notes
+    SELECT 99600000 AS freq_hz, 200000 AS bandwidth_hz, 'Kosmos FM 99.6' AS name, 'fm' AS class_id, 'WFM' AS modulation, 'Strong local FM' AS notes
     UNION ALL SELECT 105800000, 200000, 'Skai 105.8', 'fm', 'WFM', 'Strong local FM'
     UNION ALL SELECT 118100000, 8333, 'Athens Tower', 'airband', 'AM', 'Airport tower'
     UNION ALL SELECT 118575000, 8333, 'Athens Approach', 'airband', 'AM', 'ATC approach control'
@@ -184,15 +185,15 @@ WHERE (SELECT count() FROM spectrum.known_frequencies) = 0;
 -- or via CLI: curl 'http://localhost:8126/?user=spectrum&password=spectrum_local' \
 --   --data-binary "INSERT INTO spectrum.listening_log (...) VALUES (...)"
 CREATE TABLE IF NOT EXISTS spectrum.listening_log (
-    id          String DEFAULT generateUUIDv4(),
-    timestamp   DateTime64(3) DEFAULT now64(3),
-    freq_mhz    Float32,
-    mode        String DEFAULT 'NFM',
-    heard       String DEFAULT '',
-    signal_type String DEFAULT '',
-    language    String DEFAULT '',
-    notes       String DEFAULT '',
-    confirmed   Bool DEFAULT false
+    id                  String DEFAULT generateUUIDv4(),
+    timestamp           DateTime64(3) DEFAULT now64(3),
+    freq_mhz            Float32,                  -- tuned frequency (user input)
+    mode                String DEFAULT 'NFM',
+    heard               String DEFAULT '',
+    class_id            String DEFAULT '',        -- matches spectrum.signal_classes, loose
+    language            String DEFAULT '',
+    notes               String DEFAULT '',
+    confirmed_freq_hz   UInt32 DEFAULT 0          -- measured carrier (0 = not yet confirmed)
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY timestamp

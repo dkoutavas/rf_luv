@@ -100,7 +100,7 @@ async function submitLog() {
     return;
   }
 
-  var sql = "INSERT INTO spectrum.listening_log (freq_mhz, mode, heard, language, signal_type, notes) VALUES ("
+  var sql = "INSERT INTO spectrum.listening_log (freq_mhz, mode, heard, language, class_id, notes) VALUES ("
     + freq + ", '" + esc(mode) + "', '" + esc(heard) + "', '" + esc(lang) + "', '" + esc(stype) + "', '" + esc(notes) + "')";
 
   try {

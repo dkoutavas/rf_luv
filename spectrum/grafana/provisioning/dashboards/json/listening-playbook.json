@@ -126,7 +126,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT name, round(freq_hz / 1000000, 3) AS freq_mhz, modulation AS mode, category, notes FROM spectrum.known_frequencies WHERE category IN ('airband', 'marine', 'gov', 'business') ORDER BY CASE category WHEN 'airband' THEN 1 WHEN 'marine' THEN 2 WHEN 'gov' THEN 3 WHEN 'business' THEN 4 END, freq_hz",
+          "rawSql": "SELECT name, round(freq_hz / 1000000, 3) AS freq_mhz, modulation AS mode, class_id, notes FROM spectrum.known_frequencies WHERE class_id IN ('airband', 'marine', 'gov', 'business') ORDER BY CASE class_id WHEN 'airband' THEN 1 WHEN 'marine' THEN 2 WHEN 'gov' THEN 3 WHEN 'business' THEN 4 END, freq_hz",
           "format": 1
         }
       ]
@@ -162,7 +162,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT timestamp, freq_mhz, mode, signal_type, heard, language, notes FROM spectrum.listening_log ORDER BY timestamp DESC LIMIT 20",
+          "rawSql": "SELECT timestamp, freq_mhz, mode, class_id, heard, language, notes FROM spectrum.listening_log ORDER BY timestamp DESC LIMIT 20",
           "format": 1
         }
       ]

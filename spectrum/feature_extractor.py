@@ -363,12 +363,28 @@ def main() -> None:
     t0 = datetime.now(timezone.utc)
     log.info(f"Feature extractor starting (ClickHouse at {CH_HOST}:{CH_PORT})")
 
-    # 1. Active bins = distinct freqs with any peak in last 24h
+    # Compression-aware exclusion (fix from 2026-04-21 review).
+    # Sweeps classified as medium/high compression events by detect_compression.py
+    # contain unreliable peaks (attenuated known carriers + elevated spur floors).
+    # We exclude them wholesale from peak_features to prevent polluting duty-cycle
+    # and power statistics. This is the "boring correct" default — a weighted
+    # handling is captured as a followup.
+    # The NOT IN subquery is cheap: compression_events has O(100) rows at the
+    # 16-day mark, and the scanner sweep-health table reference is used in one
+    # place (latest-full-sweep snapshot).
+    SUSPECT_SWEEPS_SUBQUERY = (
+        "(SELECT sweep_id FROM spectrum.compression_events FINAL "
+        " WHERE match_tier IN ('medium', 'high'))"
+    )
+
+    # 1. Active bins = distinct freqs with any peak in last 24h (from non-suspect sweeps)
     active_bins = [
         r["freq_hz"]
         for r in ch_rows(
-            "SELECT DISTINCT freq_hz FROM spectrum.peaks "
-            "WHERE timestamp > now() - INTERVAL 24 HOUR ORDER BY freq_hz"
+            f"SELECT DISTINCT freq_hz FROM spectrum.peaks "
+            f"WHERE timestamp > now() - INTERVAL 24 HOUR "
+            f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+            f"ORDER BY freq_hz"
         )
     ]
     if not active_bins:
@@ -378,7 +394,7 @@ def main() -> None:
 
     bins_csv = ",".join(str(b) for b in active_bins)
 
-    # 2. Pull 14d scan history for all active bins in one query
+    # 2. Pull 14d scan history for all active bins in one query (excluding suspect sweeps)
     log.info("Fetching 14d scan history...")
     # JSONEachRow serialises DateTime64 as 'YYYY-MM-DD HH:MM:SS.fff' — no cast needed.
     # Aliasing with `AS timestamp` collides with the column name in ORDER BY, so leave as-is.
@@ -387,6 +403,7 @@ def main() -> None:
         f"FROM spectrum.scans "
         f"WHERE freq_hz IN ({bins_csv}) "
         f"  AND timestamp > now() - INTERVAL 14 DAY "
+        f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
         f"ORDER BY freq_hz, timestamp"
     )
     log.info(f"  {len(scans)} scan rows loaded")
@@ -397,25 +414,32 @@ def main() -> None:
             (parse_ch_datetime(r["timestamp"]), float(r["power_dbfs"]))
         )
 
-    # 3. Latest full-sweep power snapshot for bandwidth estimation.
+    # 3. Latest NON-SUSPECT full-sweep power snapshot for bandwidth estimation.
     # Server-side ORDER BY freq_hz so we can walk the bins by index; peak freqs
     # from airband preset won't be in this grid, we bisect to the nearest bin.
-    log.info("Fetching latest full-sweep snapshot for bandwidth...")
+    # If the most recent full sweep was flagged compression, we skip it —
+    # bandwidth estimates from a compressed sweep would be wildly wrong
+    # (FM carriers at -25 dBFS instead of their usual -14 dBFS).
+    log.info("Fetching latest NON-SUSPECT full-sweep snapshot for bandwidth...")
     latest = ch_rows(
-        "SELECT freq_hz, power_dbfs FROM spectrum.scans "
-        "WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
-        "                   WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1) "
-        "ORDER BY freq_hz"
+        f"SELECT freq_hz, power_dbfs FROM spectrum.scans "
+        f"WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
+        f"                   WHERE preset = 'full' "
+        f"                     AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+        f"                   ORDER BY timestamp DESC LIMIT 1) "
+        f"ORDER BY freq_hz"
     )
     latest_freqs_sorted = [r["freq_hz"] for r in latest]
     latest_powers = [float(r["power_dbfs"]) for r in latest]
     log.info(f"  {len(latest_freqs_sorted)} bins in latest full sweep")
 
-    # 4. Max peak power per bin over 24h for harmonic detection
+    # 4. Max peak power per bin over 24h for harmonic detection (excluding suspect sweeps)
     log.info("Fetching peak-power snapshot for harmonic detection...")
     peaks = ch_rows(
-        "SELECT freq_hz, max(power_dbfs) AS power_dbfs FROM spectrum.peaks "
-        "WHERE timestamp > now() - INTERVAL 24 HOUR GROUP BY freq_hz"
+        f"SELECT freq_hz, max(power_dbfs) AS power_dbfs FROM spectrum.peaks "
+        f"WHERE timestamp > now() - INTERVAL 24 HOUR "
+        f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+        f"GROUP BY freq_hz"
     )
     peak_powers = {r["freq_hz"]: float(r["power_dbfs"]) for r in peaks}
 

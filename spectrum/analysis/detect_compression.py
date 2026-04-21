@@ -61,18 +61,27 @@ SAMPLE_RATE = 2_048_000
 TILE_WIDTH_HZ = SAMPLE_RATE  # one tile per center-retune
 
 # Signature thresholds
-MIN_SPUR_BLOCK_TILES = 10         # need ≥10 consecutive tiles for spur comb to count
+MIN_SPUR_BLOCK_TILES = 10         # need ≥10 tiles (allowing up to SPUR_BLOCK_OUTLIERS_MAX) for spur comb
 SPUR_OFFSET_STDDEV_MAX_HZ = 30_000
 SPUR_OFFSET_MIN_ABS_HZ = 100_000  # exclude DC-spike pattern (|offset| ~ 0-50 kHz is normal)
 SPUR_MIN_MEDIAN_POWER_DBFS = -15.0  # real compression has peaks > -5 dBFS; normal spurs are at ~-30
+SPUR_BLOCK_OUTLIERS_MAX = 2       # allow up to 2 consecutive outlier tiles before breaking block
 DEPRESSION_MIN_DB = 5.0
+# Emitter estimation
+EMITTER_SEARCH_PADDING_TILES = 2      # search ±this many tiles around the spur block
+EMITTER_MIN_POWER_ABOVE_MEDIAN_DB = 5.0  # emitter peak must be this far above spur-block median
+EMITTER_MIN_ABS_POWER_DBFS = -10.0     # and at least this strong in absolute terms
+EMITTER_OFFSET_MIN_DEVIATION_HZ = 100_000  # peak must deviate from dominant spur offset
+# Clipping sub-signals (fix #3)
+DVBT_CLIP_RANGE = (174_000_000, 230_000_000)   # actual Greek DVB-T Band III extent (174-230)
+FM_CLIP_RANGE = (88_000_000, 108_000_000)      # FM broadcast band
+MIN_CLIPPED_CAPTURES_FOR_SIG = 5              # normal baseline is 28-40; <5 is weak signal
 
-# Exclude ranges
+# Exclude ranges (used by spur/baseline/emitter detectors)
 FM_RANGE = (88_000_000, 108_000_000)
 DVBT_RANGE = (174_000_000, 230_000_000)
-CLIP_EXCLUDE_RANGE = (170_000_000, 230_000_000)
 
-DETECTOR_VERSION = "v1"
+DETECTOR_VERSION = "v2"  # v2: outlier-tolerant spur blocks, constrained emitter search, split clip sigs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,6 +130,7 @@ class SpurInfo:
     block_count: int
     offset_mean_hz: int
     offset_stddev_khz: float
+    block_median_power_dbfs: float = -100.0
 
 
 def detect_spur_comb(per_tile_argmax_offset_hz: list[int], per_tile_peak_power_dbfs: list[float]) -> SpurInfo:
@@ -148,29 +158,55 @@ def detect_spur_comb(per_tile_argmax_offset_hz: list[int], per_tile_peak_power_d
     best_stddev = 0.0
     best_median_power = -100.0
 
-    # Greedy sliding expansion
+    # Greedy sliding expansion with outlier tolerance.
+    # The v1 detector terminated the block at the first offset-deviating tile. On
+    # the 2026-04-21 11:55 event, tile 67 had an isolated +26 kHz offset which
+    # split what should have been one 63-tile block (40-102) into two (40-66
+    # and 68-102). Now we allow up to SPUR_BLOCK_OUTLIERS_MAX consecutive tiles
+    # to deviate; the block resumes when offsets return to the dominant pattern.
     for start in range(n):
         if not active[start]:
             continue
-        offsets = [per_tile_argmax_offset_hz[start]]
+        seed_offset = per_tile_argmax_offset_hz[start]
+        offsets = [seed_offset]
         powers = [per_tile_peak_power_dbfs[start]]
         end = start
+        outlier_streak = 0
+        provisional_tail: list[tuple[int, int, float]] = []  # (idx, offset, power) held for rollback
         for j in range(start + 1, n):
             if not active[j]:
-                break  # block must be consecutive-active
-            candidate = offsets + [per_tile_argmax_offset_hz[j]]
-            if float(np.std(candidate)) > SPUR_OFFSET_STDDEV_MAX_HZ:
                 break
-            offsets = candidate
-            powers.append(per_tile_peak_power_dbfs[j])
-            end = j
+            off_j = per_tile_argmax_offset_hz[j]
+            pw_j = per_tile_peak_power_dbfs[j]
+            # Check membership: offsets stays cohesive (stddev bound) when this
+            # tile's offset is added to the ACCEPTED set (not outliers).
+            candidate_offsets = offsets + [off_j]
+            if float(np.std(candidate_offsets)) <= SPUR_OFFSET_STDDEV_MAX_HZ:
+                # Tile fits: absorb any held provisional outliers into committed block
+                for (_, po, pp) in provisional_tail:
+                    # Don't add outlier offsets to the offsets list (they'd break stddev)
+                    # but do count them in the block span.
+                    powers.append(pp)
+                provisional_tail = []
+                outlier_streak = 0
+                offsets.append(off_j)
+                powers.append(pw_j)
+                end = j
+            else:
+                outlier_streak += 1
+                if outlier_streak > SPUR_BLOCK_OUTLIERS_MAX:
+                    break  # too many consecutive outliers; block ends (provisional tail discarded)
+                provisional_tail.append((j, off_j, pw_j))
 
-        if len(offsets) >= MIN_SPUR_BLOCK_TILES and len(offsets) > best_count:
+        # Never include a trailing provisional tail — only outliers in the MIDDLE
+        # (followed by a conforming tile) were absorbed via the branch above.
+        count = (end - start + 1)
+        if count >= MIN_SPUR_BLOCK_TILES and count > best_count:
             best_lo = start
             best_hi = end
-            best_count = len(offsets)
+            best_count = count
             best_offset = int(np.mean(offsets))
-            best_stddev = float(np.std(offsets)) / 1000.0  # → kHz
+            best_stddev = float(np.std(offsets)) / 1000.0
             best_median_power = float(np.median(powers))
 
     # sig_spur fires only when all three conditions hold:
@@ -191,6 +227,7 @@ def detect_spur_comb(per_tile_argmax_offset_hz: list[int], per_tile_peak_power_d
         block_count=best_count,
         offset_mean_hz=best_offset,
         offset_stddev_khz=best_stddev,
+        block_median_power_dbfs=best_median_power,
     )
 
 
@@ -242,17 +279,42 @@ def detect_baseline_depression(
 
 @dataclass
 class ClipInfo:
-    sig: int
+    sig: int          # UHF-compression clip (outside FM AND outside DVB-T, ≥ MIN_CLIPPED_CAPTURES)
+    sig_fm: int       # FM-overload clip (in 88-108 MHz, ≥ MIN_CLIPPED_CAPTURES) — observability only
     worst_clip_freq_hz: int
     clipped_captures: int
 
 
-def detect_clip_outside_fm(sweep_health: dict) -> ClipInfo:
+def detect_clip(sweep_health: dict) -> ClipInfo:
+    """Split the clipping signal into UHF-compression and FM-overload.
+
+    sig      — worst_clip outside 88-108 (FM) AND outside 174-230 (DVB-T),
+               clipped_captures ≥ 5. Indicates compression in a band where the
+               dongle doesn't normally clip.
+    sig_fm   — worst_clip in 88-108 MHz with ≥ 5 clipped captures. In Athens,
+               FM clipping is normal baseline (Lycabettus/Hymettus TXs); this
+               tells us the FM-overload subsystem is active but says nothing
+               about wideband compression. Stored for observability, not
+               aggregated into match_tier.
+
+    Rationale (fix #3): v1 used `worst_clip outside 170-230 AND clipped > 0`
+    which fired for any non-FM incidental clipping and for minor FM excursions
+    into tile 99 MHz, and didn't distinguish these cases. The raised threshold
+    of ≥5 captures matches the observed normal baseline (32-40 per sweep with
+    persistent FM) — anything under 5 is a weak-signal blip, not compression.
+    """
     wf = int(sweep_health.get("worst_clip_freq_hz") or 0)
     cc = int(sweep_health.get("clipped_captures") or 0)
-    in_exclude = CLIP_EXCLUDE_RANGE[0] <= wf <= CLIP_EXCLUDE_RANGE[1]
+
+    in_dvbt = DVBT_CLIP_RANGE[0] <= wf <= DVBT_CLIP_RANGE[1]
+    in_fm = FM_CLIP_RANGE[0] <= wf <= FM_CLIP_RANGE[1]
+
+    sig_uhf = 1 if (wf > 0 and not in_dvbt and not in_fm and cc >= MIN_CLIPPED_CAPTURES_FOR_SIG) else 0
+    sig_fm_flag = 1 if (wf > 0 and in_fm and cc >= MIN_CLIPPED_CAPTURES_FOR_SIG) else 0
+
     return ClipInfo(
-        sig=1 if (not in_exclude and wf > 0 and cc > 0) else 0,
+        sig=sig_uhf,
+        sig_fm=sig_fm_flag,
         worst_clip_freq_hz=wf,
         clipped_captures=cc,
     )
@@ -262,35 +324,40 @@ def detect_clip_outside_fm(sweep_health: dict) -> ClipInfo:
 def estimate_emitter_freq(
     tiles: dict[int, list[tuple[int, float]]],
     spur: SpurInfo,
-) -> tuple[int, float]:
-    """Find the tile where the peak deviates most from the spur's dominant offset.
+    spur_median_power_dbfs: float,
+) -> tuple[int | None, float | None]:
+    """Constrained emitter-peak search within the compression zone.
 
-    LNA-compression spurs fall at a fixed LO-relative offset (e.g. +526 kHz in
-    the 2026-04-21 event). The real carrier sits NEAR its tile center instead,
-    so its peak-bin offset deviates from the dominant spur offset. That tile is
-    the emitter.
+    The real emitter must sit INSIDE the saturation zone by definition — either
+    within the spur block or within EMITTER_SEARCH_PADDING_TILES of its edges.
+    Searching the whole sweep (as v1 did) fabricated attributions by picking
+    always-on repeaters far away from the compression signal.
 
-    Strategy: search all active tiles (spur block or not); for each, score
-    candidate_score = peak_power_dbfs - 0.001 * abs(tile_offset - dominant_offset).
-    The penalty term gives preference to tiles whose offset is LIKE the spur's
-    (low score), and rewards deviations. In practice with a real carrier giving
-    e.g. +3.5 dBFS at +126 kHz while spurs sit at +526 kHz @ -4.4 dBFS, the
-    real carrier wins by both power and offset deviation.
+    A peak qualifies as an emitter only if:
+      (a) Inside [block_lo - padding, block_hi + padding]
+      (b) Peak offset deviates from the dominant spur offset (not a spur itself)
+      (c) Peak power > spur_block_median + EMITTER_MIN_POWER_ABOVE_MEDIAN_DB
+      (d) Peak power ≥ EMITTER_MIN_ABS_POWER_DBFS (don't attribute weak events)
+      (e) Not inside an FM or DVB-T broadcast band (those are legitimate carriers)
 
-    Also excludes known broadcast bands (FM 88-108, DVB-T 174-230) from being
-    picked — they're legitimate strong signals, not compression targets.
+    If no tile qualifies, return (None, None). NULL attribution is the correct
+    answer — we have detected compression but can't localize the emitter from
+    power spectrum alone. Phase 4/5 IQ capture would resolve this.
     """
     if spur.sig == 0:
-        return (0, -100.0)
+        return (None, None)
 
     dominant_offset = spur.offset_mean_hz
-    SAME_AS_SPUR_TOLERANCE_HZ = 50_000  # tile peaks within 50 kHz of dominant offset are spurs, not emitters
-    MIN_EMITTER_POWER_DBFS = -15.0
+    power_threshold = spur_median_power_dbfs + EMITTER_MIN_POWER_ABOVE_MEDIAN_DB
+    lo = spur.block_tile_lo - EMITTER_SEARCH_PADDING_TILES
+    hi = spur.block_tile_hi + EMITTER_SEARCH_PADDING_TILES
 
-    best_freq = 0
-    best_power = -200.0
+    best_freq: int | None = None
+    best_power: float | None = None
 
     for ti, bins in tiles.items():
+        if ti < lo or ti > hi:
+            continue
         if not bins:
             continue
         freq, power = max(bins, key=lambda x: x[1])
@@ -299,12 +366,13 @@ def estimate_emitter_freq(
         if DVBT_RANGE[0] <= freq <= DVBT_RANGE[1]:
             continue
         tile_offset = freq - tile_center_hz(ti)
-        # Peaks sitting at the spur's dominant offset are spurs, not emitters
-        if abs(tile_offset - dominant_offset) <= SAME_AS_SPUR_TOLERANCE_HZ:
+        if abs(tile_offset - dominant_offset) < EMITTER_OFFSET_MIN_DEVIATION_HZ:
             continue
-        if power < MIN_EMITTER_POWER_DBFS:
+        if power < power_threshold:
             continue
-        if power > best_power:
+        if power < EMITTER_MIN_ABS_POWER_DBFS:
+            continue
+        if best_power is None or power > best_power:
             best_power = power
             best_freq = freq
 
@@ -409,11 +477,13 @@ class SweepResult:
     spur: SpurInfo
     baseline: BaselineInfo
     clip: ClipInfo
-    emitter_freq_hz: int
-    emitter_power_dbfs: float
+    emitter_freq_hz: int | None
+    emitter_power_dbfs: float | None
 
     @property
     def tier(self) -> str:
+        # match_tier uses only the 3 aggregated sigs (spur + baseline + clip).
+        # sig_clip_fm is observability-only; do NOT aggregate it.
         return tier_from_sigs(self.spur.sig, self.baseline.sig, self.clip.sig)
 
 
@@ -434,9 +504,9 @@ def process_sweep(sh_row: dict) -> SweepResult:
     baseline_power_by_freq = fetch_hourly_baseline(timestamp)
     baseline = detect_baseline_depression(sweep_power_by_freq, baseline_power_by_freq)
 
-    clip = detect_clip_outside_fm(sh_row)
+    clip = detect_clip(sh_row)
 
-    emitter_freq, emitter_power = estimate_emitter_freq(tiles, spur)
+    emitter_freq, emitter_power = estimate_emitter_freq(tiles, spur, spur.block_median_power_dbfs)
 
     return SweepResult(sweep_id, timestamp, spur, baseline, clip, emitter_freq, emitter_power)
 
@@ -453,8 +523,12 @@ def insert_events(results: list[SweepResult], min_tier: str = "medium") -> int:
         json.dumps({
             "sweep_id": r.sweep_id,
             "timestamp": r.timestamp,
+            # Nullable columns — json.dumps emits null for None, matching ClickHouse's
+            # Nullable(UInt32)/Nullable(Float32). v2 deliberately refuses to fabricate
+            # attribution when no peak qualifies inside the compression zone.
             "estimated_emitter_freq_hz": r.emitter_freq_hz,
-            "estimated_emitter_power_dbfs": round(r.emitter_power_dbfs, 2),
+            "estimated_emitter_power_dbfs": (None if r.emitter_power_dbfs is None
+                                              else round(r.emitter_power_dbfs, 2)),
             "spur_offset_hz": int(r.spur.offset_mean_hz),
             "spur_block_tile_lo": int(r.spur.block_tile_lo),
             "spur_block_tile_hi": int(r.spur.block_tile_hi),
@@ -467,6 +541,7 @@ def insert_events(results: list[SweepResult], min_tier: str = "medium") -> int:
             "sig_spur": int(r.spur.sig),
             "sig_baseline": int(r.baseline.sig),
             "sig_clip": int(r.clip.sig),
+            "sig_clip_fm": int(r.clip.sig_fm),
             "match_tier": r.tier,
             "detector_version": DETECTOR_VERSION,
         })
@@ -521,13 +596,17 @@ def main():
     # Print notable events
     for r in results:
         if r.tier in ("medium", "high"):
-            emitter_mhz = r.emitter_freq_hz / 1e6 if r.emitter_freq_hz else 0.0
+            if r.emitter_freq_hz is not None:
+                em_str = f"emitter={r.emitter_freq_hz / 1e6:.3f} MHz @ {r.emitter_power_dbfs:.1f} dBFS"
+            else:
+                em_str = "emitter=UNKNOWN (no peak qualifies)"
             log.info(
                 f"  {r.timestamp} [{r.tier}] "
-                f"sigs=({r.spur.sig},{r.baseline.sig},{r.clip.sig}) "
-                f"emitter={emitter_mhz:.3f} MHz @ {r.emitter_power_dbfs:.1f} dBFS "
+                f"sigs=({r.spur.sig},{r.baseline.sig},{r.clip.sig},fm={r.clip.sig_fm}) "
+                f"{em_str} "
                 f"spur_block=[{r.spur.block_tile_lo}..{r.spur.block_tile_hi}] "
                 f"n={r.spur.block_count} off={r.spur.offset_mean_hz/1000:.1f}kHz "
+                f"median_pwr={r.spur.block_median_power_dbfs:.1f}dBFS "
                 f"depression={r.baseline.depression_db:.1f}dB"
             )
 

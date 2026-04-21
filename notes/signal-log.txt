@@ -1,0 +1,4 @@
+384.000 MHz | NFM | TETRA emergency services | blast beat pattern, speeds up during storm dispatch | found 2026-04-01
+446.210 MHz | NFM | PMR446 walkie-talkie, ringing preamble + transmission | 2026-04-02
+144.775 MHz | NFM | Greek ham radio, 2m band, voice conversation | 2026-04-02
+156.650 MHz | NFM | Marine Ch13 bridge-to-bridge, English voice, clean signal | 2026-04-02

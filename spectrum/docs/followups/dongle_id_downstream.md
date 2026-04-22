@@ -1,6 +1,21 @@
 # Followup — dongle_id downstream consumers
 
 **Opened**: 2026-04-22, in the session that prepared leap for V4 (migrations 017–020, dongle-aware scanner/ingest, systemd templates).
+**Status (updated 2026-04-23)**: all four code consumers and the Grafana dashboard are done in commit `9d66c0d`. Operational + schema followups remain — see status table below.
+
+## Status summary
+
+| Item | Status | Where |
+|---|---|---|
+| `detect_compression.py` per-dongle baseline + `--dongle-id` flag | ✅ done | commit `9d66c0d` |
+| `feature_extractor.py` per-dongle loop | ✅ done | commit `9d66c0d` |
+| `classifier.py` per-dongle loop | ✅ done | commit `9d66c0d` |
+| `classifier_health.py` | ⏸ deferred (intentionally optional) | — |
+| Grafana `spectrum-overview.json` `$dongle` variable + per-panel filters | ✅ done (single-select, not multi-select) | commit `9d66c0d` |
+| `spectrum/docker-compose.yml` `spectrum-scanner` block removal | ⏳ pending — after ~1 week of stable native scanner runs | earliest 2026-04-29 |
+| Migration 021 — `scan_runs.filter` column | ⏳ pending — only needed if Phase 8 self-A/B queries get awkward | optional |
+
+End-to-end verification is now via the V3 self-A/B (post-2026-04-23 14:35 UTC, see `spectrum/docs/ab_comparison.md`), not the dual-dongle `dongle_comparison_view` we originally planned.
 
 ## Context
 
@@ -104,7 +119,18 @@ Stored but not used by queries yet — retrospective tag for when filter decisio
 
 ## Verification after each followup
 
-After fixing each code consumer above, verify with the dongle_comparison_view once V4 is ingesting:
+**Note (2026-04-23)**: the original verification plan below assumed V4 had the FM filter and shared an antenna with V3 (so `dongle_comparison_view` would show a clean FM-band delta). Hardware reality changed: V3 got the filter directly, V4 has its own antenna at the patio window. The view's deltas now reflect antenna+filter+position together and aren't a clean filter-only signal.
+
+**Current verification mechanism** is the V3 self-A/B (timestamp cutoff at `2026-04-22 14:35:12 UTC`), documented in `spectrum/docs/ab_comparison.md`. Per-dongle code correctness is verified by:
+
+1. `SELECT dongle_id, count() FROM scans WHERE timestamp > now() - INTERVAL 5 MINUTE GROUP BY dongle_id` — both dongles should show comparable row counts.
+2. `SELECT dongle_id, count() FROM peak_features FINAL WHERE computed_at > now() - INTERVAL 1 HOUR GROUP BY dongle_id` — both dongles should appear.
+3. Same query against `signal_classifications`.
+4. Latest `scan_runs.run_id` should start with `run_v3-01_` or `run_v4-01_` (not `run_2026...`).
+
+If any of those return only `v3-01`, the per-dongle loop in the corresponding consumer didn't pick up V4. Re-check `9d66c0d` is deployed on leap.
+
+### Original (now-stale) verification plan
 
 ```bash
 clickhouse-client --port 9003 -q "
@@ -117,4 +143,4 @@ clickhouse-client --port 9003 -q "
 "
 ```
 
-Strongly negative `delta_noise_floor_db` values in the FM band (e.g. -5 to -15 dB) confirm the filter is working on V4. If the values are near zero, either the filter isn't installed or the classifier/feature_extractor didn't pick up the dongle split.
+This still runs and returns numbers, but interpret them as antenna-diversity deltas, not filter deltas (see `ab_comparison.md` "Antenna diversity" section).

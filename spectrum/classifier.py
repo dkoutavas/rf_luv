@@ -361,49 +361,69 @@ def main() -> None:
         f"{len(signal_classes)} signal classes"
     )
 
-    # Recent peak_features — use FINAL so we get one authoritative row per freq
-    features = ch_rows(
-        "SELECT freq_hz, bandwidth_hz, duty_cycle_1h, duty_cycle_24h, duty_cycle_7d, "
-        "       burst_p50_s, burst_p95_s, harmonic_of_hz, "
-        "       power_mean_dbfs, power_p95_dbfs, power_std_db, sweeps_observed_24h "
-        "FROM spectrum.peak_features FINAL "
-        "WHERE computed_at > now() - INTERVAL 1 HOUR"
+    # Discover which dongles produced fresh features. Migration 018 keys
+    # peak_features and signal_classifications on (freq_hz, dongle_id), so we
+    # classify each dongle's features independently and write per-dongle rows.
+    dongle_rows = ch_rows(
+        "SELECT DISTINCT dongle_id FROM spectrum.peak_features "
+        "WHERE computed_at > now() - INTERVAL 1 HOUR "
+        "ORDER BY dongle_id"
     )
-    if not features:
+    dongles = [r["dongle_id"] for r in dongle_rows]
+    if not dongles:
         log.info("No fresh peak_features in the last 1h, nothing to classify")
         return
-    log.info(f"Classifying {len(features)} peaks")
+    log.info(f"Active dongles with fresh features: {dongles}")
 
     now = datetime.now(timezone.utc)
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    rows_out: list[dict] = []
-    hist: dict[str, int] = {}
-    for feat in features:
-        cls, conf, reasoning = classify_peak(
-            feat, confirmations, allocations, known_freqs, signal_classes
+    total_written = 0
+    for dongle_id in dongles:
+        # Recent peak_features for this dongle — FINAL collapses ReplacingMergeTree
+        # duplicates per (freq_hz, dongle_id).
+        features = ch_rows(
+            "SELECT freq_hz, bandwidth_hz, duty_cycle_1h, duty_cycle_24h, duty_cycle_7d, "
+            "       burst_p50_s, burst_p95_s, harmonic_of_hz, "
+            "       power_mean_dbfs, power_p95_dbfs, power_std_db, sweeps_observed_24h "
+            "FROM spectrum.peak_features FINAL "
+            f"WHERE computed_at > now() - INTERVAL 1 HOUR "
+            f"  AND dongle_id = '{dongle_id}'"
         )
-        hist[cls] = hist.get(cls, 0) + 1
-        rows_out.append({
-            "freq_hz": int(feat["freq_hz"]),
-            "class_id": cls,
-            "confidence": round_confidence(conf),
-            "reasoning": json.dumps(reasoning, separators=(",", ":")),
-            "features_snapshot": json.dumps(feat, separators=(",", ":")),
-            "classified_at": now_str,
-        })
+        if not features:
+            log.info(f"  {dongle_id}: no fresh features, skipping")
+            continue
 
-    # Batch insert
-    for i in range(0, len(rows_out), BATCH_INSERT_LIMIT):
-        chunk = rows_out[i : i + BATCH_INSERT_LIMIT]
-        payload = "\n".join(json.dumps(r) for r in chunk)
-        ch_call(
-            "INSERT INTO spectrum.signal_classifications FORMAT JSONEachRow",
-            data=payload,
-        )
+        rows_out: list[dict] = []
+        hist: dict[str, int] = {}
+        for feat in features:
+            cls, conf, reasoning = classify_peak(
+                feat, confirmations, allocations, known_freqs, signal_classes
+            )
+            hist[cls] = hist.get(cls, 0) + 1
+            rows_out.append({
+                "freq_hz": int(feat["freq_hz"]),
+                "dongle_id": dongle_id,
+                "class_id": cls,
+                "confidence": round_confidence(conf),
+                "reasoning": json.dumps(reasoning, separators=(",", ":")),
+                "features_snapshot": json.dumps(feat, separators=(",", ":")),
+                "classified_at": now_str,
+            })
+
+        for i in range(0, len(rows_out), BATCH_INSERT_LIMIT):
+            chunk = rows_out[i : i + BATCH_INSERT_LIMIT]
+            payload = "\n".join(json.dumps(r) for r in chunk)
+            ch_call(
+                "INSERT INTO spectrum.signal_classifications FORMAT JSONEachRow",
+                data=payload,
+            )
+
+        hist_str = ", ".join(f"{k}={v}" for k, v in sorted(hist.items(), key=lambda x: -x[1]))
+        log.info(f"  {dongle_id}: wrote {len(rows_out)} | {hist_str}")
+        total_written += len(rows_out)
 
     elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
-    hist_str = ", ".join(f"{k}={v}" for k, v in sorted(hist.items(), key=lambda x: -x[1]))
-    log.info(f"Wrote {len(rows_out)} classifications in {elapsed:.1f}s | {hist_str}")
+    log.info(f"Classifier done: {total_written} rows across {len(dongles)} dongle(s) in {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

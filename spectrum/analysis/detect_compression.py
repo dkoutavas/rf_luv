@@ -55,6 +55,10 @@ CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
 CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
 CH_URL = f"http://{CH_HOST}:{CH_PORT}"
 
+# sweep_id format ({preset}:{ts}) is shared across dongles per commit 91d3860,
+# so every scanner-table query must filter by dongle_id or risk conflating regimes.
+DONGLE_ID: str = "v3-01"
+
 # Scanner geometry (matches spectrum/scanner.py)
 FREQ_START = 88_000_000
 SAMPLE_RATE = 2_048_000
@@ -381,7 +385,7 @@ def estimate_emitter_freq(
 
 # ─── Main processing ─────────────────────────────────────
 def fetch_full_sweep_list(since: str | None, sweep_id: str | None) -> list[dict]:
-    where = "preset='full'"
+    where = f"preset='full' AND dongle_id = '{DONGLE_ID}'"
     if sweep_id:
         where += f" AND sweep_id = '{sweep_id}'"
     elif since:
@@ -400,7 +404,7 @@ def fetch_sweep_bins(sweep_id: str) -> list[dict]:
     q = f"""
     SELECT freq_hz, power_dbfs
     FROM scans
-    WHERE sweep_id = '{sweep_id}'
+    WHERE sweep_id = '{sweep_id}' AND dongle_id = '{DONGLE_ID}'
     ORDER BY freq_hz
     """
     return ch_query_json(q)
@@ -416,11 +420,14 @@ def fetch_hourly_baseline(hour_iso: str) -> dict[int, float]:
 
     Fallback to same-hour if previous hour is empty (e.g. first hour of data).
     """
-    # hourly_baseline is AggregatingMergeTree; must avgMerge the aggregate state
+    # hourly_baseline is AggregatingMergeTree; must avgMerge the aggregate state.
+    # Migration 019 keys it on (hour, freq_hz, dongle_id) — without the filter an
+    # avgMerge over two regimes returns a nonsensical middle value.
     q_prev = f"""
     SELECT freq_hz, avgMerge(avg_power) AS avg_p
     FROM hourly_baseline
     WHERE hour = toStartOfHour(toDateTime64('{hour_iso}', 3)) - INTERVAL 1 HOUR
+      AND dongle_id = '{DONGLE_ID}'
     GROUP BY freq_hz
     """
     rows = ch_query_json(q_prev)
@@ -432,6 +439,7 @@ def fetch_hourly_baseline(hour_iso: str) -> dict[int, float]:
     SELECT freq_hz, avgMerge(avg_power) AS avg_p
     FROM hourly_baseline
     WHERE hour = toStartOfHour(toDateTime64('{hour_iso}', 3))
+      AND dongle_id = '{DONGLE_ID}'
     GROUP BY freq_hz
     """
     rows = ch_query_json(q_same)
@@ -523,6 +531,7 @@ def insert_events(results: list[SweepResult], min_tier: str = "medium") -> int:
         json.dumps({
             "sweep_id": r.sweep_id,
             "timestamp": r.timestamp,
+            "dongle_id": DONGLE_ID,
             # Nullable columns — json.dumps emits null for None, matching ClickHouse's
             # Nullable(UInt32)/Nullable(Float32). v2 deliberately refuses to fabricate
             # attribution when no peak qualifies inside the compression zone.
@@ -566,11 +575,18 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="compute + print, do not INSERT")
     ap.add_argument("--min-tier", choices=["low", "medium", "high"], default="medium",
                     help="minimum match_tier to persist (default: medium)")
+    ap.add_argument("--dongle-id", type=str, default="v3-01",
+                    help="filter scans/sweep_health/hourly_baseline by this dongle (default: v3-01)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
+    global DONGLE_ID
+    DONGLE_ID = args.dongle_id
+
     if args.verbose:
         log.setLevel(logging.DEBUG)
+
+    log.info(f"Detector running for dongle_id={DONGLE_ID}")
 
     sweeps = fetch_full_sweep_list(
         since=args.since, sweep_id=args.sweep,

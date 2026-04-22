@@ -359,22 +359,32 @@ def insert_features(rows: list[dict]) -> None:
         ch_call("INSERT INTO spectrum.peak_features FORMAT JSONEachRow", data=payload)
 
 
-def main() -> None:
-    t0 = datetime.now(timezone.utc)
-    log.info(f"Feature extractor starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+def discover_active_dongles() -> list[str]:
+    """Dongles that have written scans in the last hour. Used to drive the
+    per-dongle loop. If none, the scanner isn't running and there's nothing
+    to extract."""
+    rows = ch_rows(
+        "SELECT DISTINCT dongle_id FROM spectrum.scans "
+        "WHERE timestamp > now() - INTERVAL 1 HOUR "
+        "ORDER BY dongle_id"
+    )
+    return [r["dongle_id"] for r in rows]
 
-    # Compression-aware exclusion (fix from 2026-04-21 review).
-    # Sweeps classified as medium/high compression events by detect_compression.py
-    # contain unreliable peaks (attenuated known carriers + elevated spur floors).
-    # We exclude them wholesale from peak_features to prevent polluting duty-cycle
-    # and power statistics. This is the "boring correct" default — a weighted
-    # handling is captured as a followup.
-    # The NOT IN subquery is cheap: compression_events has O(100) rows at the
-    # 16-day mark, and the scanner sweep-health table reference is used in one
-    # place (latest-full-sweep snapshot).
-    SUSPECT_SWEEPS_SUBQUERY = (
-        "(SELECT sweep_id FROM spectrum.compression_events FINAL "
-        " WHERE match_tier IN ('medium', 'high'))"
+
+def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
+    """Run one full extractor pass scoped to a single dongle. Returns the
+    number of feature rows written.
+
+    sweep_id is shared across dongles (commit 91d3860 kept the format
+    unchanged for Grafana compatibility), so the suspect-sweeps subquery
+    against compression_events is also scoped per-dongle — a V4 compression
+    event must not exclude the V3 sweep that happens to share its sweep_id.
+    """
+    log.info(f"== {dongle_id}: scanning ==")
+    suspect_sweeps_subquery = (
+        f"(SELECT sweep_id FROM spectrum.compression_events FINAL "
+        f" WHERE match_tier IN ('medium', 'high') "
+        f"   AND dongle_id = '{dongle_id}')"
     )
 
     # 1. Active bins = distinct freqs with any peak in last 24h (from non-suspect sweeps)
@@ -383,30 +393,29 @@ def main() -> None:
         for r in ch_rows(
             f"SELECT DISTINCT freq_hz FROM spectrum.peaks "
             f"WHERE timestamp > now() - INTERVAL 24 HOUR "
-            f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+            f"  AND dongle_id = '{dongle_id}' "
+            f"  AND sweep_id NOT IN {suspect_sweeps_subquery} "
             f"ORDER BY freq_hz"
         )
     ]
     if not active_bins:
-        log.info("No active bins in last 24h, nothing to do")
-        return
-    log.info(f"{len(active_bins)} active bins in last 24h")
+        log.info(f"  {dongle_id}: no active bins in last 24h, skipping")
+        return 0
+    log.info(f"  {dongle_id}: {len(active_bins)} active bins in last 24h")
 
     bins_csv = ",".join(str(b) for b in active_bins)
 
     # 2. Pull 14d scan history for all active bins in one query (excluding suspect sweeps)
-    log.info("Fetching 14d scan history...")
-    # JSONEachRow serialises DateTime64 as 'YYYY-MM-DD HH:MM:SS.fff' — no cast needed.
-    # Aliasing with `AS timestamp` collides with the column name in ORDER BY, so leave as-is.
     scans = ch_rows(
         f"SELECT freq_hz, timestamp, power_dbfs "
         f"FROM spectrum.scans "
         f"WHERE freq_hz IN ({bins_csv}) "
         f"  AND timestamp > now() - INTERVAL 14 DAY "
-        f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+        f"  AND dongle_id = '{dongle_id}' "
+        f"  AND sweep_id NOT IN {suspect_sweeps_subquery} "
         f"ORDER BY freq_hz, timestamp"
     )
-    log.info(f"  {len(scans)} scan rows loaded")
+    log.info(f"  {dongle_id}: {len(scans)} scan rows loaded")
 
     by_bin: dict[int, list[tuple[datetime, float]]] = {}
     for r in scans:
@@ -415,44 +424,33 @@ def main() -> None:
         )
 
     # 3. Latest NON-SUSPECT full-sweep power snapshot for bandwidth estimation.
-    # Server-side ORDER BY freq_hz so we can walk the bins by index; peak freqs
-    # from airband preset won't be in this grid, we bisect to the nearest bin.
-    # If the most recent full sweep was flagged compression, we skip it —
-    # bandwidth estimates from a compressed sweep would be wildly wrong
-    # (FM carriers at -25 dBFS instead of their usual -14 dBFS).
-    log.info("Fetching latest NON-SUSPECT full-sweep snapshot for bandwidth...")
     latest = ch_rows(
         f"SELECT freq_hz, power_dbfs FROM spectrum.scans "
-        f"WHERE sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
+        f"WHERE dongle_id = '{dongle_id}' "
+        f"  AND sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
         f"                   WHERE preset = 'full' "
-        f"                     AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+        f"                     AND dongle_id = '{dongle_id}' "
+        f"                     AND sweep_id NOT IN {suspect_sweeps_subquery} "
         f"                   ORDER BY timestamp DESC LIMIT 1) "
         f"ORDER BY freq_hz"
     )
     latest_freqs_sorted = [r["freq_hz"] for r in latest]
     latest_powers = [float(r["power_dbfs"]) for r in latest]
-    log.info(f"  {len(latest_freqs_sorted)} bins in latest full sweep")
+    log.info(f"  {dongle_id}: {len(latest_freqs_sorted)} bins in latest full sweep")
 
     # 4. Max peak power per bin over 24h for harmonic detection (excluding suspect sweeps)
-    log.info("Fetching peak-power snapshot for harmonic detection...")
     peaks = ch_rows(
         f"SELECT freq_hz, max(power_dbfs) AS power_dbfs FROM spectrum.peaks "
         f"WHERE timestamp > now() - INTERVAL 24 HOUR "
-        f"  AND sweep_id NOT IN {SUSPECT_SWEEPS_SUBQUERY} "
+        f"  AND dongle_id = '{dongle_id}' "
+        f"  AND sweep_id NOT IN {suspect_sweeps_subquery} "
         f"GROUP BY freq_hz"
     )
     peak_powers = {r["freq_hz"]: float(r["power_dbfs"]) for r in peaks}
 
-    # 4b. Allocations — used by harmonic detection to reject cross-allocation
-    # false positives (DVB-T at 182 MHz is not a true 2× of FM at 91 MHz; they
-    # are independent real transmitters in different allocations).
-    allocations = ch_rows(
-        "SELECT freq_start_hz, freq_end_hz, service FROM spectrum.allocations"
-    )
-
-    # 5. Build feature rows
+    # 5. Build + insert feature rows tagged with dongle_id
     now = datetime.now(timezone.utc)
-    rows_out = []
+    rows_out: list[dict] = []
     for freq in active_bins:
         row = build_feature_row(
             freq,
@@ -464,25 +462,51 @@ def main() -> None:
             now,
         )
         if row is not None:
+            row["dongle_id"] = dongle_id
             rows_out.append(row)
 
-    # 6. Insert
     if not rows_out:
-        log.warning("No feature rows produced (active bins had no recent scans?)")
-        return
+        log.warning(f"  {dongle_id}: no feature rows produced (active bins had no recent scans?)")
+        return 0
     insert_features(rows_out)
 
-    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
-    # Quick glance stats so journald logs are useful at a glance
     bws = [r["bandwidth_hz"] for r in rows_out]
     wide = sum(1 for b in bws if b == BANDWIDTH_SENTINEL)
     duty_24h_vals = [r["duty_cycle_24h"] for r in rows_out]
     log.info(
-        f"Wrote {len(rows_out)} rows in {elapsed:.1f}s | "
+        f"  {dongle_id}: wrote {len(rows_out)} rows | "
         f"bw: median={percentile(bws, 50):.0f} Hz, wider-than-measurable={wide} | "
         f"duty_24h: median={percentile(duty_24h_vals, 50):.3f}, "
         f"max={max(duty_24h_vals):.3f}"
     )
+    return len(rows_out)
+
+
+def main() -> None:
+    t0 = datetime.now(timezone.utc)
+    log.info(f"Feature extractor starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+
+    dongles = discover_active_dongles()
+    if not dongles:
+        log.info("No dongles have written scans in the last hour, nothing to do")
+        return
+    log.info(f"Active dongles: {dongles}")
+
+    # Allocations are global (regulatory bands don't depend on which radio sees them),
+    # so fetch once and pass into the per-dongle loop.
+    allocations = ch_rows(
+        "SELECT freq_start_hz, freq_end_hz, service FROM spectrum.allocations"
+    )
+
+    total = 0
+    for dongle_id in dongles:
+        try:
+            total += process_dongle(dongle_id, allocations)
+        except Exception:
+            log.exception(f"Dongle {dongle_id} failed; continuing with remaining dongles")
+
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    log.info(f"Feature extractor done: {total} rows across {len(dongles)} dongle(s) in {elapsed:.1f}s")
 
 
 if __name__ == "__main__":

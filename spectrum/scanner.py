@@ -72,6 +72,13 @@ ANTENNA_ORIENTATION = int(os.environ.get("SCAN_ANTENNA_ORIENTATION", "0"))
 ANTENNA_HEIGHT_M = float(os.environ.get("SCAN_ANTENNA_HEIGHT_M", "0"))
 SCAN_NOTES = os.environ.get("SCAN_NOTES", "")
 
+# Dongle identity — tags every output line so downstream queries can
+# slice by source dongle. See spectrum/docs/dongle_identity.md.
+# Default matches the V3 serial so single-dongle deployments continue
+# to work without extra config; log a warning when we hit the default
+# so misconfigured instances are visible.
+DONGLE_ID = os.environ.get("SCAN_DONGLE_ID", "v3-01")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -393,19 +400,24 @@ def main():
 
     effective_gain = GAIN_DB
 
-    log.info(f"Spectrum scanner with {len(presets)} presets, gain: {GAIN_DB} dB (min: {GAIN_MIN} dB, step: {GAIN_STEP_DB} dB)")
+    if "SCAN_DONGLE_ID" not in os.environ:
+        log.warning(f"SCAN_DONGLE_ID not set, defaulting to '{DONGLE_ID}' — set it explicitly in per-instance env file")
+    log.info(f"Spectrum scanner dongle={DONGLE_ID} with {len(presets)} presets, gain: {GAIN_DB} dB (min: {GAIN_MIN} dB, step: {GAIN_STEP_DB} dB)")
     for p in presets:
         log.info(f"  {p['name']}: {p['start']/1e6:.1f}-{p['end']/1e6:.1f} MHz every {p['interval']}s")
 
     # Track last run time for each preset
     last_run = {p["name"]: 0.0 for p in presets}
 
-    # Generate run ID and emit run_start for configuration tracking
-    run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    # Generate run ID and emit run_start for configuration tracking.
+    # dongle_id is embedded in run_id so two scanners starting in the same
+    # second cannot collide on scan_runs' PK.
+    run_id = f"run_{DONGLE_ID}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     log.info(f"Run {run_id}: gain={effective_gain}, antenna={ANTENNA_POSITION}, arms={ANTENNA_ARMS_CM}cm")
     print(json.dumps({
         "run_start": True,
         "run_id": run_id,
+        "dongle_id": DONGLE_ID,
         "started_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
         "gain_db": effective_gain,
         "antenna_position": ANTENNA_POSITION,
@@ -460,6 +472,7 @@ def main():
                 b["sweep_id"] = sweep_id
                 b["timestamp"] = sweep_ts
                 b["run_id"] = run_id
+                b["dongle_id"] = DONGLE_ID
                 print(json.dumps(b), flush=True)
 
             # Peak detection
@@ -468,6 +481,7 @@ def main():
                 p["sweep_id"] = sweep_id
                 p["timestamp"] = sweep_ts
                 p["run_id"] = run_id
+                p["dongle_id"] = DONGLE_ID
                 print(json.dumps(p), flush=True)
 
             # Transient event detection (only for same-range sweeps)
@@ -477,6 +491,7 @@ def main():
                     e["sweep_id"] = sweep_id
                     e["timestamp"] = sweep_ts
                     e["run_id"] = run_id
+                    e["dongle_id"] = DONGLE_ID
                     print(json.dumps(e), flush=True)
 
             # Sweep health (for clipping detection)
@@ -493,6 +508,7 @@ def main():
                 "sweep_id": sweep_id,
                 "timestamp": sweep_ts,
                 "run_id": run_id,
+                "dongle_id": DONGLE_ID,
                 "preset": preset["name"],
                 "bin_count": len(bins),
                 "max_power": round(max_power, 1),
@@ -532,6 +548,7 @@ def main():
                 print(json.dumps({
                     "run_update": True,
                     "run_id": run_id,
+                    "dongle_id": DONGLE_ID,
                     "noise_floor_dbfs": round(nf, 1),
                     "peak_signal_dbfs": round(peak_bin["power_dbfs"], 1),
                     "peak_signal_freq_hz": peak_bin["freq_hz"],
@@ -556,6 +573,7 @@ def main():
     print(json.dumps({
         "run_end": True,
         "run_id": run_id,
+        "dongle_id": DONGLE_ID,
         "ended_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
     }), flush=True)
     log.info("Scanner shutdown complete")

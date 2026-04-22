@@ -1,0 +1,10 @@
+[Unit]
+Description=rtl_tcp health probe for instance %i
+After=rtl-tcp@%i.service
+
+[Service]
+Type=oneshot
+# Per-instance env provides RTL_TCP_HOST and RTL_TCP_PORT so the watchdog
+# probes the same endpoint the sibling rtl-tcp@%i instance is serving.
+EnvironmentFile=/etc/rtl-scanner/%i.env
+ExecStart=/usr/local/bin/rtl-tcp-watchdog --serial %i --unit rtl-tcp@%i.service

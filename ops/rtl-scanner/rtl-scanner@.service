@@ -1,0 +1,29 @@
+[Unit]
+Description=rf_luv wideband scanner (instance %i)
+# Depends on the matching rtl_tcp instance — the scanner connects to its
+# localhost port at startup. Requires= ensures rtl-tcp@%i comes up first.
+After=rtl-tcp@%i.service network-online.target
+Requires=rtl-tcp@%i.service
+
+[Service]
+Type=simple
+# Per-instance env file provides SCAN_DONGLE_ID, RTL_TCP_*, SCAN_* and
+# CLICKHOUSE_* variables. See ops/rtl-scanner/env.v3-01.example for the
+# full list. Installed at /etc/rtl-scanner/%i.env on leap.
+EnvironmentFile=/etc/rtl-scanner/%i.env
+# scanner.py emits JSON lines on stdout; scan_ingest.py reads them on stdin
+# and writes to ClickHouse. bash -c is needed because systemd ExecStart does
+# not support shell pipes natively. exec replaces the bash with the pipeline
+# so systemd tracks the real PID (well — tracks the shell, but the shell's
+# `exec` replaces itself with scanner.py, and scan_ingest.py runs as a child).
+# %h is the user's home directory (= /home/<user> on leap), matching the
+# pattern used by spectrum-features/classifier units.
+ExecStart=/bin/bash -c 'exec /usr/bin/python3.11 %h/dev/rf_luv/spectrum/scanner.py | /usr/bin/python3.11 %h/dev/rf_luv/spectrum/scan_ingest.py'
+Restart=on-failure
+RestartSec=5
+# Long sweeps on the full preset take ~30-40s; the default TimeoutStopSec
+# (90s) is plenty for graceful shutdown via SIGTERM. Explicit for clarity.
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

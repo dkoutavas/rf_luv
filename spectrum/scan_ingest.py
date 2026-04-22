@@ -28,6 +28,12 @@ CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
 FLUSH_INTERVAL = int(os.environ.get("FLUSH_INTERVAL_SECONDS", "5"))
 
+# Fallback dongle_id when the incoming JSON line lacks the field. Matches
+# scanner.py's default. A WARN is logged on fallback so a scanner that
+# forgot to emit dongle_id is loudly visible in logs.
+DEFAULT_DONGLE_ID = "v3-01"
+_dongle_warn_emitted = False
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -89,6 +95,22 @@ def insert_batch(rows: list[dict], table: str = "scans") -> int:
         return 0
 
 
+def dongle_id_from(data: dict) -> str:
+    """Extract dongle_id from a scanner JSON line, falling back to the default
+    with a one-shot WARN log so misconfigured scanners are visible but not noisy."""
+    global _dongle_warn_emitted
+    val = data.get("dongle_id")
+    if val:
+        return val
+    if not _dongle_warn_emitted:
+        log.warning(
+            f"incoming JSON line lacks dongle_id, defaulting to '{DEFAULT_DONGLE_ID}' "
+            f"— check scanner.py version / SCAN_DONGLE_ID env"
+        )
+        _dongle_warn_emitted = True
+    return DEFAULT_DONGLE_ID
+
+
 # ─── Main loop ───────────────────────────────────────────
 
 def wait_for_clickhouse(max_retries: int = 30, delay: int = 2):
@@ -134,6 +156,7 @@ def main():
         # Run tracking messages
         if data.get("run_start"):
             try:
+                dongle_id = dongle_id_from(data)
                 clickhouse_query(
                     "INSERT INTO scan_runs FORMAT JSONEachRow",
                     json.dumps({
@@ -145,9 +168,10 @@ def main():
                         "antenna_orientation_deg": data.get("antenna_orientation_deg", 0),
                         "antenna_height_m": data.get("antenna_height_m", 0),
                         "notes": data.get("notes", ""),
+                        "dongle_id": dongle_id,
                     })
                 )
-                log.info(f"Run started: {data['run_id']} (gain={data['gain_db']}, pos={data.get('antenna_position')})")
+                log.info(f"Run started: {data['run_id']} (dongle={dongle_id}, gain={data['gain_db']}, pos={data.get('antenna_position')})")
             except Exception as e:
                 log.error(f"Failed to insert run_start: {e}")
             continue
@@ -204,6 +228,9 @@ def main():
         sweep_id = data.get("sweep_id", "")
         ts = data.get("timestamp") or (sweep_id.split(":", 1)[1] if ":" in sweep_id else sweep_id)
 
+        # Every non-control line carries a dongle_id; pull it once per line.
+        dongle_id = dongle_id_from(data)
+
         # Route to appropriate table based on marker flags
         if data.get("peak"):
             peak_batch.append({
@@ -213,6 +240,7 @@ def main():
                 "prominence_db": data.get("prominence_db", 0.0),
                 "sweep_id": sweep_id,
                 "run_id": data.get("run_id", ""),
+                "dongle_id": dongle_id,
             })
             continue
 
@@ -226,6 +254,7 @@ def main():
                 "delta_db": data.get("delta_db", 0.0),
                 "sweep_id": sweep_id,
                 "run_id": data.get("run_id", ""),
+                "dongle_id": dongle_id,
             })
             continue
 
@@ -245,6 +274,7 @@ def main():
                 "clipped_captures": data.get("clipped_captures", 0),
                 "total_captures": data.get("total_captures", 0),
                 "run_id": data.get("run_id", ""),
+                "dongle_id": dongle_id,
             })
             continue
 
@@ -255,6 +285,7 @@ def main():
             "power_dbfs": data.get("power_dbfs", 0.0),
             "sweep_id": sweep_id,
             "run_id": data.get("run_id", ""),
+            "dongle_id": dongle_id,
         }
 
         total_read += 1

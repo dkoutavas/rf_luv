@@ -1,0 +1,19 @@
+[Unit]
+Description=RTL-SDR TCP streaming server (instance %i)
+# %i is the dongle serial (e.g. v3-01). The wrapper resolves serial → USB
+# index on each start so enumeration order cannot cross the streams.
+After=network.target
+StartLimitIntervalSec=600
+StartLimitBurst=20
+
+[Service]
+Type=simple
+# Per-instance env file holds RTL_TCP_PORT, RTL_TCP_BIND, RTL_TCP_SAMPLE_RATE.
+# See ops/rtl-scanner/env.v3-01.example for the full list.
+EnvironmentFile=/etc/rtl-scanner/%i.env
+ExecStart=/usr/local/bin/rtl-tcp-by-serial %i -a ${RTL_TCP_BIND} -p ${RTL_TCP_PORT} -s ${RTL_TCP_SAMPLE_RATE}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

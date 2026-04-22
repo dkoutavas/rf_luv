@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# rtl_tcp reliability stack installer.
-#   (1) systemd user service for rtl_tcp with Restart=always
-#   (2) health-probe watchdog (timer + oneshot) that detects the
-#       "TCP-accepts-but-no-samples" failure mode we hit 2026-04-18
-#   (3) passwordless sudoers entry for /usr/local/sbin/rtl-usb-reset so the
-#       watchdog can unbind/rebind the USB device as a replug equivalent
+# rtl_tcp reliability stack installer (dual-dongle ready).
 #
-# Run on the spectrum host (e.g. 192.168.2.10):
+# Installs both the legacy singleton units (rtl_tcp.service / rtl-tcp-watchdog)
+# AND the new template units (rtl-tcp@.service / rtl-tcp-watchdog@.service +
+# .timer) side-by-side, so the cutover runbook can swap between them without
+# a rebuild. Also installs the rtl-tcp-by-serial wrapper and the updated
+# USB-reset helper that accepts a serial argument.
+#
+# What this script does:
+#   (1) Install systemd user units (both singleton and template)
+#   (2) Install the wrapper + watchdog + USB-reset helpers
+#   (3) Install the udev rules for stable dongle symlinks
+#   (4) Install the sudoers entry (allows per-serial USB resets)
+#   (5) Enable linger + journal group (if not already)
+#
+# What this script does NOT do:
+#   - Start/stop the singleton rtl_tcp.service (leave the running pipeline
+#     alone — cutover runbook does that step explicitly)
+#   - Enable the template instances (explicit during cutover)
+#
+# Run on leap after `git pull`:
 #   bash ops/rtl-tcp/install.sh
 #
-# Requires: rtl_tcp in PATH, sudo access for the installing user.
+# Requires: rtl_tcp + rtl_test + rtl_eeprom in PATH, sudo access.
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 info() { echo -e "${GREEN}[✓]${NC} $*"; }
@@ -20,36 +33,59 @@ err()  { echo -e "${RED}[✗]${NC} $*"; }
 step() { echo -e "\n${GREEN}===${NC} $* ${GREEN}===${NC}"; }
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SRC_DIR/../.." && pwd)"
 USER_UNIT_DIR="$HOME/.config/systemd/user"
-WATCHDOG_BIN="/usr/local/bin/rtl-tcp-watchdog.py"
+WATCHDOG_BIN="/usr/local/bin/rtl-tcp-watchdog"
+WRAPPER_BIN="/usr/local/bin/rtl-tcp-by-serial"
 RESET_BIN="/usr/local/sbin/rtl-usb-reset"
 SUDOERS_PATH="/etc/sudoers.d/rtl-usb-reset"
+UDEV_RULES_SRC="$REPO_DIR/ops/udev/99-rtl-sdr.rules"
+UDEV_RULES_DEST="/etc/udev/rules.d/99-rtl-sdr.rules"
 
-if ! command -v rtl_tcp >/dev/null 2>&1; then
-    err "rtl_tcp not in PATH"; exit 1
-fi
+for tool in rtl_tcp rtl_test rtl_eeprom; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        err "$tool not in PATH"; exit 1
+    fi
+done
 
-step "Install user systemd units"
+step "Install user systemd units (singleton + template)"
 mkdir -p "$USER_UNIT_DIR"
+# Singletons (legacy — preserved for backward compat during cutover)
 install -m 0644 "$SRC_DIR/rtl_tcp.service"          "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.service" "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.timer"   "$USER_UNIT_DIR/"
+# Template units
+install -m 0644 "$SRC_DIR/rtl-tcp@.service"              "$USER_UNIT_DIR/"
+install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.service"     "$USER_UNIT_DIR/"
+install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.timer"       "$USER_UNIT_DIR/"
 systemctl --user daemon-reload
-info "$USER_UNIT_DIR"
+info "$USER_UNIT_DIR (singletons + templates installed side by side)"
 
-step "Stop any running rtl_tcp (systemd + strays)"
-# Unit must exist before we can stop it — that's why this runs AFTER the install.
-# Bare pkill races with Restart=always and leaves escaped processes holding :1234.
-systemctl --user stop rtl_tcp.service 2>/dev/null || true
-pkill -TERM rtl_tcp 2>/dev/null || true
-sleep 1
-pkill -9 rtl_tcp 2>/dev/null || true
-sleep 1
+step "Install wrapper + watchdog + USB-reset helper"
+sudo install -m 0755 "$SRC_DIR/rtl-tcp-by-serial.sh" "$WRAPPER_BIN"
+sudo install -m 0755 "$SRC_DIR/rtl-tcp-watchdog.py"  "$WATCHDOG_BIN"
+sudo install -m 0755 "$SRC_DIR/rtl-usb-reset.sh"     "$RESET_BIN"
+# Preserve the old filename as a symlink so any external references still work.
+# The file itself has the new per-serial semantics; no-arg mode is still
+# supported as a fallback for single-dongle deployments.
+sudo ln -sf "$WATCHDOG_BIN" /usr/local/bin/rtl-tcp-watchdog.py
+info "$WRAPPER_BIN, $WATCHDOG_BIN (+ legacy .py symlink), $RESET_BIN"
 
-step "Install watchdog + USB-reset helper"
-sudo install -m 0755 "$SRC_DIR/rtl-tcp-watchdog.py" "$WATCHDOG_BIN"
-sudo install -m 0755 "$SRC_DIR/rtl-usb-reset.sh"    "$RESET_BIN"
-info "$WATCHDOG_BIN, $RESET_BIN"
+step "Install udev rules"
+if [ -f "$UDEV_RULES_SRC" ]; then
+    sudo install -m 0644 "$UDEV_RULES_SRC" "$UDEV_RULES_DEST"
+    sudo udevadm control --reload
+    sudo udevadm trigger --subsystem-match=usb
+    info "$UDEV_RULES_DEST (reload + trigger done)"
+    if [ -e /dev/rtl_sdr_v3 ] || [ -e /dev/rtl_sdr_v4 ]; then
+        info "/dev/rtl_sdr_v3 or /dev/rtl_sdr_v4 present — serials appear to match"
+    else
+        warn "no /dev/rtl_sdr_* symlinks — dongle serials may not yet match (v3-01 / v4-01)"
+        warn "run 'rtl_test 2>&1 | grep SN' to confirm, and rtl_eeprom -s if needed"
+    fi
+else
+    warn "$UDEV_RULES_SRC missing — skipping udev install"
+fi
 
 step "Install sudoers entry"
 TMP=$(mktemp)
@@ -72,8 +108,6 @@ else
 fi
 
 step "Grant journal read access to $USER"
-# journalctl --user -u <service> returns "No journal files were opened" when the
-# user isn't in systemd-journal. Takes effect after next login.
 if id -nG "$USER" | tr ' ' '\n' | grep -qx systemd-journal; then
     info "$USER already in systemd-journal"
 else
@@ -81,19 +115,17 @@ else
     warn "$USER added to systemd-journal — log out and back in for journalctl --user to work"
 fi
 
-step "Enable and start services"
-systemctl --user enable --now rtl_tcp.service
-systemctl --user enable --now rtl-tcp-watchdog.timer
-info "rtl_tcp.service + rtl-tcp-watchdog.timer active"
-
-step "Status"
-systemctl --user --no-pager status rtl_tcp.service | head -10 || true
-echo
-systemctl --user list-timers --no-pager rtl-tcp-watchdog.timer || true
+step "Status summary"
+# Do NOT enable/start anything here — cutover is explicit. Just report what's
+# currently active so the operator has a baseline.
+echo "Currently active units matching rtl_tcp/rtl-tcp:"
+systemctl --user list-units --no-pager --all 'rtl_tcp.service' 'rtl-tcp@*.service' \
+    'rtl-tcp-watchdog*.service' 'rtl-tcp-watchdog*.timer' 2>/dev/null || true
 
 echo
-echo "Logs:"
-echo "  journalctl --user -u rtl_tcp -f"
-echo "  journalctl --user -u rtl-tcp-watchdog -f"
+echo "Next steps:"
+echo "  Cutover runbook:  spectrum/docs/dongle_cutover_runbook.md"
+echo "  Sibling installer (scanner template): bash ops/rtl-scanner/install.sh"
 echo
-echo "Manual test:  /usr/local/bin/rtl-tcp-watchdog.py ; echo exit=\$?"
+echo "Manual verify:  rtl_test 2>&1 | head -5"
+echo "                ls -la /dev/rtl_sdr_v3 /dev/rtl_sdr_v4 2>/dev/null"

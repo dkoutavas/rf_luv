@@ -1,0 +1,19 @@
+# RTL-SDR Blog V3/V4 stable-name symlinks by serial.
+#
+# Matches USB vendor 0bda and product 2838 (RTL2838UHIDIR — shared by
+# RTL-SDR Blog V3 and V4), creating a /dev symlink keyed on the serial
+# written via rtl_eeprom. Downstream tools (rtl-tcp-by-serial wrapper,
+# rtl-usb-reset) resolve the current USB index via these symlinks so
+# enumeration order cannot cross the streams.
+#
+# Install on leap with:
+#   sudo cp ops/udev/99-rtl-sdr.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload
+#   sudo udevadm trigger --subsystem-match=usb
+#
+# After install, each dongle re-enumeration will create /dev/rtl_sdr_v3
+# and /dev/rtl_sdr_v4 per its serial. See spectrum/docs/dongle_identity.md
+# for the full setup procedure.
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v3-01", SYMLINK+="rtl_sdr_v3", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v4-01", SYMLINK+="rtl_sdr_v4", MODE="0666", GROUP="plugdev"

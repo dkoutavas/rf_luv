@@ -1,4 +1,12 @@
-# Passwordless USB reset for the RTL-SDR dongle, used by rtl-tcp-watchdog.
+# Passwordless USB reset for the RTL-SDR dongles, used by rtl-tcp-watchdog.
 # Install: sudo install -m 0440 sudoers-rtl-usb-reset /etc/sudoers.d/rtl-usb-reset
 # install.sh substitutes __USER__ with $USER before installing.
+#
+# Three allowed invocations, one per line. sudoers matches the command +
+# arguments literally (shell glob on args), so we enumerate the acceptable
+# serials explicitly rather than using a wildcard that could be subverted.
+# Add a new line here to allow a new dongle serial (e.g. v3-02 as a
+# replacement V3 unit).
 __USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset v3-01
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset v4-01

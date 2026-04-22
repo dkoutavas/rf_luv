@@ -1,0 +1,11 @@
+[Unit]
+Description=rtl_tcp health probe timer for instance %i (every 30s)
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=rtl-tcp-watchdog@%i.service
+
+[Install]
+WantedBy=timers.target

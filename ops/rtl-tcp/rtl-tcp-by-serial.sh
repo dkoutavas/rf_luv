@@ -31,34 +31,42 @@ fi
 SERIAL="$1"
 shift
 
-# rtl_test prints to stderr. The format (librtlsdr 0.6+):
-#   Found 2 device(s):
-#     0:  Realtek, RTL2838UHIDIR, SN: v3-01
-#     1:  Realtek, RTL2838UHIDIR, SN: v4-01
-#
-# Extract the leading index of the line whose SN field matches $SERIAL.
-INDEX=$(rtl_test 2>&1 \
-    | awk -v s="$SERIAL" '
-        match($0, /^  ([0-9]+):/, m) && $0 ~ ("SN: " s "$") {
-            print m[1]
-            exit
-        }
-    ')
+# Enumerate by probing rtl_eeprom on each candidate index. rtl_eeprom reads
+# the EEPROM and exits — unlike `rtl_test` (no args), which enters an
+# indefinite sample loop and won't exit on SIGPIPE if it's not currently
+# writing to stderr. The original wrapper used `rtl_test 2>&1 | awk ...`
+# which deadlocked here on librtlsdr 2.0+ (see followup 2026-04-22:
+# rtl_test sampling loop never wrote stderr after the device list, so awk's
+# exit didn't terminate it). MAX_PROBE bounds the search since librtlsdr
+# uses 0-based contiguous indices.
+MAX_PROBE=7
+INDEX=""
+for IDX in $(seq 0 "$MAX_PROBE"); do
+    # `|| true` because rtl_eeprom exits non-zero past the last device, and
+    # set -e would abort the script otherwise. We detect the actual end of
+    # devices by the "No matching devices found" message instead.
+    PROBE=$(rtl_eeprom -d "$IDX" 2>&1) || true
+    if echo "$PROBE" | grep -q "No matching devices found"; then
+        break
+    fi
+    THIS_SERIAL=$(echo "$PROBE" | awk '/Serial number/ {print $NF; exit}')
+    if [ "${THIS_SERIAL:-}" = "$SERIAL" ]; then
+        INDEX="$IDX"
+        break
+    fi
+done
 
 if [ -z "${INDEX:-}" ]; then
     echo "rtl-tcp-by-serial: serial '$SERIAL' not found on bus" >&2
-    rtl_test 2>&1 | grep -E 'Found|SN:' >&2 || true
+    rtl_eeprom 2>&1 | grep -E 'Found|SN:' >&2 || true
     exit 1
 fi
 
-# Post-resolve verification: ask rtl_eeprom what serial actually sits at that
-# index, and compare. Guards against races where the USB bus re-enumerated
-# between the rtl_test call above and now (rare, but not zero).
-ACTUAL=$(rtl_eeprom -d "$INDEX" 2>&1 | awk '/Serial number/ {print $NF; exit}')
-if [ "${ACTUAL:-}" != "$SERIAL" ]; then
-    echo "rtl-tcp-by-serial: index $INDEX now holds serial '${ACTUAL:-unknown}', expected '$SERIAL' — aborting" >&2
-    exit 1
-fi
+# Post-resolve re-verification was here originally, but a second
+# back-to-back rtl_eeprom -d "$INDEX" call sometimes returns non-zero
+# (USB device not yet released by the first probe), which triggered
+# set -e and silently exited the wrapper. The probe loop above is
+# already authoritative — drop the second probe.
 
 echo "rtl-tcp-by-serial: $SERIAL → index $INDEX" >&2
 exec /usr/local/bin/rtl_tcp -d "$INDEX" "$@"

@@ -8,9 +8,20 @@
 -- Scope of 017 — additive only, safe with running scanner:
 --   * ADD COLUMN dongle_id LowCardinality(String) DEFAULT 'v3-01' to:
 --       scans, peaks, events, sweep_health, scan_runs, compression_events
---   * MODIFY ORDER BY on scans to append dongle_id (only legal ALTER form in CH 24.3).
 --   * Backfill existing rows to 'v3-01' via ALTER UPDATE so the column is
 --     materialized on disk rather than relying on the default at read time.
+--
+-- ORDER BY change — REMOVED 2026-04-22 after first apply attempt failed:
+--   ClickHouse 24.3 (BAD_ARGUMENTS Code 36): "Existing column dongle_id is used
+--   in the expression that was added to the sorting key. You can add expressions
+--   that use only the newly added columns." Because migrate.py splits the file
+--   into separate HTTP statements, by the time MODIFY ORDER BY runs the column
+--   already "exists" and CH refuses. Combining ADD COLUMN + MODIFY ORDER BY
+--   into a single ALTER would work but isn't supported by the splitter. Per
+--   the original author's note below, the LowCardinality skip-index handles
+--   most of the per-dongle pruning anyway, so the ORDER BY change is dropped.
+--   If full sort-key pruning is later needed, do it via table recreation in
+--   a separate scanner-stop window.
 --
 -- NOT in this migration:
 --   * peak_features and signal_classifications — those are ReplacingMergeTree
@@ -42,16 +53,8 @@ ALTER TABLE spectrum.scan_runs
 ALTER TABLE spectrum.compression_events
     ADD COLUMN IF NOT EXISTS dongle_id LowCardinality(String) DEFAULT 'v3-01' AFTER detector_version;
 
--- Append dongle_id to scans ORDER BY. This is the only table where the brief
--- calls for dongle_id in the sort key (scans is the high-volume table where
--- per-dongle query pruning matters). Appending is the only legal form — CH
--- does not allow prepending to an existing ORDER BY without a full table
--- recreation, which would require a scanner-stop window this session won't
--- afford. For pure WHERE dongle_id='v3-01' queries the LowCardinality
--- skip-index handles most of the selectivity; combined filters like
--- WHERE freq_hz=X AND dongle_id=Y will now use the full sort prefix.
-ALTER TABLE spectrum.scans
-    MODIFY ORDER BY (freq_hz, timestamp, dongle_id);
+-- (ORDER BY change removed — see header. Pruning falls back to LowCardinality
+-- skip-index, which is sufficient for typical per-dongle filter queries.)
 
 -- Materialize the default on existing rows. ClickHouse mutations are async
 -- (they complete on merges); the migration returns immediately and the actual

@@ -34,6 +34,19 @@ GREETING_TIMEOUT = 3.0
 SAMPLE_WINDOW_S = 2.0
 SAMPLE_MIN_BYTES = 512 * 1024  # at 2 MS/s real rate ~4 MB/s; 512KB/2s = floor
 
+# Circuit breaker — after this many consecutive failures, stop trying recovery
+# actions and just log CIRCUIT_BREAKER_OPEN every tick until a probe succeeds.
+# Observed live on 2026-04-23: watchdog entered a 1000+ iteration reset loop
+# for V4, which kept hammering USB + causing cascading instability for V3.
+# 10 × 30s probe cadence = ~5 min tolerance before we give up and alert.
+MAX_CONSECUTIVE_FAILURES = 10
+
+# Rate-limit hard USB resets to at most one every this many seconds. The
+# USB subsystem needs time to settle after an unbind/bind cycle; bouncing
+# it every 30s is counter-productive. 5 min lets transient glitches
+# resolve and gives any pending enumerate-on-connect races time to finish.
+HARD_RESET_COOLDOWN_S = 300
+
 
 def parse_args():
     ap = argparse.ArgumentParser()
@@ -58,9 +71,13 @@ def state_path(serial: str) -> str:
 def load_state(path: str):
     try:
         with open(path) as f:
-            return json.load(f)
+            s = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"consecutive_failures": 0}
+        s = {}
+    # Back-compat defaults — older state files won't have last_hard_reset_ts.
+    s.setdefault("consecutive_failures", 0)
+    s.setdefault("last_hard_reset_ts", 0.0)
+    return s
 
 
 def save_state(path: str, state):
@@ -105,23 +122,39 @@ def probe(host: str, port: int):
             pass
 
 
-def recover(fails: int, serial: str, unit: str):
-    # Escalate: 1-2 soft restarts of the matching rtl_tcp unit; from 3rd onward
-    # unbind/rebind the specific USB device identified by serial.
+def recover(fails: int, serial: str, unit: str, state: dict):
+    """Escalate recovery actions and record state mutations on `state` in-place.
+
+    fails = current consecutive_failures counter (pre-increment on this call).
+    Side effect: may update state["last_hard_reset_ts"].
+    """
     soft_restart = ["systemctl", "--user", "restart", unit]
-    hard_reset = ["sudo", "-n", "/usr/local/sbin/rtl-usb-reset"]
+    hard_reset_cmd = ["sudo", "-n", "/usr/local/sbin/rtl-usb-reset"]
     if serial:
-        hard_reset.append(serial)  # per-serial USB reset — unbinds only this dongle
+        hard_reset_cmd.append(serial)  # per-serial USB reset — unbinds only this dongle
 
     if fails <= 2:
         log(f"soft restart (fail #{fails}) → {unit}", serial)
         subprocess.run(soft_restart, check=False)
         return
 
+    # Hard reset path — gate on cooldown. If we've done a hard reset too recently,
+    # fall back to soft restart only. This prevents the 2026-04-23 pathology
+    # where a stuck V4 got hard-reset every 30s for hours while the subsystem
+    # never had time to settle.
+    now = time.time()
+    since_last = now - state.get("last_hard_reset_ts", 0.0)
+    if since_last < HARD_RESET_COOLDOWN_S:
+        remaining = HARD_RESET_COOLDOWN_S - since_last
+        log(f"soft restart only (fail #{fails}); hard-reset cooldown: {remaining:.0f}s left", serial)
+        subprocess.run(soft_restart, check=False)
+        return
+
     log(f"hard USB reset (fail #{fails}) → rtl-usb-reset {serial or '(all)'}", serial)
-    r = subprocess.run(hard_reset, check=False)
+    r = subprocess.run(hard_reset_cmd, check=False)
     if r.returncode != 0:
         log(f"rtl-usb-reset returned {r.returncode}", serial)
+    state["last_hard_reset_ts"] = now
     subprocess.run(soft_restart, check=False)
 
 
@@ -142,8 +175,21 @@ def main():
         state["consecutive_failures"] = 0
     else:
         state["consecutive_failures"] += 1
+        fails = state["consecutive_failures"]
         log(f"unhealthy: {reason}", serial)
-        recover(state["consecutive_failures"], serial, unit)
+        if fails > MAX_CONSECUTIVE_FAILURES:
+            # Circuit breaker open — stop hammering the USB subsystem. Keep
+            # probing (counter stays incremented, keeps being reported) so
+            # a lucky recovery is still noticed and clears the counter above.
+            # Emit on every tick so the journal stays actionable — this is
+            # the alert we watch for.
+            log(
+                f"CIRCUIT_BREAKER_OPEN fail #{fails} > {MAX_CONSECUTIVE_FAILURES}; "
+                f"skipping recovery (human intervention needed)",
+                serial,
+            )
+        else:
+            recover(fails, serial, unit, state)
     save_state(path, state)
 
 

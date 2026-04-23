@@ -1,0 +1,15 @@
+[Unit]
+Description=Clear systemd failure state on rtl_tcp/rtl-scanner user units
+
+[Service]
+Type=oneshot
+# Clear "failed" state on any rtl-* template or singleton unit so that
+# Restart=always can re-engage. Prevents the 2026-04-23 pathology where
+# rtl-tcp@v3-01 hit StartLimitBurst=20 in a transient USB flap and stayed
+# permanent-failed until manual intervention. Zero-cost when everything is
+# healthy — reset-failed is a no-op on non-failed units.
+#
+# systemd-253+ supports glob patterns in unit-name arguments; earlier
+# versions tolerate the quoted-literal form. If a pattern matches nothing,
+# reset-failed returns 0 (no-op), so no SuccessExitStatus override needed.
+ExecStart=/bin/systemctl --user reset-failed rtl_tcp.service rtl-tcp@*.service rtl-scanner@*.service rtl-tcp-watchdog.service rtl-tcp-watchdog@*.service rtl-reset-failed.service

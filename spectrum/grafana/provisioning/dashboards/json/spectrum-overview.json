@@ -9,6 +9,110 @@
   "links": [],
   "panels": [
     {
+      "type": "table",
+      "title": "Dongle Health Summary (ignores $dongle selector)",
+      "description": "Both dongles' ingest health at a glance. Last 5 min of scans + sweep_health + latest run_id. A missing row means that dongle is not ingesting \u2014 don't wait for the rest of the dashboard to tell you something's wrong.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "targets": [
+        {
+          "rawSql": "WITH recent_scans AS (  SELECT dongle_id, count() AS rows_5min, max(timestamp) AS last_scan   FROM spectrum.scans   WHERE timestamp > now() - INTERVAL 5 MINUTE   GROUP BY dongle_id), recent_sweeps AS (  SELECT dongle_id,          round(avg(gain_db), 1) AS gain_db,          round(avg(max_clip_fraction), 4) AS avg_clip_5min,          round(max(max_clip_fraction), 4) AS max_clip_5min   FROM spectrum.sweep_health   WHERE timestamp > now() - INTERVAL 5 MINUTE   GROUP BY dongle_id), latest_run AS (  SELECT dongle_id, argMax(run_id, started_at) AS run_id   FROM spectrum.scan_runs   WHERE started_at > now() - INTERVAL 6 HOUR   GROUP BY dongle_id) SELECT   coalesce(rs.dongle_id, sw.dongle_id, lr.dongle_id) AS dongle,   rs.last_scan AS last_write,   dateDiff('second', rs.last_scan, now()) AS seconds_since_last,   round(rs.rows_5min / 300.0, 1) AS rows_per_sec,   sw.gain_db,   sw.avg_clip_5min,   sw.max_clip_5min,   lr.run_id FROM recent_scans rs FULL OUTER JOIN recent_sweeps sw ON rs.dongle_id = sw.dongle_id FULL OUTER JOIN latest_run lr ON coalesce(rs.dongle_id, sw.dongle_id) = lr.dongle_id ORDER BY dongle",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "seconds_since_last"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "green"
+                    },
+                    {
+                      "value": 120,
+                      "color": "yellow"
+                    },
+                    {
+                      "value": 300,
+                      "color": "red"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max_clip_5min"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "green"
+                    },
+                    {
+                      "value": 0.05,
+                      "color": "yellow"
+                    },
+                    {
+                      "value": 0.2,
+                      "color": "red"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "type": "stat",
       "title": "Latest Full Sweep",
       "description": "When the last full-band sweep (88-470 MHz) completed",
@@ -16,7 +120,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -42,7 +146,7 @@
         "h": 4,
         "w": 4,
         "x": 5,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -63,7 +167,7 @@
         "h": 4,
         "w": 5,
         "x": 9,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -84,7 +188,7 @@
         "h": 4,
         "w": 3,
         "x": 14,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -125,7 +229,7 @@
         "h": 4,
         "w": 2,
         "x": 17,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -163,7 +267,7 @@
         "h": 4,
         "w": 5,
         "x": 19,
-        "y": 0
+        "y": 5
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -193,7 +297,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 9
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -249,7 +353,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 18
+        "y": 23
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -291,7 +395,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 28
+        "y": 33
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -329,7 +433,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 28
+        "y": 33
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -350,7 +454,7 @@
         "h": 8,
         "w": 14,
         "x": 0,
-        "y": 36
+        "y": 41
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -382,7 +486,7 @@
         "h": 8,
         "w": 10,
         "x": 14,
-        "y": 36
+        "y": 41
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -403,7 +507,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 49
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -435,7 +539,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 57
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -467,7 +571,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 65
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -488,7 +592,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 65
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -509,7 +613,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 73
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -600,7 +704,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 81
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -621,7 +725,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 85
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -686,7 +790,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 97
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -707,7 +811,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 107
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -755,7 +859,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 112
+        "y": 117
       },
       "datasource": {
         "type": "grafana-clickhouse-datasource",
@@ -896,10 +1000,22 @@
         "label": "Dongle",
         "type": "custom",
         "query": "v3-01,v4-01",
-        "current": {"selected": true, "text": "v3-01", "value": "v3-01"},
+        "current": {
+          "selected": true,
+          "text": "v3-01",
+          "value": "v3-01"
+        },
         "options": [
-          {"selected": true, "text": "v3-01", "value": "v3-01"},
-          {"selected": false, "text": "v4-01", "value": "v4-01"}
+          {
+            "selected": true,
+            "text": "v3-01",
+            "value": "v3-01"
+          },
+          {
+            "selected": false,
+            "text": "v4-01",
+            "value": "v4-01"
+          }
         ],
         "includeAll": false,
         "multi": false,

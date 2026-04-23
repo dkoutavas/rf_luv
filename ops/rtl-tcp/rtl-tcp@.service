@@ -3,8 +3,14 @@ Description=RTL-SDR TCP streaming server (instance %i)
 # %i is the dongle serial (e.g. v3-01). The wrapper resolves serial → USB
 # index on each start so enumeration order cannot cross the streams.
 After=network.target
+# Rate limit: allow up to 100 starts per 10 min before systemd gives up with
+# "Start request repeated too quickly". 100 × 10s RestartSec = ~17 min of
+# continuous flap before permanent failure. Previous 20/10min was too strict
+# (V3 hit it once on 2026-04-23 after ~1h of normal runtime and went
+# permanent-failed with no auto-recovery). rtl-reset-failed.timer also fires
+# every 5 min to reset the counter — belt and braces.
 StartLimitIntervalSec=600
-StartLimitBurst=20
+StartLimitBurst=100
 
 [Service]
 Type=simple
@@ -13,7 +19,14 @@ Type=simple
 EnvironmentFile=/etc/rtl-scanner/%i.env
 ExecStart=/usr/local/bin/rtl-tcp-by-serial %i -a ${RTL_TCP_BIND} -p ${RTL_TCP_PORT} -s ${RTL_TCP_SAMPLE_RATE}
 Restart=always
-RestartSec=3
+# RestartSec=10 (was 3) — gives USB a fair re-enumeration window before
+# we re-try, and keeps the rate-limit budget meaningful.
+RestartSec=10
+# Timeouts cap how long the wrapper's rtl_eeprom probe loop can hold the
+# service in "activating" before systemd kills it. 8 probes × ~2s each = 16s
+# upper bound for enumeration; 30s is comfortable headroom.
+TimeoutStartSec=30
+TimeoutStopSec=15
 
 [Install]
 WantedBy=default.target

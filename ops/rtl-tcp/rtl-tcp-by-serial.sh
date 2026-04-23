@@ -39,25 +39,59 @@ shift
 # rtl_test sampling loop never wrote stderr after the device list, so awk's
 # exit didn't terminate it). MAX_PROBE bounds the search since librtlsdr
 # uses 0-based contiguous indices.
+#
+# MAX_ENUMERATE_ATTEMPTS wraps the whole probe in a retry loop because
+# librtlsdr enumeration races with USB re-enumeration events: on 2026-04-23
+# the wrapper failed with "serial 'v3-01' not found on bus" AT THE SAME
+# INSTANT sysfs showed v3-01 on the bus — the kernel had the device but
+# librtlsdr's usb_get_device_list() had a stale cache. A short sleep +
+# retry clears the race without adding meaningful startup latency.
 MAX_PROBE=7
+MAX_ENUMERATE_ATTEMPTS=3
+ENUMERATE_RETRY_SLEEP=0.5
 INDEX=""
-for IDX in $(seq 0 "$MAX_PROBE"); do
-    # `|| true` because rtl_eeprom exits non-zero past the last device, and
-    # set -e would abort the script otherwise. We detect the actual end of
-    # devices by the "No matching devices found" message instead.
-    PROBE=$(rtl_eeprom -d "$IDX" 2>&1) || true
-    if echo "$PROBE" | grep -q "No matching devices found"; then
-        break
-    fi
-    THIS_SERIAL=$(echo "$PROBE" | awk '/Serial number/ {print $NF; exit}')
-    if [ "${THIS_SERIAL:-}" = "$SERIAL" ]; then
-        INDEX="$IDX"
-        break
+SAW_BUSY=0  # track whether any probe hit usb_claim_interface error (device on bus but in use)
+for attempt in $(seq 1 "$MAX_ENUMERATE_ATTEMPTS"); do
+    for IDX in $(seq 0 "$MAX_PROBE"); do
+        # `|| true` because rtl_eeprom exits non-zero past the last device, and
+        # set -e would abort the script otherwise. We detect the actual end of
+        # devices by the "No matching devices found" message instead.
+        PROBE=$(rtl_eeprom -d "$IDX" 2>&1) || true
+        if echo "$PROBE" | grep -q "No matching devices found"; then
+            break
+        fi
+        if echo "$PROBE" | grep -q "usb_claim_interface error"; then
+            # Device is enumerated on the bus but another process holds the
+            # handle. rtl_eeprom can't read the EEPROM to confirm serial, so
+            # we can't positively match it against $SERIAL — but we do know
+            # SOMETHING is at this index. Record that we saw a busy dongle
+            # so we can produce a meaningful error message at the end
+            # (rather than the misleading "not found on bus").
+            SAW_BUSY=1
+            continue
+        fi
+        THIS_SERIAL=$(echo "$PROBE" | awk '/Serial number/ {print $NF; exit}')
+        if [ "${THIS_SERIAL:-}" = "$SERIAL" ]; then
+            INDEX="$IDX"
+            break 2
+        fi
+    done
+    if [ "$attempt" -lt "$MAX_ENUMERATE_ATTEMPTS" ]; then
+        echo "rtl-tcp-by-serial: attempt $attempt/$MAX_ENUMERATE_ATTEMPTS did not find '$SERIAL', retrying in ${ENUMERATE_RETRY_SLEEP}s" >&2
+        sleep "$ENUMERATE_RETRY_SLEEP"
     fi
 done
 
 if [ -z "${INDEX:-}" ]; then
-    echo "rtl-tcp-by-serial: serial '$SERIAL' not found on bus" >&2
+    if [ "$SAW_BUSY" -eq 1 ]; then
+        # Most likely cause: another rtl_tcp (system-level rtl-tcp.service is
+        # the classic offender — see 2026-04-22 and 2026-04-23 incidents) is
+        # holding the device, so rtl_eeprom can't read the serial to match.
+        echo "rtl-tcp-by-serial: serial '$SERIAL' not found (at least one dongle is BUSY — another rtl_tcp likely holds it)." >&2
+        echo "rtl-tcp-by-serial: check 'systemctl status rtl-tcp.service' (system) and kill orphan rtl_tcp processes." >&2
+    else
+        echo "rtl-tcp-by-serial: serial '$SERIAL' not found on bus after $MAX_ENUMERATE_ATTEMPTS attempts" >&2
+    fi
     rtl_eeprom 2>&1 | grep -E 'Found|SN:' >&2 || true
     exit 1
 fi

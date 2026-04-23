@@ -1,0 +1,14 @@
+[Unit]
+Description=Run rtl-reset-failed every 5 minutes (StartLimitBurst safety net)
+
+[Timer]
+# First fire 5 min after boot so the user session is settled; every 5 min
+# thereafter. AccuracySec loose because this is a safety net — doesn't
+# matter if it runs 30s off schedule.
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

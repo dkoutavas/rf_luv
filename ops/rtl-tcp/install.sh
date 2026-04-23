@@ -58,8 +58,14 @@ install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.timer"   "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp@.service"              "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.service"     "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.timer"       "$USER_UNIT_DIR/"
+# Safety-net: periodic reset-failed so a transient burst of failures doesn't
+# land units in permanent-failed state with no auto-recovery. Added 2026-04-23
+# after rtl-tcp@v3-01 hit StartLimitBurst and wouldn't come back without
+# manual reset-failed.
+install -m 0644 "$SRC_DIR/rtl-reset-failed.service"      "$USER_UNIT_DIR/"
+install -m 0644 "$SRC_DIR/rtl-reset-failed.timer"        "$USER_UNIT_DIR/"
 systemctl --user daemon-reload
-info "$USER_UNIT_DIR (singletons + templates installed side by side)"
+info "$USER_UNIT_DIR (singletons + templates + reset-failed safety net installed)"
 
 step "Install wrapper + watchdog + USB-reset helper"
 sudo install -m 0755 "$SRC_DIR/rtl-tcp-by-serial.sh" "$WRAPPER_BIN"
@@ -126,6 +132,8 @@ echo
 echo "Next steps:"
 echo "  Cutover runbook:  spectrum/docs/dongle_cutover_runbook.md"
 echo "  Sibling installer (scanner template): bash ops/rtl-scanner/install.sh"
+echo "  Enable reset-failed safety net (do this after cutover):"
+echo "    systemctl --user enable --now rtl-reset-failed.timer"
 echo
 echo "Manual verify:  rtl_test 2>&1 | head -5"
 echo "                ls -la /dev/rtl_sdr_v3 /dev/rtl_sdr_v4 2>/dev/null"

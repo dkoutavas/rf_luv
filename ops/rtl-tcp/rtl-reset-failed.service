@@ -9,7 +9,9 @@ Type=oneshot
 # permanent-failed until manual intervention. Zero-cost when everything is
 # healthy — reset-failed is a no-op on non-failed units.
 #
-# systemd-253+ supports glob patterns in unit-name arguments; earlier
-# versions tolerate the quoted-literal form. If a pattern matches nothing,
-# reset-failed returns 0 (no-op), so no SuccessExitStatus override needed.
-ExecStart=/bin/systemctl --user reset-failed rtl_tcp.service rtl-tcp@*.service rtl-scanner@*.service rtl-tcp-watchdog.service rtl-tcp-watchdog@*.service rtl-reset-failed.service
+# Arguments are globs only — literal singleton names (rtl_tcp.service,
+# rtl-tcp-watchdog.service) would cause systemctl to exit 1 with "Unit not
+# loaded" after those singletons were masked to /dev/null on 2026-04-23.
+# Globs against never-loaded templates are no-ops (exit 0), so the set
+# below covers live templates plus self without ever failing.
+ExecStart=/bin/systemctl --user reset-failed rtl-tcp@*.service rtl-scanner@*.service rtl-tcp-watchdog@*.service rtl-reset-failed.service

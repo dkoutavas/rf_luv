@@ -85,6 +85,55 @@ def save_state(path: str, state):
         json.dump(state, f)
 
 
+def _hex_ip_is_loopback(hex_ip: str) -> bool:
+    """True if a hex-encoded IP from /proc/net/tcp{,6} is a loopback address.
+
+    /proc/net/tcp stores IPv4 in little-endian hex; tcp6 stores IPv6 (and
+    IPv4-mapped IPv6) as 32 hex chars. Loopback covers 127.0.0.0/8, ::1, and
+    ::ffff:127.0.0.0/8.
+    """
+    if len(hex_ip) == 8:  # IPv4 (little-endian)
+        return int(hex_ip[6:8], 16) == 127
+    if len(hex_ip) == 32:  # IPv6
+        if hex_ip.upper() == "00000000000000000000000001000000":
+            return True  # ::1
+        if hex_ip[:24].upper() == "00000000000000000000FFFF":
+            return _hex_ip_is_loopback(hex_ip[24:])  # IPv4-mapped
+    return False
+
+
+def has_external_client(port: int) -> bool:
+    """True if rtl_tcp's port has an ESTABLISHED connection from a non-loopback peer.
+
+    rtl_tcp accepts a single client at a time; an active probe would kick whoever
+    is currently streaming. The scanner and watchdog connect via 127.0.0.1, so
+    a non-loopback peer means a real human listener (SDR++, SDR Console, etc.)
+    is on the line. If they're getting samples, rtl_tcp is healthy by proxy and
+    we skip the active probe to avoid disconnecting them every 30s.
+    """
+    target_local = f"{port:04X}"
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path) as f:
+                next(f)  # header
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 4:
+                        continue
+                    local_addr, rem_addr, state = parts[1], parts[2], parts[3]
+                    if state != "01":  # TCP_ESTABLISHED
+                        continue
+                    local_port_hex = local_addr.rsplit(":", 1)[-1]
+                    if local_port_hex.upper() != target_local:
+                        continue
+                    rem_ip_hex = rem_addr.rsplit(":", 1)[0]
+                    if not _hex_ip_is_loopback(rem_ip_hex):
+                        return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
 def probe(host: str, port: int):
     try:
         s = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
@@ -168,6 +217,18 @@ def main():
 
     path = state_path(serial)
     state = load_state(path)
+
+    # Don't fight an active human listener. rtl_tcp is single-client, so an
+    # active probe would kick SDR++ / SDR Console off every 30s. If a
+    # non-loopback peer is established on the rtl_tcp port, it's a real
+    # client streaming samples — treat that as healthy by proxy and skip.
+    if has_external_client(port):
+        if state["consecutive_failures"] > 0:
+            log("external client connected; clearing failure counter", serial)
+        state["consecutive_failures"] = 0
+        save_state(path, state)
+        return
+
     ok, reason = probe(host, port)
     if ok:
         if state["consecutive_failures"] > 0:

@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+import messages
+
 # ─── Config ──────────────────────────────────────────────
 
 # Default works in Docker on both Linux (20.10+ with extra_hosts) and WSL/Docker Desktop
@@ -330,7 +332,7 @@ def detect_peaks(bins: list[dict]) -> list[dict]:
 
         if prominence >= PEAK_THRESHOLD_DB:
             peaks.append({
-                "peak": True,
+                messages.PEAK: True,
                 "freq_hz": bins[i]["freq_hz"],
                 "power_dbfs": bins[i]["power_dbfs"],
                 "prominence_db": round(float(prominence), 1),
@@ -366,7 +368,7 @@ def detect_transients(bins: list[dict]) -> list[dict]:
             delta = power - prev
             if delta >= TRANSIENT_THRESHOLD_DB:
                 events.append({
-                    "event": True,
+                    messages.EVENT: True,
                     "freq_hz": freq_hz,
                     "event_type": "appeared",
                     "power_dbfs": power,
@@ -375,7 +377,7 @@ def detect_transients(bins: list[dict]) -> list[dict]:
                 })
             elif delta <= -TRANSIENT_THRESHOLD_DB:
                 events.append({
-                    "event": True,
+                    messages.EVENT: True,
                     "freq_hz": freq_hz,
                     "event_type": "disappeared",
                     "power_dbfs": power,
@@ -415,7 +417,7 @@ def main():
     run_id = f"run_{DONGLE_ID}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     log.info(f"Run {run_id}: gain={effective_gain}, antenna={ANTENNA_POSITION}, arms={ANTENNA_ARMS_CM}cm")
     print(json.dumps({
-        "run_start": True,
+        messages.RUN_START: True,
         "run_id": run_id,
         "dongle_id": DONGLE_ID,
         "started_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
@@ -504,7 +506,7 @@ def main():
                 (b["power_dbfs"] for b in bins if DVBT_EXCLUDE_START <= b["freq_hz"] <= DVBT_EXCLUDE_END),
                 default=-100.0)
             print(json.dumps({
-                "health": True,
+                messages.HEALTH: True,
                 "sweep_id": sweep_id,
                 "timestamp": sweep_ts,
                 "run_id": run_id,
@@ -546,7 +548,7 @@ def main():
                 nf = float(np.percentile(uhf_powers, 10)) if uhf_powers else -100.0
                 peak_bin = max(bins, key=lambda b: b["power_dbfs"])
                 print(json.dumps({
-                    "run_update": True,
+                    messages.RUN_UPDATE: True,
                     "run_id": run_id,
                     "dongle_id": DONGLE_ID,
                     "noise_floor_dbfs": round(nf, 1),
@@ -556,7 +558,7 @@ def main():
                 log.info(f"Run {run_id}: noise_floor={nf:.1f}, peak={peak_bin['power_dbfs']:.1f} @ {peak_bin['freq_hz']/1e6:.2f} MHz")
 
             # Flush marker
-            print(json.dumps({"flush": True}), flush=True)
+            print(json.dumps({messages.FLUSH: True}), flush=True)
 
             clip_pct = f"{clipping['max_clip_fraction']*100:.1f}%"
             log.info(
@@ -571,7 +573,7 @@ def main():
 
     # Emit run_end so ingest can close the scan_runs entry
     print(json.dumps({
-        "run_end": True,
+        messages.RUN_END: True,
         "run_id": run_id,
         "dongle_id": DONGLE_ID,
         "ended_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],

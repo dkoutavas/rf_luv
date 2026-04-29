@@ -41,4 +41,5 @@ config/sdrpp_config.json
 notes/*.md
 !notes/.gitkeep
 !notes/listening-playbook.md
-spectrum/exports/spectrum_*/
+spectrum/exports/*
+!spectrum/exports/.gitkeep

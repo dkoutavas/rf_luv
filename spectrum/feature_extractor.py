@@ -22,24 +22,14 @@ to fingerprint signal identity beyond raw center frequency.
 from __future__ import annotations
 
 import bisect
-import json
 import logging
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from statistics import mean, pstdev
-from urllib.error import HTTPError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+
+import db
 
 # ─── Config ─────────────────────────────────────────────────
-
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
-CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 BIN_WIDTH_HZ = 100_000
 DUTY_THRESHOLD_DB = 6.0            # power > baseline + this = "active"
@@ -62,36 +52,6 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger("features")
-
-
-# ─── ClickHouse helpers ─────────────────────────────────────
-
-
-def ch_call(query: str, data: str | None = None, timeout: int = 120) -> str:
-    """Invoke ClickHouse HTTP API. Without data: query in POST body.
-    With data: query in URL, data in POST body (INSERT pattern)."""
-    params = f"user={CH_USER}&password={CH_PASS}&database={CH_DB}"
-    if data is not None:
-        url = f"{CH_URL}?{params}&query={quote(query)}"
-        body = data.encode()
-    else:
-        url = f"{CH_URL}?{params}"
-        body = query.encode()
-    req = Request(url, data=body)
-    req.add_header("Content-Type", "text/plain")
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode()
-    except HTTPError as e:
-        err_body = e.read().decode() if e.fp else ""
-        log.error(f"ClickHouse HTTP {e.code}: {err_body[:300]}")
-        raise
-
-
-def ch_rows(sql: str) -> list[dict]:
-    """Run a SELECT and parse JSONEachRow lines into dicts."""
-    out = ch_call(sql + " FORMAT JSONEachRow")
-    return [json.loads(line) for line in out.splitlines() if line]
 
 
 # ─── Pure helpers ───────────────────────────────────────────
@@ -354,16 +314,14 @@ def build_feature_row(
 def insert_features(rows: list[dict]) -> None:
     """Batch-insert peak_features rows via JSONEachRow."""
     for i in range(0, len(rows), BATCH_INSERT_LIMIT):
-        chunk = rows[i : i + BATCH_INSERT_LIMIT]
-        payload = "\n".join(json.dumps(r) for r in chunk)
-        ch_call("INSERT INTO spectrum.peak_features FORMAT JSONEachRow", data=payload)
+        db.insert("spectrum.peak_features", rows[i : i + BATCH_INSERT_LIMIT])
 
 
 def discover_active_dongles() -> list[str]:
     """Dongles that have written scans in the last hour. Used to drive the
     per-dongle loop. If none, the scanner isn't running and there's nothing
     to extract."""
-    rows = ch_rows(
+    rows = db.query_rows(
         "SELECT DISTINCT dongle_id FROM spectrum.scans "
         "WHERE timestamp > now() - INTERVAL 1 HOUR "
         "ORDER BY dongle_id"
@@ -390,7 +348,7 @@ def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
     # 1. Active bins = distinct freqs with any peak in last 24h (from non-suspect sweeps)
     active_bins = [
         r["freq_hz"]
-        for r in ch_rows(
+        for r in db.query_rows(
             f"SELECT DISTINCT freq_hz FROM spectrum.peaks "
             f"WHERE timestamp > now() - INTERVAL 24 HOUR "
             f"  AND dongle_id = '{dongle_id}' "
@@ -406,7 +364,7 @@ def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
     bins_csv = ",".join(str(b) for b in active_bins)
 
     # 2. Pull 14d scan history for all active bins in one query (excluding suspect sweeps)
-    scans = ch_rows(
+    scans = db.query_rows(
         f"SELECT freq_hz, timestamp, power_dbfs "
         f"FROM spectrum.scans "
         f"WHERE freq_hz IN ({bins_csv}) "
@@ -424,7 +382,7 @@ def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
         )
 
     # 3. Latest NON-SUSPECT full-sweep power snapshot for bandwidth estimation.
-    latest = ch_rows(
+    latest = db.query_rows(
         f"SELECT freq_hz, power_dbfs FROM spectrum.scans "
         f"WHERE dongle_id = '{dongle_id}' "
         f"  AND sweep_id = (SELECT sweep_id FROM spectrum.sweep_health "
@@ -439,7 +397,7 @@ def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
     log.info(f"  {dongle_id}: {len(latest_freqs_sorted)} bins in latest full sweep")
 
     # 4. Max peak power per bin over 24h for harmonic detection (excluding suspect sweeps)
-    peaks = ch_rows(
+    peaks = db.query_rows(
         f"SELECT freq_hz, max(power_dbfs) AS power_dbfs FROM spectrum.peaks "
         f"WHERE timestamp > now() - INTERVAL 24 HOUR "
         f"  AND dongle_id = '{dongle_id}' "
@@ -494,7 +452,7 @@ def main() -> None:
 
     # Allocations are global (regulatory bands don't depend on which radio sees them),
     # so fetch once and pass into the per-dongle loop.
-    allocations = ch_rows(
+    allocations = db.query_rows(
         "SELECT freq_start_hz, freq_end_hz, service FROM spectrum.allocations"
     )
 

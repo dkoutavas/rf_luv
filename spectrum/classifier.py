@@ -27,21 +27,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from datetime import datetime, timezone
-from urllib.error import HTTPError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+
+import db
 
 # ─── Config ─────────────────────────────────────────────────
-
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
-CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 FREQ_MATCH_TOLERANCE_HZ = 150_000
 DUTY_CONTINUOUS_THRESHOLD = 0.5    # duty_24h > this → "continuous"
@@ -56,33 +47,6 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger("classifier")
-
-
-# ─── ClickHouse helpers ─────────────────────────────────────
-
-
-def ch_call(query: str, data: str | None = None, timeout: int = 60) -> str:
-    params = f"user={CH_USER}&password={CH_PASS}&database={CH_DB}"
-    if data is not None:
-        url = f"{CH_URL}?{params}&query={quote(query)}"
-        body = data.encode()
-    else:
-        url = f"{CH_URL}?{params}"
-        body = query.encode()
-    req = Request(url, data=body)
-    req.add_header("Content-Type", "text/plain")
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode()
-    except HTTPError as e:
-        err_body = e.read().decode() if e.fp else ""
-        log.error(f"ClickHouse HTTP {e.code}: {err_body[:300]}")
-        raise
-
-
-def ch_rows(sql: str) -> list[dict]:
-    out = ch_call(sql + " FORMAT JSONEachRow")
-    return [json.loads(line) for line in out.splitlines() if line]
 
 
 # ─── Helpers ────────────────────────────────────────────────
@@ -330,21 +294,21 @@ def main() -> None:
     log.info(f"Classifier starting (ClickHouse at {CH_HOST}:{CH_PORT})")
 
     # Reference data — all tiny
-    confirmations = ch_rows(
+    confirmations = db.query_rows(
         "SELECT id, class_id, toUInt32(confirmed_freq_hz) AS confirmed_freq_hz "
         "FROM spectrum.listening_log "
         "WHERE class_id != '' AND confirmed_freq_hz != 0 "
         "ORDER BY timestamp DESC"
     )
-    allocations = ch_rows("SELECT * FROM spectrum.allocations ORDER BY freq_start_hz")
-    known_freqs = ch_rows(
+    allocations = db.query_rows("SELECT * FROM spectrum.allocations ORDER BY freq_start_hz")
+    known_freqs = db.query_rows(
         "SELECT toUInt32(freq_hz) AS freq_hz, name, class_id "
         "FROM spectrum.known_frequencies"
     )
     # signal_classes is a plain MergeTree (FINAL would illegal-final here).
     # ALTER TABLE ... UPDATE from migration 006 applies lazily on merge;
     # reads are eventually consistent, which is fine for a reference table.
-    signal_classes = ch_rows(
+    signal_classes = db.query_rows(
         "SELECT class_id, evidence_rules FROM spectrum.signal_classes"
     )
     # Parse evidence_rules JSON once
@@ -364,7 +328,7 @@ def main() -> None:
     # Discover which dongles produced fresh features. Migration 018 keys
     # peak_features and signal_classifications on (freq_hz, dongle_id), so we
     # classify each dongle's features independently and write per-dongle rows.
-    dongle_rows = ch_rows(
+    dongle_rows = db.query_rows(
         "SELECT DISTINCT dongle_id FROM spectrum.peak_features "
         "WHERE computed_at > now() - INTERVAL 1 HOUR "
         "ORDER BY dongle_id"
@@ -381,7 +345,7 @@ def main() -> None:
     for dongle_id in dongles:
         # Recent peak_features for this dongle — FINAL collapses ReplacingMergeTree
         # duplicates per (freq_hz, dongle_id).
-        features = ch_rows(
+        features = db.query_rows(
             "SELECT freq_hz, bandwidth_hz, duty_cycle_1h, duty_cycle_24h, duty_cycle_7d, "
             "       burst_p50_s, burst_p95_s, harmonic_of_hz, "
             "       power_mean_dbfs, power_p95_dbfs, power_std_db, sweeps_observed_24h "
@@ -411,11 +375,9 @@ def main() -> None:
             })
 
         for i in range(0, len(rows_out), BATCH_INSERT_LIMIT):
-            chunk = rows_out[i : i + BATCH_INSERT_LIMIT]
-            payload = "\n".join(json.dumps(r) for r in chunk)
-            ch_call(
-                "INSERT INTO spectrum.signal_classifications FORMAT JSONEachRow",
-                data=payload,
+            db.insert(
+                "spectrum.signal_classifications",
+                rows_out[i : i + BATCH_INSERT_LIMIT],
             )
 
         hist_str = ", ".join(f"{k}={v}" for k, v in sorted(hist.items(), key=lambda x: -x[1]))

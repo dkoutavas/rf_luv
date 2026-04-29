@@ -14,17 +14,12 @@ import json
 import time
 import signal
 import logging
-from urllib.parse import quote
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+
+import db
+import messages
 
 # ─── Config ──────────────────────────────────────────────
 
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "clickhouse")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8123")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
 FLUSH_INTERVAL = int(os.environ.get("FLUSH_INTERVAL_SECONDS", "5"))
 
@@ -57,38 +52,18 @@ signal.signal(signal.SIGINT, handle_signal)
 
 # ─── ClickHouse insertion ────────────────────────────────
 
-CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
-
-
-def clickhouse_query(query: str, data: str = "") -> str:
-    if data:
-        # INSERT-style: query in URL param, data in POST body
-        params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}&query={quote(query)}"
-        url = f"{CH_URL}?{params}"
-        req = Request(url, data=data.encode("utf-8"))
-    else:
-        # All other queries: send as POST body (required for ALTER TABLE, etc.)
-        params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}"
-        url = f"{CH_URL}?{params}"
-        req = Request(url, data=query.encode("utf-8"))
-    req.add_header("Content-Type", "text/plain")
-    try:
-        with urlopen(req, timeout=10) as resp:
-            return resp.read().decode("utf-8")
-    except URLError as e:
-        log.error(f"ClickHouse query failed: {e}")
-        raise
-
 
 def insert_batch(rows: list[dict], table: str = "scans") -> int:
+    """Wraps db.insert with the silent-error semantics this loop needs.
+
+    db.insert raises on HTTP error; the ingest loop tolerates a transient
+    insert failure (next batch will catch up — scanner.py keeps producing).
+    Returning 0 on failure lets the metrics counter stay accurate.
+    """
     if not rows:
         return 0
-
-    payload = "\n".join(json.dumps(row) for row in rows)
-    query = f"INSERT INTO {table} FORMAT JSONEachRow"
-
     try:
-        clickhouse_query(query, payload)
+        db.insert(table, rows, timeout=10)
         return len(rows)
     except Exception as e:
         log.error(f"Failed to insert {len(rows)} into {table}: {e}")
@@ -116,7 +91,7 @@ def dongle_id_from(data: dict) -> str:
 def wait_for_clickhouse(max_retries: int = 30, delay: int = 2):
     for i in range(max_retries):
         try:
-            clickhouse_query("SELECT 1 FORMAT TabSeparated")
+            db.query("SELECT 1 FORMAT TabSeparated", timeout=10)
             log.info("ClickHouse is ready")
             return
         except Exception:
@@ -154,50 +129,49 @@ def main():
             continue
 
         # Run tracking messages
-        if data.get("run_start"):
+        if data.get(messages.RUN_START):
             try:
                 dongle_id = dongle_id_from(data)
-                clickhouse_query(
-                    "INSERT INTO scan_runs FORMAT JSONEachRow",
-                    json.dumps({
-                        "run_id": data["run_id"],
-                        "started_at": data["started_at"],
-                        "gain_db": data["gain_db"],
-                        "antenna_position": data.get("antenna_position", ""),
-                        "antenna_arms_cm": data.get("antenna_arms_cm", 0),
-                        "antenna_orientation_deg": data.get("antenna_orientation_deg", 0),
-                        "antenna_height_m": data.get("antenna_height_m", 0),
-                        "notes": data.get("notes", ""),
-                        "dongle_id": dongle_id,
-                    })
-                )
+                db.insert("scan_runs", [{
+                    "run_id": data["run_id"],
+                    "started_at": data["started_at"],
+                    "gain_db": data["gain_db"],
+                    "antenna_position": data.get("antenna_position", ""),
+                    "antenna_arms_cm": data.get("antenna_arms_cm", 0),
+                    "antenna_orientation_deg": data.get("antenna_orientation_deg", 0),
+                    "antenna_height_m": data.get("antenna_height_m", 0),
+                    "notes": data.get("notes", ""),
+                    "dongle_id": dongle_id,
+                }], timeout=10)
                 log.info(f"Run started: {data['run_id']} (dongle={dongle_id}, gain={data['gain_db']}, pos={data.get('antenna_position')})")
             except Exception as e:
                 log.error(f"Failed to insert run_start: {e}")
             continue
 
-        if data.get("run_update"):
+        if data.get(messages.RUN_UPDATE):
             try:
                 rid = data["run_id"]
                 nf = data["noise_floor_dbfs"]
                 ps = data["peak_signal_dbfs"]
                 pf = data["peak_signal_freq_hz"]
-                clickhouse_query(
+                db.query(
                     f"ALTER TABLE scan_runs UPDATE "
                     f"noise_floor_dbfs = {nf}, peak_signal_dbfs = {ps}, "
-                    f"peak_signal_freq_hz = {pf} WHERE run_id = '{rid}'"
+                    f"peak_signal_freq_hz = {pf} WHERE run_id = '{rid}'",
+                    timeout=10,
                 )
                 log.info(f"Run updated: noise_floor={nf}, peak={ps} dBFS")
             except Exception as e:
                 log.error(f"Failed to update run: {e}")
             continue
 
-        if data.get("run_end"):
+        if data.get(messages.RUN_END):
             try:
-                clickhouse_query(
+                db.query(
                     f"ALTER TABLE scan_runs UPDATE "
                     f"ended_at = '{data['ended_at']}' "
-                    f"WHERE run_id = '{data['run_id']}'"
+                    f"WHERE run_id = '{data['run_id']}'",
+                    timeout=10,
                 )
                 log.info(f"Run ended: {data['run_id']}")
             except Exception as e:
@@ -205,7 +179,7 @@ def main():
             continue
 
         # Flush marker from scanner.py — flush all batches
-        if data.get("flush"):
+        if data.get(messages.FLUSH):
             if batch:
                 count = insert_batch(batch, "scans")
                 total_inserted += count
@@ -232,7 +206,7 @@ def main():
         dongle_id = dongle_id_from(data)
 
         # Route to appropriate table based on marker flags
-        if data.get("peak"):
+        if data.get(messages.PEAK):
             peak_batch.append({
                 "timestamp": ts,
                 "freq_hz": data.get("freq_hz", 0),
@@ -244,7 +218,7 @@ def main():
             })
             continue
 
-        if data.get("event"):
+        if data.get(messages.EVENT):
             event_batch.append({
                 "timestamp": ts,
                 "freq_hz": data.get("freq_hz", 0),
@@ -258,7 +232,7 @@ def main():
             })
             continue
 
-        if data.get("health"):
+        if data.get(messages.HEALTH):
             health_batch.append({
                 "timestamp": ts,
                 "sweep_id": sweep_id,

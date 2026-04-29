@@ -19,22 +19,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 import time
 from datetime import datetime, timezone
-from urllib.error import HTTPError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+
+import db
 
 # ─── Config ─────────────────────────────────────────────────
-
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASS = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
-CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 FREQ_MATCH_TOLERANCE_HZ = 150_000
 ATIS_CLASS_ID = "am_airband_atis"  # for the dedicated atis_confidence_current metric
@@ -55,48 +46,12 @@ logging.basicConfig(
 log = logging.getLogger("classifier_health")
 
 
-# ─── ClickHouse helpers ─────────────────────────────────────
-
-
-def ch_call(query: str, data: str | None = None, timeout: int = 30) -> str:
-    params = f"user={CH_USER}&password={CH_PASS}&database={CH_DB}"
-    if data is not None:
-        url = f"{CH_URL}?{params}&query={quote(query)}"
-        body = data.encode()
-    else:
-        url = f"{CH_URL}?{params}"
-        body = query.encode()
-    req = Request(url, data=body)
-    req.add_header("Content-Type", "text/plain")
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode()
-    except HTTPError as e:
-        err_body = e.read().decode() if e.fp else ""
-        log.error(f"ClickHouse HTTP {e.code}: {err_body[:300]}")
-        raise
-
-
-def ch_rows(sql: str) -> list[dict]:
-    out = ch_call(sql + " FORMAT JSONEachRow")
-    return [json.loads(line) for line in out.splitlines() if line]
-
-
-def ch_scalar(sql: str):
-    """Return first column of first row, or None if empty."""
-    rows = ch_rows(sql)
-    if not rows:
-        return None
-    first_row = rows[0]
-    return next(iter(first_row.values()), None)
-
-
 # ─── Metric computation ─────────────────────────────────────
 
 
 def latest_run_stats(latest_classified_at: str) -> dict:
     """Aggregate stats over the classifier's latest batch."""
-    rows = ch_rows(
+    rows = db.query_rows(
         f"SELECT count() AS total, "
         f"  uniqExact(confidence) AS distinct_confs, "
         f"  countIf(abs(confidence - round(confidence, 1)) > 0.001) AS precision_tails, "
@@ -109,7 +64,7 @@ def latest_run_stats(latest_classified_at: str) -> dict:
 
 
 def class_distribution(latest_classified_at: str) -> dict[str, int]:
-    rows = ch_rows(
+    rows = db.query_rows(
         f"SELECT class_id, count() AS n "
         f"FROM spectrum.signal_classifications FINAL "
         f"WHERE classified_at = toDateTime('{latest_classified_at}') "
@@ -120,13 +75,13 @@ def class_distribution(latest_classified_at: str) -> dict[str, int]:
 
 def harmonic_flag_counts() -> tuple[int, int]:
     """(total flagged in last 1h, cross-allocation flagged in last 1h)."""
-    total = int(ch_scalar(
+    total = int(db.query_scalar(
         "SELECT count() FROM spectrum.peak_features FINAL "
         "WHERE harmonic_of_hz IS NOT NULL AND computed_at > now() - INTERVAL 1 HOUR"
     ) or 0)
     # CROSS JOIN with WHERE — ClickHouse's JOIN analyzer rejects BETWEEN in ON,
     # but the pre-analyzer comma-join form works.
-    xalloc = int(ch_scalar(
+    xalloc = int(db.query_scalar(
         "SELECT count() FROM "
         "(SELECT freq_hz, harmonic_of_hz FROM spectrum.peak_features FINAL "
         " WHERE harmonic_of_hz IS NOT NULL AND computed_at > now() - INTERVAL 1 HOUR) pf, "
@@ -139,7 +94,7 @@ def harmonic_flag_counts() -> tuple[int, int]:
 
 
 def continuous_with_bursts_count() -> int:
-    return int(ch_scalar(
+    return int(db.query_scalar(
         "SELECT count() FROM spectrum.peak_features FINAL "
         "WHERE duty_cycle_24h > 0.85 AND burst_p50_s IS NOT NULL"
     ) or 0)
@@ -147,15 +102,15 @@ def continuous_with_bursts_count() -> int:
 
 def liveness_seconds() -> tuple[float, float, float]:
     """Age in seconds of latest row in each of (classifications, features, scans)."""
-    sec_classif = float(ch_scalar(
+    sec_classif = float(db.query_scalar(
         "SELECT dateDiff('second', max(classified_at), now()) "
         "FROM spectrum.signal_classifications FINAL"
     ) or 0)
-    sec_features = float(ch_scalar(
+    sec_features = float(db.query_scalar(
         "SELECT dateDiff('second', max(computed_at), now()) "
         "FROM spectrum.peak_features FINAL"
     ) or 0)
-    sec_scans = float(ch_scalar(
+    sec_scans = float(db.query_scalar(
         "SELECT dateDiff('second', max(timestamp), now()) FROM spectrum.scans"
     ) or 0)
     return sec_classif, sec_features, sec_scans
@@ -187,7 +142,7 @@ def best_classification_in_tolerance(
     # Escape single quotes defensively — class_ids are schema-controlled
     # ('am_airband_atis', 'dvbt_mux', …) but keep the substitution safe.
     safe_class = expected_class.replace("'", "''")
-    rows = ch_rows(
+    rows = db.query_rows(
         f"SELECT freq_hz, class_id, confidence "
         f"FROM spectrum.signal_classifications FINAL "
         f"WHERE freq_hz BETWEEN {lo} AND {hi} "
@@ -205,7 +160,7 @@ def load_reference_bins() -> list[dict]:
     danglers like 'satcom'/'ism'/'broadcast' that don't match any class).
 
     Excludes unknown_* fallback classes — they're not real-signal targets."""
-    return ch_rows(
+    return db.query_rows(
         "SELECT freq_hz, name, class_id, min_confidence "
         "FROM spectrum.known_frequencies "
         "WHERE class_id IN ("
@@ -265,7 +220,7 @@ def main() -> None:
     t0 = time.monotonic()
     log.info(f"classifier_health starting (ClickHouse at {CH_HOST}:{CH_PORT})")
 
-    latest_classified_at = ch_scalar(
+    latest_classified_at = db.query_scalar(
         "SELECT toString(max(classified_at)) FROM spectrum.signal_classifications FINAL"
     )
     if not latest_classified_at or latest_classified_at == "1970-01-01 00:00:00":
@@ -305,8 +260,7 @@ def main() -> None:
         "seconds_since_last_sweep": sec_scans,
     }
 
-    payload = json.dumps(row, separators=(",", ":"))
-    ch_call("INSERT INTO spectrum.classifier_health FORMAT JSONEachRow", data=payload)
+    db.insert("spectrum.classifier_health", [row])
 
     elapsed = time.monotonic() - t0
     log.info(

@@ -35,25 +35,23 @@ Dependencies: numpy + stdlib. No clickhouse-driver — HTTP via urllib.
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from urllib.error import HTTPError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from pathlib import Path
 
 import numpy as np
 
+# Add the spectrum/ parent directory to sys.path so we can import db, config,
+# etc. when this script is run directly (script's __file__ dir is analysis/,
+# but db.py / config.py / messages.py live in spectrum/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import db  # noqa: E402
+
 # ─── Config ──────────────────────────────────────────────
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "192.168.2.10")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
-CH_URL = f"http://{CH_HOST}:{CH_PORT}"
+# Defaults to localhost via spectrum.config; for ad-hoc off-host runs
+# (e.g. backfill from a workstation) set CLICKHOUSE_HOST=<leap-ip>.
 
 # sweep_id format ({preset}:{ts}) is shared across dongles per commit 91d3860,
 # so every scanner-table query must filter by dongle_id or risk conflating regimes.
@@ -94,26 +92,6 @@ logging.basicConfig(
     stream=sys.stderr,
 )
 log = logging.getLogger("detect_compression")
-
-
-# ─── ClickHouse I/O ──────────────────────────────────────
-def ch_query(query: str) -> str:
-    """Execute a ClickHouse query via HTTP; return raw text response."""
-    params = f"user={CH_USER}&password={CH_PASSWORD}&database={CH_DB}"
-    url = f"{CH_URL}/?{params}"
-    req = Request(url, data=query.encode(), headers={"Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        return urlopen(req, timeout=60).read().decode().strip()
-    except HTTPError as e:
-        raise RuntimeError(f"ClickHouse error: {e.read().decode()[:500]}") from e
-
-
-def ch_query_json(query: str) -> list[dict]:
-    """Execute a query returning JSONEachRow; parse to list of dicts."""
-    text = ch_query(query + " FORMAT JSONEachRow")
-    if not text:
-        return []
-    return [json.loads(line) for line in text.split("\n") if line]
 
 
 # ─── Tile math ───────────────────────────────────────────
@@ -397,7 +375,7 @@ def fetch_full_sweep_list(since: str | None, sweep_id: str | None) -> list[dict]
     WHERE {where}
     ORDER BY timestamp
     """
-    return ch_query_json(q)
+    return db.query_rows(q)
 
 
 def fetch_sweep_bins(sweep_id: str) -> list[dict]:
@@ -407,7 +385,7 @@ def fetch_sweep_bins(sweep_id: str) -> list[dict]:
     WHERE sweep_id = '{sweep_id}' AND dongle_id = '{DONGLE_ID}'
     ORDER BY freq_hz
     """
-    return ch_query_json(q)
+    return db.query_rows(q)
 
 
 def fetch_hourly_baseline(hour_iso: str) -> dict[int, float]:
@@ -430,7 +408,7 @@ def fetch_hourly_baseline(hour_iso: str) -> dict[int, float]:
       AND dongle_id = '{DONGLE_ID}'
     GROUP BY freq_hz
     """
-    rows = ch_query_json(q_prev)
+    rows = db.query_rows(q_prev)
     if rows:
         return {int(r["freq_hz"]): float(r["avg_p"]) for r in rows}
 
@@ -442,7 +420,7 @@ def fetch_hourly_baseline(hour_iso: str) -> dict[int, float]:
       AND dongle_id = '{DONGLE_ID}'
     GROUP BY freq_hz
     """
-    rows = ch_query_json(q_same)
+    rows = db.query_rows(q_same)
     return {int(r["freq_hz"]): float(r["avg_p"]) for r in rows}
 
 
@@ -527,12 +505,12 @@ def insert_events(results: list[SweepResult], min_tier: str = "medium") -> int:
     if not keep:
         return 0
 
-    rows_json = "\n".join(
-        json.dumps({
+    rows = [
+        {
             "sweep_id": r.sweep_id,
             "timestamp": r.timestamp,
             "dongle_id": DONGLE_ID,
-            # Nullable columns — json.dumps emits null for None, matching ClickHouse's
+            # Nullable columns — None serializes as null, matching ClickHouse's
             # Nullable(UInt32)/Nullable(Float32). v2 deliberately refuses to fabricate
             # attribution when no peak qualifies inside the compression zone.
             "estimated_emitter_freq_hz": r.emitter_freq_hz,
@@ -553,15 +531,10 @@ def insert_events(results: list[SweepResult], min_tier: str = "medium") -> int:
             "sig_clip_fm": int(r.clip.sig_fm),
             "match_tier": r.tier,
             "detector_version": DETECTOR_VERSION,
-        })
+        }
         for r in keep
-    )
-
-    params = f"user={CH_USER}&password={CH_PASSWORD}&database={CH_DB}"
-    q = "INSERT INTO compression_events FORMAT JSONEachRow"
-    url = f"{CH_URL}/?{params}&query={quote(q)}"
-    req = Request(url, data=rows_json.encode(), headers={"Content-Type": "application/x-www-form-urlencoded"})
-    urlopen(req, timeout=60).read()
+    ]
+    db.insert("compression_events", rows)
     return len(keep)
 
 

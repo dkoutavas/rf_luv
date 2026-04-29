@@ -1,0 +1,30 @@
+-- Template for a new-location known_frequencies seed.
+-- Copy to `known_frequencies_<your_location>.sql`, replace the rows, and load:
+--
+--     cat spectrum/clickhouse/seeds/known_frequencies_<your_location>.sql \
+--       | docker exec -i clickhouse-spectrum clickhouse-client \
+--           --user spectrum --password spectrum_local
+--
+-- See known_frequencies_athens.sql for a working example.
+--
+-- Schema (spectrum.known_frequencies):
+--   freq_hz       UInt32   carrier center frequency in Hz
+--   bandwidth_hz  UInt32   nominal channel bandwidth (0 = unknown / mixed ISM)
+--   name          String   free-form human-readable label shown in Grafana
+--   class_id      String   matches spectrum.signal_classes (loose; no FK enforcement)
+--                          common values: fm, airband, marine, tetra, ham, gov, broadcast,
+--                                         business, satcom, ism, pmr
+--   modulation    String   WFM / NFM / AM / digital / OFDM / APT / mixed
+--   notes         String   freeform — useful when reviewing peaks vs known sources
+--
+-- The classifier scores higher when a peak matches one of these rows within
+-- ±150 kHz tolerance (FREQ_MATCH_TOLERANCE_HZ in spectrum/classifier.py).
+
+INSERT INTO spectrum.known_frequencies (freq_hz, bandwidth_hz, name, class_id, modulation, notes)
+SELECT * FROM (
+    -- TODO: replace with frequencies that matter at your location.
+    -- Examples to delete + replace:
+    SELECT 100000000 AS freq_hz, 200000 AS bandwidth_hz, 'Local FM 100.0' AS name, 'fm' AS class_id, 'WFM' AS modulation, 'Replace with your strongest local FM' AS notes
+    UNION ALL SELECT 162400000, 25000, 'NOAA Weather Radio (US)', 'broadcast', 'NFM', 'US WX channels — replace for non-US'
+) AS seed
+WHERE (SELECT count() FROM spectrum.known_frequencies) = 0;

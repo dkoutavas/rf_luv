@@ -15,15 +15,13 @@ Usage:
     python3 migrate.py --dry-run       # show what would run without applying
 """
 
-import os
 import sys
 import re
 import time
 import logging
 from pathlib import Path
-from urllib.parse import quote
-from urllib.request import urlopen, Request
-from urllib.error import URLError
+
+import db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,37 +31,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("migrate")
 
-CH_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8123")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
-CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
-CH_URL = f"http://{CH_HOST}:{CH_PORT}"
-
 MIGRATIONS_DIR = Path(__file__).parent / "clickhouse" / "migrations"
 MIGRATION_PATTERN = re.compile(r"^(\d{3})_.+\.sql$")
-
-
-def ch_query(query: str, data: str = "") -> str:
-    """Execute a ClickHouse query via HTTP API."""
-    params = f"user={CH_USER}&password={CH_PASSWORD}&database={CH_DB}"
-    if data:
-        url = f"{CH_URL}/?{params}&query={quote(query)}"
-        body = data.encode()
-    else:
-        url = f"{CH_URL}/?{params}"
-        body = query.encode()
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    req = Request(url, data=body, headers=headers)
-    resp = urlopen(req, timeout=30)
-    return resp.read().decode().strip()
 
 
 def wait_for_clickhouse(max_retries: int = 30, delay: int = 2) -> bool:
     """Wait until ClickHouse is accepting queries."""
     for i in range(max_retries):
         try:
-            ch_query("SELECT 1 FORMAT TabSeparated")
+            db.query("SELECT 1 FORMAT TabSeparated", timeout=30)
             return True
         except Exception:
             log.info(f"Waiting for ClickHouse... ({i + 1}/{max_retries})")
@@ -73,7 +49,7 @@ def wait_for_clickhouse(max_retries: int = 30, delay: int = 2) -> bool:
 
 def ensure_migrations_table():
     """Create the schema_migrations tracking table if it doesn't exist."""
-    ch_query("""
+    db.query("""
         CREATE TABLE IF NOT EXISTS spectrum.schema_migrations (
             version     String,
             name        String,
@@ -81,16 +57,17 @@ def ensure_migrations_table():
             checksum    String DEFAULT ''
         ) ENGINE = MergeTree()
         ORDER BY version
-    """)
+    """, timeout=30)
 
 
 def get_applied_versions() -> set[str]:
     """Return the set of migration versions already applied."""
     try:
-        result = ch_query(
-            "SELECT version FROM spectrum.schema_migrations FORMAT TabSeparated"
+        result = db.query(
+            "SELECT version FROM spectrum.schema_migrations FORMAT TabSeparated",
+            timeout=30,
         )
-        if not result:
+        if not result.strip():
             return set()
         return {line.strip() for line in result.split("\n") if line.strip()}
     except Exception as e:
@@ -203,7 +180,7 @@ def apply_migration(version: str, name: str, path: Path):
     statements = split_sql_statements(sql)
     for i, stmt in enumerate(statements):
         try:
-            ch_query(stmt)
+            db.query(stmt, timeout=30)
         except Exception as e:
             log.error(f"Migration {version} failed on statement {i + 1}: {e}")
             log.error(f"Statement: {stmt[:200]}")
@@ -211,9 +188,10 @@ def apply_migration(version: str, name: str, path: Path):
 
     # Record successful migration
     checksum = compute_checksum(path)
-    ch_query(
-        "INSERT INTO spectrum.schema_migrations FORMAT JSONEachRow",
-        f'{{"version": "{version}", "name": "{name}", "checksum": "{checksum}"}}'
+    db.insert(
+        "spectrum.schema_migrations",
+        [{"version": version, "name": name, "checksum": checksum}],
+        timeout=30,
     )
     log.info(f"Migration {version} applied successfully")
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily heartbeat ntfy at 09:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 UTC
+Persistent=true
+RandomizedDelaySec=60
+Unit=rf-heartbeat.service
+
+[Install]
+WantedBy=timers.target

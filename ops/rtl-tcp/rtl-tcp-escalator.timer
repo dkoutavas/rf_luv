@@ -1,0 +1,11 @@
+[Unit]
+Description=rtl_tcp escalator timer (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=rtl-tcp-escalator.service
+
+[Install]
+WantedBy=timers.target

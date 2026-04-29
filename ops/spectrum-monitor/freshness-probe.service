@@ -1,0 +1,10 @@
+[Unit]
+Description=Spectrum pipeline freshness probe (ClickHouse-level)
+Wants=network.target
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rf-freshness-probe
+TimeoutStartSec=60
+User=root

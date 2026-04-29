@@ -392,6 +392,51 @@ ClickHouse (spectrum database, :8126/:9003)
 - Transient detection: >15 dB change between consecutive sweeps
 - Reconnect to rtl_tcp for each sweep to prevent TCP buffer stale data accumulation
 
+## Reliability Stack on Leap
+
+The leap host carries a layered reliability stack — each layer catches a failure mode the layer above can't see. Code lives under `ops/`:
+
+```
+            ┌──────────────────────────────────────────────────────────────┐
+            │  rtl-tcp-watchdog  (user-level, 30s)                         │  fastest
+            │   probe → soft restart → unbind/rebind → CB-open at fail #10 │  per-process
+            └──────────────────────────────────────────────────────────────┘
+                              ↓ stops here
+            ┌──────────────────────────────────────────────────────────────┐
+            │  rtl-tcp-escalator  (root, 5min)                             │  USB layer
+            │   on CB-open ≥10min: rtl-usb-reset + xHCI bounce + restart   │
+            │   on 3 failed unwedges/24h or both CB ≥30min: systemctl reboot│  hardware
+            └──────────────────────────────────────────────────────────────┘
+                              ↓ stops here
+            ┌──────────────────────────────────────────────────────────────┐
+            │  freshness-probe  (root, 5min)                               │  data layer
+            │   queries spectrum.scans per dongle_id                       │
+            │   WARN >10min stale, CRITICAL >25min stale                   │  catches
+            │   catches: Docker death, ClickHouse OOM, ingest broken       │  downstream
+            └──────────────────────────────────────────────────────────────┘
+                              ↓
+            ┌──────────────────────────────────────────────────────────────┐
+            │  notify.py → ntfy.sh → operator's phone                      │  alerting
+            │   topic in /etc/rtl-scanner/notify.env (gitignored)          │
+            │   daily heartbeat 09:00 UTC confirms pipe is alive           │
+            └──────────────────────────────────────────────────────────────┘
+```
+
+**Action log**: every layer appends JSON lines to `/var/log/rtl-recovery.log` (logrotate weekly, 4-week retention). On return from a trip, `cat /var/log/rtl-recovery.log | jq` is the single source of truth for what happened.
+
+**State files** (root-owned, world-readable):
+- `/var/lib/rtl-tcp-escalator/state.json` — per-serial unwedge attempts in last 24h, cb_first_seen timestamps, last_reboot_ts
+- `/var/lib/spectrum-monitor/freshness.json` — current freshness level + stale_sec per dongle_id
+- `/run/user/1000/rtl-tcp-watchdog-<serial>.state` — per-serial consecutive_failures + last_hard_reset_ts (user-level, the watchdog's own state)
+
+**Install**: `bash ops/install-trip-hardening.sh` — idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v3-01.service` doesn't exist yet).
+
+**Failure modes this stack does NOT cover**:
+- Chip-lockup (the 2026-04-28 V3 incident pattern: hot-but-enumerated, no software response). Hardware mitigation only — per-port-power hub (e.g. YEPKIT YKUSH3) or smart plug for whole-machine cycle.
+- Kernel panic / hard hang. `systemctl reboot` can't help; smart plug only.
+- Outbound network down for >24h. ntfy alerts won't reach the phone.
+- Both dongles flapping due to a shared-bus hardware fault. Escalator handles each independently and will reboot per the both-CB-open threshold.
+
 ## Port Allocation
 
 | Pipeline | ClickHouse HTTP | ClickHouse Native | Grafana | Extra |

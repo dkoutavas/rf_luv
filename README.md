@@ -29,7 +29,7 @@ If you're on WSL/openSUSE and want the local CLI toolchain (`rtl_433`, `multimon
 
 The RTL-SDR is a USB device, so `rtl_tcp` runs on the host that physically owns the dongle and streams IQ samples over TCP. All downstream containers — scanner, ingest, ClickHouse, Grafana — run in Docker and reach `rtl_tcp` via `host.docker.internal`. The same bridge is reused by every pipeline, but **only one pipeline can hold the dongle at a time** (single-client).
 
-Production host: `leap` (192.168.2.10, openSUSE Leap 15.6), where `rtl_tcp` is wrapped by the reliability stack in `ops/rtl-tcp/` — a systemd user unit plus a 30-second watchdog timer that restarts the service and, as escalation, soft-replugs the USB device when the dongle enters its "RTL0 greeting but zero samples" failure mode.
+Production host: `leap` (192.168.2.10, openSUSE Leap 15.6), where `rtl_tcp` is wrapped by a layered reliability stack: the user-level **watchdog** in `ops/rtl-tcp/` handles the per-process "RTL0 greeting but zero samples" failure mode (30 s probe, soft restart → USB unbind/rebind, circuit-breaker at fail #10). For unattended operation a root-level **escalator** in `ops/rtl-tcp/rtl-tcp-escalator.py` picks up after the circuit breaker — running the full per-device + xHCI bounce + restart sequence proven on V4, then `systemctl reboot` as a last resort. A separate **freshness probe** in `ops/spectrum-monitor/` watches ClickHouse `spectrum.scans` to catch downstream stalls (Docker, ingest, ClickHouse itself) the per-process watchdog can't see. Push alerts go via [ntfy.sh](https://ntfy.sh) using the helper in `ops/notify/`; a daily heartbeat confirms the alert pipe is alive. Install with `bash ops/install-trip-hardening.sh`.
 
 ## Pipelines
 
@@ -47,7 +47,10 @@ The spectrum stack is intentionally dependency-light — numpy for DSP, stdlib f
 - **[`spectrum/scanner.py`](spectrum/scanner.py)** — custom `rtl_tcp` FFT client. `rtl_power`, the usual tool for this job, only speaks direct USB and was replaced. Implements: multi-preset scheduler (full 88–470 MHz every ~5 min, airband 118–137 MHz every 60 s, picked by "most overdue"); Hann-windowed FFT with linear-domain averaging (N=8) to avoid dB-averaging bias on bursty signals; peak detection (prominence vs. ±5 neighbor bins); transient detection (Δ≥15 dB vs. previous full sweep); adaptive gain with floor on ADC clipping; per-sweep health metadata (clipping, duration, worst-case bin).
 - **[`spectrum/scan_ingest.py`](spectrum/scan_ingest.py)** — stdlib-only ClickHouse batch inserter. Reads JSON lines from the scanner, routes by message type (`bin` / `peak` / `event` / `health` / `run_start` / `run_update` / `run_end`) into the matching table, flushes on size or interval.
 - **[`spectrum/migrate.py`](spectrum/migrate.py)** — numbered-SQL migration runner, applied at container start before the scanner pipe opens. Migrations live in `spectrum/clickhouse/migrations/`.
-- **[`ops/rtl-tcp/rtl-tcp-watchdog.py`](ops/rtl-tcp/rtl-tcp-watchdog.py)** — 30 s systemd-timer watchdog. Connects to `rtl_tcp`, verifies the RTL0 greeting *and* ≥512 KB of actual IQ samples within 2 s. Escalation: restart the user unit → unbind/rebind the USB device.
+- **[`ops/rtl-tcp/rtl-tcp-watchdog.py`](ops/rtl-tcp/rtl-tcp-watchdog.py)** — 30 s systemd-timer watchdog. Connects to `rtl_tcp`, verifies the RTL0 greeting *and* ≥512 KB of actual IQ samples within 2 s. Escalation: restart the user unit → unbind/rebind the USB device. Stops at fail #10 (circuit breaker) so a stuck dongle can't trigger a USB-reset storm.
+- **[`ops/rtl-tcp/rtl-tcp-escalator.py`](ops/rtl-tcp/rtl-tcp-escalator.py)** — root-level 5 min systemd timer that picks up where the watchdog stops. After CB-open ≥10 min on a serial it runs the proven manual recipe (per-device USB reset → xHCI controller bounce → restart user unit). After 3 unsuccessful unwedges in 24 h, or both serials CB-open ≥30 min, triggers `systemctl reboot` (rate-limited 1/6 h).
+- **[`ops/spectrum-monitor/freshness-probe.py`](ops/spectrum-monitor/freshness-probe.py)** — 5 min ClickHouse-level liveness check. Catches scanner / Docker / ClickHouse / ingest failures the per-process watchdog can't see. WARN >10 min stale, CRITICAL >25 min stale, per `dongle_id`.
+- **[`ops/notify/notify.py`](ops/notify/notify.py)** — stdlib ntfy.sh push helper. Used by the escalator, freshness probe, and a daily heartbeat to reach a phone via [ntfy.sh](https://ntfy.sh). Topic configured in `/etc/rtl-scanner/notify.env`.
 
 ## Running the spectrum pipeline
 
@@ -76,6 +79,9 @@ spectrum/          # primary pipeline — scanner, ingest, migrations, ClickHous
   grafana/           # provisioned datasources and dashboards
   logging/           # operator listening-log HTML form (served on :8084)
 ops/rtl-tcp/       # systemd unit, watchdog, USB reset — host-side rtl_tcp reliability
+ops/spectrum-monitor/  # ClickHouse-level freshness probe (alerts on downstream stalls)
+ops/notify/        # ntfy.sh push helper + daily heartbeat
+ops/install-trip-hardening.sh  # idempotent installer for the unattended-ops layer
 adsb/ ais/ ism/    # companion pipelines (see each directory's docker-compose.yml)
 scripts/           # one-shot CLI helpers (airband, ISM, AIS, satellite passes)
 setup/             # WSL installer and Windows setup guide

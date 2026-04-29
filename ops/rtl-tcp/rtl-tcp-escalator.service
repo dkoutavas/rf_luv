@@ -1,0 +1,11 @@
+[Unit]
+Description=Escalator past rtl_tcp watchdog circuit breaker (root-level)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rtl-tcp-escalator
+TimeoutStartSec=120
+# Run as root: needs to write /sys/bus/pci/drivers/xhci_hcd/{un,}bind, talk to
+# the user systemd manager via --machine, and (last resort) systemctl reboot.
+User=root

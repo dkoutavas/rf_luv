@@ -414,6 +414,14 @@ The leap host carries a layered reliability stack — each layer catches a failu
             │   WARN >10min stale, CRITICAL >25min stale                   │  catches
             │   catches: Docker death, ClickHouse OOM, ingest broken       │  downstream
             └──────────────────────────────────────────────────────────────┘
+                              ↓ stops here (data flowing but useless?)
+            ┌──────────────────────────────────────────────────────────────┐
+            │  signal-quality-probe  (root, 5min)                          │  RF layer
+            │   queries spectrum.sweep_health per dongle_id (full sweeps)  │
+            │   WARN max_power < -35 dBFS over 30min                        │  catches
+            │   CRITICAL max_power < -40 dBFS over 30min                    │  deaf
+            │   catches: antenna disconnect, loose F-connector, broken filter │ scanner
+            └──────────────────────────────────────────────────────────────┘
                               ↓
             ┌──────────────────────────────────────────────────────────────┐
             │  notify.py → ntfy.sh → operator's phone                      │  alerting
@@ -427,6 +435,7 @@ The leap host carries a layered reliability stack — each layer catches a failu
 **State files** (root-owned, world-readable):
 - `/var/lib/rtl-tcp-escalator/state.json` — per-serial unwedge attempts in last 24h, cb_first_seen timestamps, last_reboot_ts
 - `/var/lib/spectrum-monitor/freshness.json` — current freshness level + stale_sec per dongle_id
+- `/var/lib/spectrum-monitor/signal_quality.json` — current signal level + max_pwr per dongle_id over the last 30 min
 - `/run/user/1000/rtl-tcp-watchdog-<serial>.state` — per-serial consecutive_failures + last_hard_reset_ts (user-level, the watchdog's own state)
 
 **Install**: `bash ops/install-trip-hardening.sh` — idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v3-01.service` doesn't exist yet).
@@ -436,6 +445,7 @@ The leap host carries a layered reliability stack — each layer catches a failu
 - Kernel panic / hard hang. `systemctl reboot` can't help; smart plug only.
 - Outbound network down for >24h. ntfy alerts won't reach the phone.
 - Both dongles flapping due to a shared-bus hardware fault. Escalator handles each independently and will reboot per the both-CB-open threshold.
+- Antenna or filter physical failure: signal-quality-probe **alerts** (within 30 min) but cannot self-recover. Operator inspection / re-seat connectors required. The 2026-04-29 V3 RF-chain failure was the canonical case — coax/F-connector at the FM bandstop loosened, sweep `max_power` dropped 30 dB, fixed by replug.
 
 ## Port Allocation
 

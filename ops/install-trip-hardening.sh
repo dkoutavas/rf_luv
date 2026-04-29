@@ -5,14 +5,17 @@
 # What this installs (all root-level):
 #   /usr/local/bin/rtl-tcp-escalator         escalator past the watchdog CB
 #   /usr/local/bin/rf-freshness-probe        ClickHouse-level liveness check
+#   /usr/local/bin/rf-signal-quality-probe   deaf-scanner detection (low max_power)
 #   /usr/local/bin/rf-notify                 ntfy.sh sender (stdlib urllib)
 #   /usr/local/bin/rf-heartbeat              daily heartbeat
-#   /etc/systemd/system/rtl-tcp-escalator.{service,timer}    every 5 min
-#   /etc/systemd/system/rf-freshness-probe.{service,timer}   every 5 min
-#   /etc/systemd/system/rf-heartbeat.{service,timer}         daily at 09:00 UTC
+#   /etc/systemd/system/rtl-tcp-escalator.{service,timer}        every 5 min
+#   /etc/systemd/system/rf-freshness-probe.{service,timer}       every 5 min
+#   /etc/systemd/system/rf-signal-quality-probe.{service,timer}  every 5 min
+#   /etc/systemd/system/rf-heartbeat.{service,timer}             daily at 09:00 UTC
 #   /etc/rtl-scanner/notify.env              ntfy topic config (placeholder)
 #   /etc/rtl-scanner/escalator.env           escalator overrides (optional)
 #   /etc/rtl-scanner/freshness-probe.env     freshness overrides (optional)
+#   /etc/rtl-scanner/signal-quality-probe.env signal-quality overrides (optional)
 #   /etc/logrotate.d/rtl-recovery            logrotate for /var/log/rtl-recovery.log
 #   /var/lib/rtl-tcp-escalator/              state dir
 #   /var/lib/spectrum-monitor/               state dir
@@ -61,6 +64,9 @@ for f in \
     "$SPEC_DIR/freshness-probe.py" \
     "$SPEC_DIR/freshness-probe.service" \
     "$SPEC_DIR/freshness-probe.timer" \
+    "$SPEC_DIR/signal-quality-probe.py" \
+    "$SPEC_DIR/signal-quality-probe.service" \
+    "$SPEC_DIR/signal-quality-probe.timer" \
     "$NOTIFY_DIR/notify.py" \
     "$NOTIFY_DIR/notify.env.example" \
     "$NOTIFY_DIR/heartbeat.sh" \
@@ -72,6 +78,7 @@ done
 step "Install scripts"
 run sudo install -m 0755 "$RTL_TCP_DIR/rtl-tcp-escalator.py"   /usr/local/bin/rtl-tcp-escalator
 run sudo install -m 0755 "$SPEC_DIR/freshness-probe.py"        /usr/local/bin/rf-freshness-probe
+run sudo install -m 0755 "$SPEC_DIR/signal-quality-probe.py"   /usr/local/bin/rf-signal-quality-probe
 run sudo install -m 0755 "$NOTIFY_DIR/notify.py"               /usr/local/bin/rf-notify
 run sudo install -m 0755 "$NOTIFY_DIR/heartbeat.sh"            /usr/local/bin/rf-heartbeat
 info "scripts installed"
@@ -81,6 +88,8 @@ run sudo install -m 0644 "$RTL_TCP_DIR/rtl-tcp-escalator.service"  /etc/systemd/
 run sudo install -m 0644 "$RTL_TCP_DIR/rtl-tcp-escalator.timer"    /etc/systemd/system/rtl-tcp-escalator.timer
 run sudo install -m 0644 "$SPEC_DIR/freshness-probe.service"      /etc/systemd/system/rf-freshness-probe.service
 run sudo install -m 0644 "$SPEC_DIR/freshness-probe.timer"        /etc/systemd/system/rf-freshness-probe.timer
+run sudo install -m 0644 "$SPEC_DIR/signal-quality-probe.service" /etc/systemd/system/rf-signal-quality-probe.service
+run sudo install -m 0644 "$SPEC_DIR/signal-quality-probe.timer"   /etc/systemd/system/rf-signal-quality-probe.timer
 run sudo install -m 0644 "$NOTIFY_DIR/heartbeat.service"          /etc/systemd/system/rf-heartbeat.service
 run sudo install -m 0644 "$NOTIFY_DIR/heartbeat.timer"            /etc/systemd/system/rf-heartbeat.timer
 info "units installed"
@@ -144,6 +153,7 @@ if [ "$ENABLE" -eq 1 ]; then
     step "Enable + start timers"
     run sudo systemctl enable --now rtl-tcp-escalator.timer
     run sudo systemctl enable --now rf-freshness-probe.timer
+    run sudo systemctl enable --now rf-signal-quality-probe.timer
     run sudo systemctl enable --now rf-heartbeat.timer
     info "timers enabled"
 else
@@ -151,7 +161,7 @@ else
 fi
 
 step "Verify"
-run sudo systemctl list-timers --no-pager 'rtl-tcp-escalator.timer' 'rf-freshness-probe.timer' 'rf-heartbeat.timer'
+run sudo systemctl list-timers --no-pager 'rtl-tcp-escalator.timer' 'rf-freshness-probe.timer' 'rf-signal-quality-probe.timer' 'rf-heartbeat.timer'
 
 echo
 info "Install complete."
@@ -161,4 +171,5 @@ echo "  1. Edit /etc/rtl-scanner/notify.env and set NTFY_TOPIC=<your-topic>"
 echo "  2. Test the alert pipe:  rf-notify INFO 'install test' -m 'pipe alive' --force"
 echo "  3. One-shot dry-run of escalator:  sudo /usr/local/bin/rtl-tcp-escalator --dry-run"
 echo "  4. One-shot freshness:             sudo /usr/local/bin/rf-freshness-probe"
-echo "  5. Tail action log:                sudo tail -f /var/log/rtl-recovery.log"
+echo "  5. One-shot signal quality:        sudo /usr/local/bin/rf-signal-quality-probe"
+echo "  6. Tail action log:                sudo tail -f /var/log/rtl-recovery.log"

@@ -1,0 +1,10 @@
+[Unit]
+Description=Spectrum pipeline signal-quality probe (deaf-scanner detection)
+Wants=network.target
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rf-signal-quality-probe
+TimeoutStartSec=60
+User=root

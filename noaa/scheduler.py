@@ -147,6 +147,9 @@ def predict_passes() -> list[dict]:
     out: list[dict] = []
     for sat_name, (l1, l2) in tles_by_name.items():
         try:
+            # NOTE: previous "too many values to unpack" failure traced to
+            # an API mismatch with orbit-predictor 1.15.2's signature here
+            # — keep this try-block tight so the next diagnosis is easy.
             predictor = get_predictor_from_tle_lines([sat_name, l1, l2])
             now = datetime.now(timezone.utc)
             while now < horizon_end:
@@ -167,8 +170,8 @@ def predict_passes() -> list[dict]:
                     "duration_s": int((pass_obj.los - pass_obj.aos).total_seconds()),
                 })
                 now = pass_obj.los + timedelta(seconds=1)
-        except Exception as e:
-            log.warning(f"prediction for {sat_name} failed: {e}")
+        except Exception:
+            log.exception(f"prediction for {sat_name} failed")
     return sorted(out, key=lambda p: p["pass_start"])
 
 

@@ -1,0 +1,195 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Messages (last 5 min)",
+      "description": "ACARS message rate sanity check — should rarely be 0 during the day at a busy airport",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() AS msgs FROM acars.messages WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Unique flights (last hour)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(flight) AS flights FROM acars.messages WHERE timestamp > now() - INTERVAL 1 HOUR AND flight != ''",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique tails today",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(tail) AS tails FROM acars.messages WHERE timestamp > today() AND tail != ''",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total messages today",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() AS total FROM acars.messages WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Messages per minute (24h)",
+      "description": "Look for diurnal pattern matching airport traffic curve",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS t, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) GROUP BY t ORDER BY t",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Top flights (by message count)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT flight, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) AND flight != '' GROUP BY flight ORDER BY msgs DESC LIMIT 15",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Top tails (by message count)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT tail, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) AND tail != '' GROUP BY tail ORDER BY msgs DESC LIMIT 15",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Messages by ACARS label",
+      "description": "Label is the 2-char ACARS message type (e.g. _d=DCDU, H1=ACARS-over-VHF, B6=position report)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT label, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) AND label != '' GROUP BY label ORDER BY msgs DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Messages per frequency channel",
+      "description": "Which 131.* MHz channel is hottest right now",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toString(round(freq_mhz, 3)) AS freq, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) GROUP BY freq ORDER BY msgs DESC",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Signal level (avg dBFS over time)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfFifteenMinutes(timestamp) AS t, avg(level_db) AS level FROM acars.messages WHERE $__timeFilter(timestamp) GROUP BY t ORDER BY t",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Top OOOI airport pairs (depa → dsta)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT concat(depa, '-', dsta) AS route, count() AS msgs FROM acars.messages WHERE $__timeFilter(timestamp) AND depa != '' AND dsta != '' GROUP BY route ORDER BY msgs DESC LIMIT 15",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Recent messages",
+      "description": "Last 100 ACARS messages — joins on tail to ADS-B (cross-DB query) once classifier feedback is wired",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, freq_mhz, level_db, label, flight, tail, msgno, text FROM acars.messages WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 100",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Frequency activity (MV: acars.freq_activity)",
+      "description": "Validates the classifier-feedback loop. Each row = (freq, dongle) with last_seen and total count. Spectrum classifier reads this to confirm ACARS stations.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ACARS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT freq_mhz, dongle_id, last_seen, message_count, round(avg_level_db, 1) AS avg_level FROM acars.freq_activity FINAL ORDER BY message_count DESC",
+          "format": 1
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["acars", "aviation", "rf_luv"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ACARS Overview",
+  "uid": "acars-overview",
+  "version": 1,
+  "weekStart": ""
+}

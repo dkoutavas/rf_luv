@@ -1,0 +1,132 @@
+# ACARS Aircraft Communications Pipeline
+# acarsdec (decoder) → acars-ingest (UDP→ClickHouse) → Grafana (dashboards)
+#
+# Usage on leap (production):
+#   cp env.v4-01.example .env
+#   docker compose up -d
+#   open http://localhost:3004 for Grafana dashboards
+#
+# Usage for local smoke testing (no real radio):
+#   docker compose up -d clickhouse acars-ingest grafana
+#   # then synthesize ACARS messages with:
+#   #   echo '{"timestamp":1764691234.0,"freq":"131.525","level":"-25",...}' | nc -u -w1 localhost 5550
+#
+# RTL-SDR connection: ACARS owns V4 (rtl_tcp on leap port 1235). The
+# spectrum scanner stays on V3 (port 1234). See ../docs/decoding-roadmap
+# for the dongle-assignment policy.
+#
+# Pipeline pattern: decoder image (sdr-enthusiasts/docker-acarsdec) emits
+# JSON datagrams via UDP; the ingest sidecar listens on UDP :5550, batches
+# rows, and INSERTs to ClickHouse. Mirrors the AIS pipeline shape.
+
+services:
+
+  # ─── ACARS Decoder ──────────────────────────────────────
+  # Maintained image with airframesio/acarsdec + SoapySDR + Soapy-rtltcp.
+  # Connects to rtl_tcp via SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>
+  # and ships decoded messages as JSON UDP datagrams to acars-ingest:5550.
+  acarsdec:
+    image: ghcr.io/sdr-enthusiasts/docker-acarsdec:4.1.6Build1494
+    container_name: acarsdec
+    restart: unless-stopped
+    depends_on:
+      - acars-ingest
+    environment:
+      # Tuner: full SoapySDR string. On leap, set this to:
+      #   driver=rtltcp,rtltcp=192.168.2.10:1235
+      # Adjust per-deployment via .env.
+      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:1235}"
+      FREQUENCIES: "${ACARS_FREQUENCIES:-131.525;131.725;131.825}"
+      GAIN: "${ACARS_GAIN:-30}"
+      PPM: "${ACARS_PPM:-0}"
+      FEED_ID: "${ACARS_FEED_ID:-rf_luv-v4-01}"
+      # Send decoded messages to the ingest container as JSON over UDP.
+      MODE: "J"
+      OUTPUT_SERVER: "acars-ingest"
+      OUTPUT_SERVER_PORT: "5550"
+      OUTPUT_SERVER_MODE: "udp"
+      QUIET_LOGS: "${ACARS_QUIET_LOGS:-false}"
+      TZ: "${TZ:-UTC}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── ACARS Ingest Worker ────────────────────────────────
+  # Listens for JSON UDP from acarsdec, parses fields, batch-inserts to ClickHouse.
+  acars-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: acars-ingest
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      ACARS_UDP_PORT: "5550"
+      ACARS_DONGLE_ID: "${ACARS_DONGLE_ID:-v4-01}"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: acars
+      CLICKHOUSE_USER: acars
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-acars_local}"
+      BATCH_SIZE: "${BATCH_SIZE:-100}"
+      FLUSH_INTERVAL_SECONDS: "${FLUSH_INTERVAL_SECONDS:-10}"
+    # acarsdec → acars-ingest UDP traffic stays on the compose network (no host port).
+
+  # ─── ClickHouse (Time Series Storage) ───────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-acars
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: acars
+      CLICKHOUSE_USER: acars
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-acars_local}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8127:8123"   # HTTP interface
+      - "9004:9000"   # native TCP
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      # busybox wget in the ClickHouse alpine image resolves localhost to
+      # something ClickHouse isn't bound to (connection refused observed on
+      # leap even though HTTP from other containers works) — same fix as
+      # spectrum/docker-compose.yml. clickhouse-client sidesteps the HTTP
+      # resolution path and matches upstream ops docs.
+      test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-acars}", "--password", "${CLICKHOUSE_PASSWORD:-acars_local}", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana (Dashboards) ───────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-acars
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3004:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  clickhouse-data:
+  grafana-data:

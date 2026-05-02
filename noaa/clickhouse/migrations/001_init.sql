@@ -73,7 +73,11 @@ AS SELECT
     argMax(status,          inserted_at) AS status,
     argMax(notes,           inserted_at) AS notes,
     argMax(dongle_id,       inserted_at) AS dongle_id,
-    max(inserted_at) AS inserted_at
+    -- argMax(x,x) == max(x) but framed as an argMax avoids a ClickHouse
+    -- ILLEGAL_AGGREGATION error: `max(inserted_at) AS inserted_at` next to
+    -- `argMax(field, inserted_at)` confuses the parser into thinking the
+    -- outer max() is nested inside the argMax. Discovered 2026-05-02.
+    argMax(inserted_at, inserted_at) AS inserted_at
 FROM noaa.passes
 GROUP BY pass_start, satellite;
 

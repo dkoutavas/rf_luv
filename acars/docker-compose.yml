@@ -47,7 +47,14 @@ services:
       GAIN: "${ACARS_GAIN:-30}"
       PPM: "${ACARS_PPM:-0}"
       FEED_ID: "${ACARS_FEED_ID:-rf_luv-v4-01}"
-      # Send decoded messages to the ingest container as JSON over UDP.
+      # The image ships decoded JSON via the `acars_feeder` s6 service,
+      # which reads SERVER + SERVER_PORT (NOT the `OUTPUT_SERVER*` env
+      # vars implied by the docker-acarsdec README — that maps to a
+      # different downstream feeder script). Default SERVER is "acarshub"
+      # which doesn't exist on our network — overriding to our ingest sidecar.
+      SERVER: "acars-ingest"
+      SERVER_PORT: "5550"
+      # Kept for forward compat with any future feeder script that reads them.
       MODE: "J"
       OUTPUT_SERVER: "acars-ingest"
       OUTPUT_SERVER_PORT: "5550"

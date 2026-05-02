@@ -61,7 +61,11 @@ services:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      # busybox wget in clickhouse:24.3-alpine resolves localhost to an
+      # address ClickHouse isn't bound to on some hosts (observed on leap;
+      # WSL appears to work). clickhouse-client sidesteps the HTTP path.
+      # Same fix as spectrum/docker-compose.yml + acars/docker-compose.yml.
+      test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-ism}", "--password", "${CLICKHOUSE_PASSWORD:-ism_local}", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 5

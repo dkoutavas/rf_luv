@@ -22,7 +22,7 @@ import logging
 from datetime import datetime, timezone
 from urllib.parse import quote
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 
 # ─── Config ──────────────────────────────────────────────
 
@@ -61,14 +61,34 @@ CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
 
 def clickhouse_query(query: str, data: str = "") -> str:
-    """Execute a ClickHouse query via HTTP interface."""
-    params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}&query={quote(query)}"
-    url = f"{CH_URL}?{params}"
-    req = Request(url, data=data.encode("utf-8") if data else None)
+    """Execute a ClickHouse query via HTTP interface.
+
+    Always POSTs (mirrors spectrum/db.py + acars/migrate.py):
+      - SELECT / DDL:        clickhouse_query(sql)               → SQL in body
+      - INSERT with payload: clickhouse_query(sql, data=rows)    → SQL in URL, payload in body
+
+    ClickHouse 24.3 forbids DDL via GET ("readonly mode"), so always-POST
+    keeps the function future-proof if ISM ever runs DDL through it
+    (currently it only does INSERTs; init.sql runs at clickhouse boot).
+    HTTPError captures the response body so ClickHouse's actual complaint
+    is visible in logs instead of a bare HTTP 500.
+    """
+    base_params = f"database={CH_DB}&user={CH_USER}&password={CH_PASSWORD}"
+    if data:
+        url = f"{CH_URL}?{base_params}&query={quote(query)}"
+        body = data.encode("utf-8")
+    else:
+        url = f"{CH_URL}?{base_params}"
+        body = query.encode("utf-8")
+    req = Request(url, data=body)
     req.add_header("Content-Type", "text/plain")
     try:
         with urlopen(req, timeout=10) as resp:
             return resp.read().decode("utf-8")
+    except HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        log.error(f"ClickHouse HTTP {e.code}: {err_body[:400]}")
+        raise
     except URLError as e:
         log.error(f"ClickHouse query failed: {e}")
         raise

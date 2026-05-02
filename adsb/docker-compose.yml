@@ -100,7 +100,9 @@ services:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      # See ism/docker-compose.yml for the rationale — busybox wget vs
+      # ClickHouse bind address on leap. Same fix as spectrum + acars + ais + ism.
+      test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-adsb}", "--password", "${CLICKHOUSE_PASSWORD:-adsb_local}", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 5

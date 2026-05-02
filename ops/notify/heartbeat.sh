@@ -25,7 +25,8 @@ try:
     s = json.load(open("'"$FRESHNESS_STATE"'"))
     parts = []
     for d, v in sorted(s.get("dongles", {}).items()):
-        parts.append(f"{d}={v.get(\"stale_sec\", \"?\")}s")
+        stale = v.get("stale_sec", "?")
+        parts.append(f"{d}={stale}s")
     print(" ".join(parts) if parts else "no-data")
 except Exception as e:
     print(f"err:{e}")

@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir orbit-predictor
+WORKDIR /app
+COPY scheduler.py recorder.py migrate.py ./
+COPY clickhouse/migrations/ ./clickhouse/migrations/
+# This image only runs the schema migrator + the scheduler in dry-run mode
+# (so we can validate the stack stands up). The actual recorder runs on the
+# host via systemd-run, NOT in Docker — it needs USB / rtl_tcp access that
+# Docker doesn't easily expose.
+ENTRYPOINT ["python3", "-u", "/app/migrate.py"]

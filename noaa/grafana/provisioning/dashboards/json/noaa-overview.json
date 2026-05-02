@@ -1,0 +1,93 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Passes today",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        { "rawSql": "SELECT count() FROM noaa.pass_latest FINAL WHERE pass_start > today()", "format": 1 }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Decoded today",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        { "rawSql": "SELECT count() FROM noaa.pass_latest FINAL WHERE pass_start > today() AND status = 'decoded'", "format": 1 }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Failed today",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        { "rawSql": "SELECT count() FROM noaa.pass_latest FINAL WHERE pass_start > today() AND status = 'failed'", "format": 1 }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg SNR (decoded)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        { "rawSql": "SELECT avg(snr_db) FROM noaa.pass_latest FINAL WHERE pass_start > today() AND status = 'decoded'", "format": 1 }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Upcoming + recent passes",
+      "description": "Latest known state per (pass_start, satellite). Status pending = scheduled; recording/recorded/decoded/failed = post-AOS.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT pass_start, satellite, freq_mhz, round(max_elevation, 1) AS max_el, duration_s, status, round(snr_db, 1) AS snr, image_path, notes FROM noaa.pass_latest FINAL WHERE pass_start > now() - INTERVAL 24 HOUR ORDER BY pass_start DESC LIMIT 50",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Passes by satellite (last 30 days)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT satellite, count() AS passes, sum(if(status='decoded',1,0)) AS decoded FROM noaa.pass_latest FINAL WHERE pass_start > now() - INTERVAL 30 DAY GROUP BY satellite ORDER BY passes DESC",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Daily decode count (30 days)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_NOAA_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfDay(pass_start) AS day, count() AS passes FROM noaa.pass_latest FINAL WHERE pass_start > now() - INTERVAL 30 DAY GROUP BY day ORDER BY day",
+          "format": 0
+        }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["noaa", "satellite", "rf_luv"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now+12h" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "NOAA / Meteor Passes",
+  "uid": "noaa-overview",
+  "version": 1,
+  "weekStart": ""
+}

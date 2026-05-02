@@ -1,0 +1,87 @@
+# NOAA / Meteor weather satellite pipeline (Tier 2 #6)
+#
+# This stack is INTENTIONALLY minimal — only ClickHouse + Grafana + a
+# one-shot migrator container. The recording + decoding workflow runs
+# on the HOST via systemd-run (see ../ops/noaa-pass-scheduler/) because
+# rtl_fm needs direct USB access that Docker doesn't expose cleanly.
+#
+# Ports: 8128/9005/3005 (continues the 8123→8127 sequence).
+#
+# Usage:
+#   docker compose up -d
+#   open http://localhost:3005 for Grafana
+#   bash ../ops/noaa-pass-scheduler/install.sh   # to enable hourly scheduling
+
+services:
+
+  # ─── Migrator (one-shot) ────────────────────────────────
+  # Applies migrations and exits 0. Restart on failure but not on success.
+  noaa-migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: noaa-migrator
+    restart: on-failure
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: noaa
+      CLICKHOUSE_USER: noaa
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-noaa_local}"
+
+  # ─── ClickHouse ─────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse-noaa
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: noaa
+      CLICKHOUSE_USER: noaa
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-noaa_local}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8128:8123"
+      - "9005:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      # Same fix as acars/spectrum — busybox wget vs ClickHouse bind on leap.
+      test: ["CMD", "clickhouse-client", "--user", "${CLICKHOUSE_USER:-noaa}", "--password", "${CLICKHOUSE_PASSWORD:-noaa_local}", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ─── Grafana ────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana-noaa
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+    ports:
+      - "3005:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  clickhouse-data:
+  grafana-data:

@@ -147,10 +147,12 @@ def predict_passes() -> list[dict]:
     out: list[dict] = []
     for sat_name, (l1, l2) in tles_by_name.items():
         try:
-            # NOTE: previous "too many values to unpack" failure traced to
-            # an API mismatch with orbit-predictor 1.15.2's signature here
-            # — keep this try-block tight so the next diagnosis is easy.
-            predictor = get_predictor_from_tle_lines([sat_name, l1, l2])
+            # orbit-predictor 1.15.2 expects ONLY the 2 TLE lines —
+            # passing the name as a 3rd element triggers ValueError
+            # "too many values to unpack" inside accurate.py:94 where
+            # `tle_line_1, tle_line_2 = self.tle.lines`. The satellite
+            # identity comes from the NORAD number embedded in the TLE.
+            predictor = get_predictor_from_tle_lines([l1, l2])
             now = datetime.now(timezone.utc)
             while now < horizon_end:
                 pass_obj = predictor.get_next_pass(receiver, when_utc=now)

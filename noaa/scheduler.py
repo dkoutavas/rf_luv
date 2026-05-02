@@ -199,12 +199,19 @@ def main() -> None:
     # rejects the comparison with NO_COMMON_TYPE. Cast the LHS to DateTime
     # for the WHERE clause (sub-second precision is irrelevant for an
     # "is this row from the last hour" filter).
+    # Don't alias `toString(pass_start) AS pass_start` — ClickHouse 24.3
+    # resolves the SELECT alias in the WHERE clause too, so a subsequent
+    # toDateTime(pass_start) in the WHERE becomes toDateTime(toString(...))
+    # which fails on millisecond suffixes. Use a different output name.
     try:
-        existing = ch_query_rows(
-            "SELECT satellite, toString(pass_start) AS pass_start "
+        existing_raw = ch_query_rows(
+            "SELECT satellite, toString(pass_start) AS pass_start_str "
             "FROM noaa.pass_latest "
             "WHERE toDateTime(pass_start) > now() - INTERVAL 1 HOUR"
         )
+        # Rename for downstream code that already uses key 'pass_start'.
+        existing = [{"satellite": r["satellite"], "pass_start": r["pass_start_str"]}
+                    for r in existing_raw]
     except URLError as e:
         # Genuine network unreachability (CH not yet started, etc.) — soft no-op.
         log.warning(f"could not reach noaa ClickHouse — pipeline likely not deployed yet ({e})")

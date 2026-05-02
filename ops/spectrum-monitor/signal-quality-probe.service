@@ -5,6 +5,10 @@ After=network.target
 
 [Service]
 Type=oneshot
+# Optional env file for runtime overrides (EXPECTED_DONGLES, signal level
+# thresholds, etc.). The leading `-` makes the file optional — defaults
+# baked into the script are used if the file is missing.
+EnvironmentFile=-/etc/rtl-scanner/signal-quality-probe.env
 ExecStart=/usr/local/bin/rf-signal-quality-probe
 TimeoutStartSec=60
 User=root

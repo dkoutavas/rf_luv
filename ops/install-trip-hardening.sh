@@ -110,6 +110,21 @@ else
     info "/etc/rtl-scanner/notify.env exists; not overwriting"
 fi
 
+step "Install probe env-files (freshness, signal-quality)"
+# Probes read these as optional EnvironmentFile=- in their .service units.
+# Defaults in .example reflect post-2026-05-02 architecture (V4 dedicated to ACARS,
+# only V3 produces spectrum.scans). Operators free to edit.
+for probe in freshness-probe signal-quality-probe; do
+    target="/etc/rtl-scanner/${probe}.env"
+    src="$SPEC_DIR/${probe}.env.example"
+    if [ -f "$src" ] && [ ! -f "$target" ]; then
+        run sudo install -m 0644 "$src" "$target"
+        info "$target"
+    elif [ -f "$target" ]; then
+        info "$target exists; not overwriting"
+    fi
+done
+
 step "Install logrotate config"
 LOGROTATE=/etc/logrotate.d/rtl-recovery
 if [ "$DRY" -eq 0 ]; then

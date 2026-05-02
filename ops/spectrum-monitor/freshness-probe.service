@@ -5,6 +5,10 @@ After=network.target
 
 [Service]
 Type=oneshot
+# Optional env file for runtime overrides (EXPECTED_DONGLES, FRESHNESS_WARN_S,
+# FRESHNESS_CRITICAL_S, etc.). The leading `-` makes the file optional —
+# defaults baked into the script are used if the file is missing.
+EnvironmentFile=-/etc/rtl-scanner/freshness-probe.env
 ExecStart=/usr/local/bin/rf-freshness-probe
 TimeoutStartSec=60
 User=root

@@ -31,6 +31,7 @@ import sys
 from datetime import datetime, timezone
 
 import db
+from config import config
 
 # ─── Config ─────────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ def classify_peak(
 
 def main() -> None:
     t0 = datetime.now(timezone.utc)
-    log.info(f"Classifier starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+    log.info(f"Classifier starting (ClickHouse at {config.CH_HOST}:{config.CH_PORT})")
 
     # Reference data — all tiny
     confirmations = db.query_rows(

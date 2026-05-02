@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timezone
 
 import db
+from config import config
 
 # ─── Config ─────────────────────────────────────────────────
 
@@ -218,7 +219,7 @@ def known_good_assessment() -> tuple[int, list[dict], float | None, int]:
 
 def main() -> None:
     t0 = time.monotonic()
-    log.info(f"classifier_health starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+    log.info(f"classifier_health starting (ClickHouse at {config.CH_HOST}:{config.CH_PORT})")
 
     latest_classified_at = db.query_scalar(
         "SELECT toString(max(classified_at)) FROM spectrum.signal_classifications FINAL"

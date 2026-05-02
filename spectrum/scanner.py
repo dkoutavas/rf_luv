@@ -28,11 +28,13 @@ import socket
 import struct
 import signal
 import logging
+import contextlib
 from datetime import datetime, timezone
 
 import numpy as np
 
 import messages
+from coordinator import dongle_lock, CoordinatorMissing
 
 # ─── Config ──────────────────────────────────────────────
 
@@ -411,6 +413,12 @@ def main():
     # Track last run time for each preset
     last_run = {p["name"]: 0.0 for p in presets}
 
+    # Single-element list as a mutable flag for "have we logged the
+    # coordinator-missing warning yet" — keeps the log noise to one line
+    # per process lifetime when running in environments without the
+    # rtl-coordinator install (Docker on Windows for development, etc.).
+    coordinator_warned = [False]
+
     # Generate run ID and emit run_start for configuration tracking.
     # dongle_id is embedded in run_id so two scanners starting in the same
     # second cannot collide on scan_runs' PK.
@@ -448,7 +456,33 @@ def main():
 
         preset = best
 
+        # Per-sweep dongle coordination. We're a low-priority consumer: if a
+        # decoder (e.g. NOAA recorder.py during a satellite pass) holds the
+        # lock, skip this sweep and try again next pick. Graceful when the
+        # coordinator install hasn't been run on this host — one warning,
+        # then proceed unlocked. See ops/rtl-coordinator/.
         try:
+            cm = dongle_lock(DONGLE_ID, mode="nonblock")
+        except CoordinatorMissing:
+            if not coordinator_warned[0]:
+                log.warning(
+                    "rtl-coordinator lock dir not present — running unlocked. "
+                    "Run ops/rtl-coordinator/install.sh on the host (and ensure "
+                    "/var/lib/rtl-coordinator is bind-mounted into this container)."
+                )
+                coordinator_warned[0] = True
+            cm = contextlib.nullcontext(True)
+
+        try:
+          with cm as got_lock:
+            if not got_lock:
+                log.info(
+                    f"[{preset['name']}] dongle {DONGLE_ID} held by another "
+                    f"consumer — deferring sweep"
+                )
+                last_run[preset["name"]] = time.monotonic()
+                time.sleep(2)
+                continue
             client = RTLTCPClient(RTL_HOST, RTL_PORT)
             client.set_sample_rate(SAMPLE_RATE)
             client.set_gain(effective_gain)

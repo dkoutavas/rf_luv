@@ -162,14 +162,23 @@ def predict_passes() -> list[dict]:
                     now = pass_obj.los + timedelta(seconds=1)
                     continue
                 meta = SATELLITES[sat_name]
+                # Floor AOS/LOS to whole seconds. orbit-predictor returns
+                # microsecond-precise timestamps that drift 50-300ms run-to-run,
+                # which makes the (pass_start, satellite) ReplacingMergeTree key
+                # unstable: each scheduler tick re-INSERTs the same logical pass
+                # under a slightly different millisecond and the MV never
+                # collapses. Whole-second precision is more than enough — AOS-30s
+                # systemd timer and rtl_fm warmup absorb any sub-second drift.
+                aos = pass_obj.aos.replace(tzinfo=timezone.utc, microsecond=0)
+                los = pass_obj.los.replace(tzinfo=timezone.utc, microsecond=0)
                 out.append({
                     "satellite": sat_name,
-                    "pass_start": pass_obj.aos.replace(tzinfo=timezone.utc),
-                    "pass_end":   pass_obj.los.replace(tzinfo=timezone.utc),
+                    "pass_start": aos,
+                    "pass_end":   los,
                     "max_elevation": float(pass_obj.max_elevation_deg),
                     "freq_mhz": meta["freq_mhz"],
                     "decoder":  meta["decoder"],
-                    "duration_s": int((pass_obj.los - pass_obj.aos).total_seconds()),
+                    "duration_s": int((los - aos).total_seconds()),
                 })
                 now = pass_obj.los + timedelta(seconds=1)
         except Exception:
@@ -232,13 +241,16 @@ def main() -> None:
     new_rows: list[dict] = []
     queued_cmds: list[str] = []
     for p in upcoming:
+        # pass_start is already floored to whole seconds in predict_passes();
+        # both the comparison string and the INSERTed value resolve to .000,
+        # which keeps the ReplacingMergeTree key stable across scheduler ticks.
         ts_str = p["pass_start"].strftime("%Y-%m-%d %H:%M:%S.000")
         if already_scheduled(existing, ts_str, p["satellite"]):
             continue
 
         new_rows.append({
-            "pass_start":    p["pass_start"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
-            "pass_end":      p["pass_end"].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "pass_start":    p["pass_start"].strftime("%Y-%m-%d %H:%M:%S.000"),
+            "pass_end":      p["pass_end"].strftime("%Y-%m-%d %H:%M:%S.000"),
             "satellite":     p["satellite"],
             "freq_mhz":      p["freq_mhz"],
             "max_elevation": p["max_elevation"],

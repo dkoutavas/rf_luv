@@ -185,13 +185,21 @@ def main():
                 notify(cfg, "INFO", f"rf_luv: {d} freshness recovered",
                        message=f"now {stale}s stale (was {prev_level})")
 
-    # Also surface any unexpected dongle reported by ClickHouse (e.g., a third
-    # one was added without updating EXPECTED_DONGLES).
+    # Surface unexpected dongles only if they look ACTIVE (fresh rows in the
+    # last warn_s window). The "actively scanning but not in EXPECTED_DONGLES"
+    # case is the alarm we want — it means a third dongle was wired in without
+    # updating the env file. Conversely, a stale unexpected dongle is almost
+    # always a previously-monitored dongle that's been reassigned to another
+    # pipeline (e.g. v4-01 became the ACARS dongle on 2026-05-02). Logging it
+    # repeatedly as CRITICAL pollutes the tick log without adding signal.
     for d, stale in fresh.items():
         if d in expected:
             continue
-        new_dongles[d] = {"stale_sec": int(stale),
-                          "level": classify(int(stale), warn_s, crit_s),
+        s = int(stale)
+        if s >= warn_s:
+            continue
+        new_dongles[d] = {"stale_sec": s,
+                          "level": classify(s, warn_s, crit_s),
                           "unexpected": True}
 
     state["dongles"] = new_dongles

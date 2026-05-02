@@ -74,6 +74,13 @@ services:
     # Maps host.docker.internal to host IP. Works on Linux Docker 20.10+ and WSL/Docker Desktop.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Bind-mount the rtl-coordinator lock directory so the scanner's
+    # per-sweep flock check sees the same kernel state as bash decoders
+    # (e.g. NOAA recorder.py taking V3 during a satellite pass). Optional —
+    # if the directory doesn't exist on the host, scanner.py logs once and
+    # runs unlocked; see ops/rtl-coordinator/install.sh.
+    volumes:
+      - /var/lib/rtl-coordinator:/var/lib/rtl-coordinator
 
   # ─── ClickHouse (Time Series Storage) ──────────────────
   clickhouse:

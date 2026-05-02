@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import mean, pstdev
 
 import db
+from config import config
 
 # ─── Config ─────────────────────────────────────────────────
 
@@ -442,7 +443,7 @@ def process_dongle(dongle_id: str, allocations: list[dict]) -> int:
 
 def main() -> None:
     t0 = datetime.now(timezone.utc)
-    log.info(f"Feature extractor starting (ClickHouse at {CH_HOST}:{CH_PORT})")
+    log.info(f"Feature extractor starting (ClickHouse at {config.CH_HOST}:{config.CH_PORT})")
 
     dongles = discover_active_dongles()
     if not dongles:

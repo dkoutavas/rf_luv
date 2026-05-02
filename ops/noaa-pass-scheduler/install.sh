@@ -46,8 +46,11 @@ fi
 chmod +x "$TLE_REFRESH_SH"
 
 step "State directory"
-sudo install -d -m 0755 -o "$USER" -g "$USER" /var/lib/noaa
-info "/var/lib/noaa (TLE cache + state)"
+# Don't hardcode -g "$USER" — openSUSE Leap uses a shared "users" group
+# (gid 100), not per-user groups like Debian. Letting install determine
+# the primary group via -o $USER alone keeps it portable.
+sudo install -d -m 0755 -o "$USER" /var/lib/noaa
+info "/var/lib/noaa (TLE cache + state, owned by $USER)"
 
 step "Install user systemd units"
 mkdir -p "$USER_UNIT_DIR"

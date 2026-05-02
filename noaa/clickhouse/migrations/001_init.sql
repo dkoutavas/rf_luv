@@ -56,8 +56,15 @@ SETTINGS index_granularity = 8192;
 
 -- Latest row per (pass_start, satellite) — picks up the most recent INSERT
 -- as the canonical state of a pass.
+--
+-- ClickHouse 24.3 ILLEGAL_AGGREGATION quirk: the version column's OUTPUT
+-- alias must NOT match the column name used inside the argMax(...) calls
+-- of the SAME SELECT. Aliasing `max(inserted_at) AS inserted_at` makes the
+-- parser see argMax(field, inserted_at) as nesting argMax(inserted_at, ...).
+-- Solution: alias the version column to a different name (`latest_seen`)
+-- and reference that in the engine clause. Discovered 2026-05-02.
 CREATE MATERIALIZED VIEW IF NOT EXISTS noaa.pass_latest
-ENGINE = ReplacingMergeTree(inserted_at)
+ENGINE = ReplacingMergeTree(latest_seen)
 ORDER BY (pass_start, satellite)
 AS SELECT
     pass_start,
@@ -73,11 +80,7 @@ AS SELECT
     argMax(status,          inserted_at) AS status,
     argMax(notes,           inserted_at) AS notes,
     argMax(dongle_id,       inserted_at) AS dongle_id,
-    -- argMax(x,x) == max(x) but framed as an argMax avoids a ClickHouse
-    -- ILLEGAL_AGGREGATION error: `max(inserted_at) AS inserted_at` next to
-    -- `argMax(field, inserted_at)` confuses the parser into thinking the
-    -- outer max() is nested inside the argMax. Discovered 2026-05-02.
-    argMax(inserted_at, inserted_at) AS inserted_at
+    max(inserted_at)                     AS latest_seen
 FROM noaa.passes
 GROUP BY pass_start, satellite;
 

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+#
+# rtl-coordinator-status — show which dongle locks are currently held,
+# by which process. Useful for "why didn't my NOAA pass start?" debugging.
+#
+# Usage:
+#     rtl-coordinator-status [<serial>]
+#
+# With no args, lists all locks. With a serial, shows only that one.
+#
+# Detection method:
+#   1. lslocks (util-linux ≥ 2.20) — preferred; reads /proc/locks directly
+#      and reports the actual flock holder PID/comm.
+#   2. /proc/locks fallback — parses the kernel's lock table by inode if
+#      lslocks isn't available. Should never need this on leap (util-linux
+#      2.39+ is standard) but keeps the script portable.
+#
+# fuser(1) is NOT used: flock(2) advisory locks don't always appear in
+# fuser output — only the file *open* does, which is misleading.
+
+LOCK_DIR="${RTL_COORDINATOR_LOCK_DIR:-/var/lib/rtl-coordinator}"
+
+if [ ! -d "$LOCK_DIR" ]; then
+    echo "rtl-coordinator-status: $LOCK_DIR missing — installer not run." >&2
+    exit 1
+fi
+
+if [ $# -gt 0 ]; then
+    pattern="${1}.lock"
+else
+    pattern="*.lock"
+fi
+
+shopt -s nullglob
+locks=("$LOCK_DIR"/$pattern)
+shopt -u nullglob
+
+if [ ${#locks[@]} -eq 0 ]; then
+    echo "(no lock files matching '$pattern' in $LOCK_DIR)"
+    exit 0
+fi
+
+# Build a map of inode → "PID(comm) PID(comm) ..." once.
+declare -A inode_holders=()
+if command -v lslocks >/dev/null 2>&1; then
+    while IFS=$'\t' read -r pid command path; do
+        # lslocks --raw separates fields with spaces; we need a stable parse.
+        :
+    done < <(lslocks --noheadings 2>/dev/null || true)
+    # Use lslocks's --output for stable parsing
+    while read -r pid comm path; do
+        [ -z "$pid" ] && continue
+        # Match by realpath since lslocks may resolve symlinks
+        for lock in "${locks[@]}"; do
+            if [ -e "$lock" ] && [ "$path" = "$(readlink -f "$lock")" ]; then
+                inode_holders["$lock"]+="${pid}(${comm}) "
+            fi
+        done
+    done < <(lslocks -n -r -o PID,COMMAND,PATH 2>/dev/null || true)
+else
+    # Fallback: read /proc/locks, match by major:minor:inode.
+    for lock in "${locks[@]}"; do
+        [ -e "$lock" ] || continue
+        # Get device + inode of the lock file
+        read -r dev_inode <<< "$(stat -c '%D %i' "$lock" 2>/dev/null || echo '0 0')"
+        dev="${dev_inode%% *}"; ino="${dev_inode##* }"
+        # /proc/locks lines: "<id>: <type> <kind> <r/w> <pid> <maj>:<min>:<ino> <start> <end>"
+        while read -r _id _type _kind _rw pid maj_min_ino _rest; do
+            [ "$maj_min_ino" = "$dev:$ino" ] || continue  # very approximate match
+            comm=$(ps -o comm= -p "$pid" 2>/dev/null || echo "?")
+            inode_holders["$lock"]+="${pid}(${comm}) "
+        done < /proc/locks
+    done
+fi
+
+printf '%-12s  %-9s  %s\n' "SERIAL" "STATE" "HOLDER"
+for lock in "${locks[@]}"; do
+    name="$(basename "$lock" .lock)"
+    holders="${inode_holders[$lock]:-}"
+    if [ -z "$holders" ]; then
+        printf '%-12s  %-9s  %s\n' "$name" "free" "—"
+    else
+        printf '%-12s  %-9s  %s\n' "$name" "HELD" "${holders% }"
+    fi
+done

@@ -1,0 +1,19 @@
+[Unit]
+Description=Run an rtl_tcp consumer with exclusive lock on dongle %i
+# Templated unit. Instance name is the dongle serial (e.g. v4-01).
+# Pair with a per-instance env file at /etc/rtl-coordinator/<serial>.env
+# defining COORDINATOR_CMD — the command to run with the lock held.
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/rtl-coordinator/%i.env
+# COORDINATOR_MODE: wait | nonblock | timeout (default wait)
+# COORDINATOR_TIMEOUT: seconds, only used when COORDINATOR_MODE=timeout
+# COORDINATOR_CMD: the actual command to run (full path, with args)
+ExecStart=/usr/local/bin/rtl-coordinator-run %i ${COORDINATOR_FLAGS} -- ${COORDINATOR_CMD}
+TimeoutStartSec=0   # allow long-running decode (e.g. NOAA pass = ~12 min)
+Restart=no
+
+[Install]
+WantedBy=default.target

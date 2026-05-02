@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+#
+# rtl-coordinator-run — flock-based wrapper that gives a command exclusive
+# access to a dongle's rtl_tcp stream. Called by short-lived decoders
+# (NOAA pass recording, Meteor LRPT, ACARS-on-shared-dongle, etc.) that
+# need to claim a dongle for a finite window without fighting whatever
+# else might also want it.
+#
+# Usage:
+#     rtl-coordinator-run <serial> [--wait | --nonblock | --timeout <sec>] -- <cmd> [args...]
+#
+# Examples:
+#     # NOAA pass recording on V3, wait if scanner is mid-sweep
+#     rtl-coordinator-run v3-01 -- noaa-record-pass.sh 137.62
+#
+#     # Skip if dongle is busy (return exit code 75 = EX_TEMPFAIL)
+#     rtl-coordinator-run v3-01 --nonblock -- some-decoder ...
+#
+#     # Wait up to 10s for the dongle, then bail
+#     rtl-coordinator-run v3-01 --timeout 10 -- some-decoder ...
+#
+# Exit codes:
+#     0       — command ran (its exit code is propagated)
+#     75      — could not acquire lock (--nonblock) or timed out (--timeout)
+#     other   — propagated from the wrapped command
+#
+# Lock files live at /var/lib/rtl-coordinator/<serial>.lock and are
+# created world-writable by ops/rtl-coordinator/install.sh — that way
+# both root services and unprivileged decoders can claim them. flock(2)
+# is advisory, so this only works if EVERY consumer uses the wrapper
+# (or the matching Python context manager in spectrum/coordinator.py).
+#
+# Design notes:
+#   - flock is preferred over fcntl/lockf because it survives fork/exec
+#     cleanly. The wrapped command inherits FD 9 with the lock held; lock
+#     is automatically released when FD 9 closes (i.e. when the wrapped
+#     command exits).
+#   - We log to /var/log/rtl-recovery.log alongside the watchdog/escalator
+#     stack so the operator has one timeline of dongle-related events.
+#     Falls back to stderr if the log path isn't writable.
+#   - Lock file persists between runs (/var/lib lives across reboots) but
+#     that's fine — flock state is in-kernel, not on disk.
+
+LOCK_DIR="/var/lib/rtl-coordinator"
+LOG_PATH="/var/log/rtl-recovery.log"
+
+usage() {
+    sed -n '4,29p' "$0" >&2
+    exit 64
+}
+
+[ $# -lt 3 ] && usage
+
+serial="$1"; shift
+
+# Parse mode flags. Default = wait (flock blocks).
+mode="wait"
+timeout_sec=""
+case "${1:-}" in
+    --wait)        mode="wait"; shift ;;
+    --nonblock)    mode="nonblock"; shift ;;
+    --timeout)     mode="timeout"; timeout_sec="${2:?--timeout needs <sec>}"; shift 2 ;;
+esac
+
+# Optional `--` separator before command, for clarity.
+[ "${1:-}" = "--" ] && shift
+[ $# -lt 1 ] && usage
+
+cmd_str="$*"
+lock_path="$LOCK_DIR/${serial}.lock"
+
+if [ ! -d "$LOCK_DIR" ]; then
+    echo "rtl-coordinator-run: $LOCK_DIR missing — run ops/rtl-coordinator/install.sh first" >&2
+    exit 1
+fi
+
+# Touch the lockfile so flock has something to open. World-writable created
+# at install time; chmod here is defensive in case operator recreated it.
+if [ ! -e "$lock_path" ]; then
+    install -m 0666 /dev/null "$lock_path" 2>/dev/null || touch "$lock_path"
+fi
+
+log_event() {
+    local event="$1"; local detail="${2:-}"
+    local ts; ts=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    local who; who=$(id -un)
+    local line
+    line=$(printf '{"ts":"%s","layer":"coordinator","serial":"%s","user":"%s","event":"%s","detail":"%s","cmd":"%s"}' \
+        "$ts" "$serial" "$who" "$event" "$detail" "$cmd_str")
+    if [ -w "$LOG_PATH" ]; then
+        echo "$line" >> "$LOG_PATH"
+    else
+        echo "$line" >&2
+    fi
+}
+
+case "$mode" in
+    wait)
+        log_event "lock_wait_start"
+        exec 9<>"$lock_path"
+        flock 9
+        ;;
+    nonblock)
+        log_event "lock_try"
+        exec 9<>"$lock_path"
+        if ! flock -n 9; then
+            log_event "lock_busy" "another consumer holds the lock"
+            exit 75
+        fi
+        ;;
+    timeout)
+        log_event "lock_wait_timeout" "${timeout_sec}s"
+        exec 9<>"$lock_path"
+        if ! flock -w "$timeout_sec" 9; then
+            log_event "lock_timeout" "after ${timeout_sec}s"
+            exit 75
+        fi
+        ;;
+esac
+
+log_event "lock_acquired"
+trap 'log_event "lock_released"' EXIT
+
+# Run wrapped command with the lock held. The lock is released when this
+# subshell (and FD 9 with it) goes away — i.e. when we exit.
+"$@"

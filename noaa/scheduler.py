@@ -189,15 +189,27 @@ def main() -> None:
     # `cd noaa && docker compose up -d`). In that case, log a warning and
     # exit 0 — same posture as ops/spectrum-acars-feedback. The timer will
     # keep firing hourly and start working as soon as CH comes up.
+    #
+    # Type note: pass_start is DateTime64(3); now() returns DateTime; CH 24.3
+    # rejects the comparison with NO_COMMON_TYPE. Cast the LHS to DateTime
+    # for the WHERE clause (sub-second precision is irrelevant for an
+    # "is this row from the last hour" filter).
     try:
         existing = ch_query_rows(
             "SELECT satellite, toString(pass_start) AS pass_start "
             "FROM noaa.pass_latest "
-            "WHERE pass_start > now() - INTERVAL 1 HOUR"
+            "WHERE toDateTime(pass_start) > now() - INTERVAL 1 HOUR"
         )
-    except (URLError, HTTPError, OSError) as e:
+    except URLError as e:
+        # Genuine network unreachability (CH not yet started, etc.) — soft no-op.
         log.warning(f"could not reach noaa ClickHouse — pipeline likely not deployed yet ({e})")
         return
+    except HTTPError as e:
+        # CH returned an error (schema mismatch, bad query, etc.) — propagate
+        # so systemd records the failure rather than silently treating it as
+        # "not deployed".
+        log.error(f"noaa ClickHouse query failed: {e}")
+        sys.exit(1)
     log.info(f"{len(existing)} pass(es) already in noaa.pass_latest")
 
     upcoming = predict_passes()

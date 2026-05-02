@@ -70,12 +70,15 @@ RX_LAT = float(os.environ.get("NOAA_RX_LAT", "37.9838"))      # Athens default
 RX_LON = float(os.environ.get("NOAA_RX_LON", "23.7275"))
 RX_ALT_M = float(os.environ.get("NOAA_RX_ALT_M", "100"))
 
-# Frequency table — keep in sync with scripts/satellite-pass.sh
+# Frequency table — keys MUST match celestrak's TLE name lines exactly
+# (post-strip), so the scheduler can find a TLE by name. Verified against
+# celestrak's CATNR-based responses 2026-05.
 SATELLITES = {
-    "NOAA-15":     {"freq_mhz": 137.620,  "decoder": "noaa-apt"},
-    "NOAA-18":     {"freq_mhz": 137.9125, "decoder": "noaa-apt"},
-    "NOAA-19":     {"freq_mhz": 137.100,  "decoder": "noaa-apt"},
-    "METEOR-M2-3": {"freq_mhz": 137.100,  "decoder": "satdump"},
+    "NOAA 15":     {"freq_mhz": 137.620,  "decoder": "noaa-apt"},
+    "NOAA 18":     {"freq_mhz": 137.9125, "decoder": "noaa-apt"},
+    "NOAA 19":     {"freq_mhz": 137.100,  "decoder": "noaa-apt"},
+    "METEOR-M2 3": {"freq_mhz": 137.100,  "decoder": "satdump"},
+    "METEOR-M2 4": {"freq_mhz": 137.100,  "decoder": "satdump"},
 }
 
 
@@ -182,15 +185,19 @@ def main() -> None:
     log.info(f"Scheduler starting (rx={RX_LAT},{RX_LON} alt={RX_ALT_M}m, "
              f"horizon={HORIZON_HOURS}h, dry_run={DRY_RUN})")
 
+    # noaa ClickHouse may not be deployed yet (the timer can land before
+    # `cd noaa && docker compose up -d`). In that case, log a warning and
+    # exit 0 — same posture as ops/spectrum-acars-feedback. The timer will
+    # keep firing hourly and start working as soon as CH comes up.
     try:
         existing = ch_query_rows(
             "SELECT satellite, toString(pass_start) AS pass_start "
             "FROM noaa.pass_latest "
             "WHERE pass_start > now() - INTERVAL 1 HOUR"
         )
-    except (URLError, HTTPError) as e:
-        log.error(f"could not reach noaa ClickHouse: {e}")
-        sys.exit(1)
+    except (URLError, HTTPError, OSError) as e:
+        log.warning(f"could not reach noaa ClickHouse — pipeline likely not deployed yet ({e})")
+        return
     log.info(f"{len(existing)} pass(es) already in noaa.pass_latest")
 
     upcoming = predict_passes()

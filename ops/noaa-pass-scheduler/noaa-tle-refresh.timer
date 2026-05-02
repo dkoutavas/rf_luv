@@ -1,0 +1,14 @@
+[Unit]
+Description=Weekly: refresh NOAA/Meteor TLEs
+
+[Timer]
+# Weekly Mondays at 03:00 UTC. TLEs drift from real orbits by a few km/day;
+# weekly cadence is sufficient for the ±150 kHz Doppler window we care about.
+# Fires at host startup too, so a fresh deploy gets TLEs immediately.
+OnCalendar=Mon *-*-* 03:00:00 UTC
+OnBootSec=2min
+Unit=noaa-tle-refresh.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

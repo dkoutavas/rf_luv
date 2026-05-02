@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly: schedule next 12h of NOAA/Meteor passes
+
+[Timer]
+# Hourly at :05. Each run inserts pending rows into noaa.passes for any
+# new passes within the next 12h, then prints (or runs, when DRY_RUN=0)
+# systemd-run commands to fire the recorder at AOS-30s.
+OnCalendar=*:05
+Unit=noaa-pass-scheduler.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

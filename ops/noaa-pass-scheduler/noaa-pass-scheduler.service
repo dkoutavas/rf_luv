@@ -1,0 +1,22 @@
+[Unit]
+Description=Predict next 12h of NOAA/Meteor passes and stage recordings
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/rtl-scanner/noaa-scheduler.env
+# Defaults match noaa/scheduler.py — override via EnvironmentFile=
+# above for per-host RX location, horizon, threshold etc.
+Environment=NOAA_DRY_RUN=1
+Environment=CLICKHOUSE_HOST=localhost
+Environment=CLICKHOUSE_PORT=8128
+Environment=CLICKHOUSE_DB=noaa
+Environment=CLICKHOUSE_USER=noaa
+Environment=CLICKHOUSE_PASSWORD=noaa_local
+ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/noaa/scheduler.py
+TimeoutStartSec=120
+Restart=no
+
+[Install]
+WantedBy=default.target

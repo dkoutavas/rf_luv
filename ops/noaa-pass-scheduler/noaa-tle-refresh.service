@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh NOAA/Meteor TLEs from celestrak
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/dev/rf_luv/noaa/tle_refresh.sh
+TimeoutStartSec=60
+Restart=no
+
+[Install]
+WantedBy=default.target

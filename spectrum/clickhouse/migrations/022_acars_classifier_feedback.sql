@@ -54,13 +54,11 @@ WHERE (SELECT count() FROM spectrum.signal_classes WHERE class_id IN ('acars_dow
 --   (50 kHz, vs default 150 kHz) so only true ACARS bins score the +3.
 -- requires_allocation_in: aviation_voice (118-137 MHz, seeded in mig 003).
 
+-- NOTE: ClickHouse does NOT auto-concatenate adjacent string literals
+-- (unlike Python). Keep the full JSON inline on a single string literal,
+-- even when it gets long.
 ALTER TABLE spectrum.signal_classes
-UPDATE evidence_rules =
-    '{"bw_hz":[3000,15000],"duty_pattern":["bursty_low","bursty_high"],'
-    '"duty_24h_range":[0.001,0.3],'
-    '"center_freq_hz_near":[131525000,131725000,131825000],'
-    '"center_freq_tolerance_hz":50000,'
-    '"requires_allocation_in":["aviation_voice"]}'
+UPDATE evidence_rules = '{"bw_hz":[3000,15000],"duty_pattern":["bursty_low","bursty_high"],"duty_24h_range":[0.001,0.3],"center_freq_hz_near":[131525000,131725000,131825000],"center_freq_tolerance_hz":50000,"requires_allocation_in":["aviation_voice"]}'
 WHERE class_id IN ('acars_downlink', 'acars_uplink');
 
 -- ─── Seed known_frequencies for the EU ACARS plan ──────────

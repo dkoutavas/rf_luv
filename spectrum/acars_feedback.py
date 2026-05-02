@@ -110,21 +110,24 @@ def spectrum_insert(table: str, rows: list[dict]) -> None:
 
 def main() -> None:
     log.info(
-        f"Reading acars.freq_activity (lookback={LOOKBACK_HOURS}h, "
+        f"Reading acars.messages (lookback={LOOKBACK_HOURS}h, "
         f"min_messages={MIN_MESSAGES}, dry_run={DRY_RUN})"
     )
 
-    # acars.freq_activity is a ReplacingMergeTree per (freq_mhz, dongle_id);
-    # FINAL collapses duplicates. message_count is cumulative since pipeline
-    # start, which is fine for a "has this freq seen real traffic" check —
-    # tighter time-windowing would query acars.messages directly, but that's
-    # heavier. Re-evaluate if message_count gets stale (unlikely on this scale).
+    # Query acars.messages directly (NOT freq_activity). The MV in 001_init.sql
+    # uses ReplacingMergeTree(last_seen) with count() in the SELECT — that
+    # counts the per-batch insert (typically 1 row), not cumulative across
+    # all messages. Behaviour discovered 2026-05-02 when a 30-message
+    # pipeline showed message_count=1 in freq_activity. Fixing the MV needs
+    # AggregatingMergeTree + countState() (follow-up migration); for now,
+    # this script bypasses the MV entirely and aggregates from messages.
     try:
         candidates = acars_query(
-            "SELECT freq_mhz, dongle_id, message_count, last_seen "
-            "FROM acars.freq_activity FINAL "
-            f"WHERE message_count >= {MIN_MESSAGES} "
-            f"  AND last_seen > now() - INTERVAL {LOOKBACK_HOURS} HOUR "
+            "SELECT freq_mhz, dongle_id, count() AS message_count, max(timestamp) AS last_seen "
+            "FROM acars.messages "
+            f"WHERE timestamp > now() - INTERVAL {LOOKBACK_HOURS} HOUR "
+            "GROUP BY freq_mhz, dongle_id "
+            f"HAVING count() >= {MIN_MESSAGES} "
             "ORDER BY message_count DESC"
         )
     except (URLError, HTTPError) as e:

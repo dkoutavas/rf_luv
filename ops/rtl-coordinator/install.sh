@@ -27,7 +27,12 @@ ETC_DIR="/etc/rtl-coordinator"
 BIN_DIR="/usr/local/bin"
 
 step "Lock directory"
-sudo install -d -m 0775 "$LOCK_DIR"
+# Mode 0777 (world-writable) so unprivileged decoders running as
+# dio_nysis can create their per-serial lockfiles. The directory is
+# created root-owned but the lock files inside are world-creatable.
+# Lockfile contents are irrelevant (flock is in-kernel state); the
+# directory is just a rendezvous point.
+sudo install -d -m 0777 "$LOCK_DIR"
 info "$LOCK_DIR"
 
 step "Per-instance env file directory"

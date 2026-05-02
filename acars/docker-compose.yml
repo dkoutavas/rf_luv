@@ -25,8 +25,15 @@ services:
   # Maintained image with airframesio/acarsdec + SoapySDR + Soapy-rtltcp.
   # Connects to rtl_tcp via SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>
   # and ships decoded messages as JSON UDP datagrams to acars-ingest:5550.
+  #
+  # KNOWN ISSUE — mutable tag: sdr-enthusiasts only publish the SoapySDR
+  # variant under `latest_soapy` (commit-SHA tags don't have a _soapy
+  # suffix). CLAUDE.md says "never use latest", but `latest_soapy` is the
+  # only path here without building from source. Mitigation: capture the
+  # image digest after first pull and pin via @sha256:... in this file.
+  # TODO(deploy): replace with digest pin once first pull lands on leap.
   acarsdec:
-    image: ghcr.io/sdr-enthusiasts/docker-acarsdec:4.1.6Build1494
+    image: ghcr.io/sdr-enthusiasts/docker-acarsdec:latest_soapy
     container_name: acarsdec
     restart: unless-stopped
     depends_on:

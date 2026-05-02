@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly: ACARS → spectrum classifier feedback
+
+[Timer]
+# Hourly at :15. Spectrum classifier runs at *:0/5:30 (5-min cadence) so
+# new listening_log entries are picked up within ~5 minutes of being written.
+# Hourly is plenty for this — ACARS confirmations are stable on the day scale.
+OnCalendar=*:15
+Unit=spectrum-acars-feedback.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

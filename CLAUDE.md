@@ -111,6 +111,16 @@ rf_luv/
 │   └── grafana/
 │       └── provisioning/       # datasource + dashboard auto-provisioning
 │
+├── acars/                      # ACARS aircraft messaging pipeline (Tier 1 #1)
+│   ├── docker-compose.yml      # acarsdec (sdr-enthusiasts image) + ingest + ClickHouse + Grafana
+│   ├── Dockerfile.ingest       # python:3.12-slim — only the ingest worker; decoder is prebuilt
+│   ├── entrypoint.sh           # runs migrations then UDP listener
+│   ├── acars_ingest.py         # UDP datagram reader → ClickHouse batch inserter
+│   ├── migrate.py              # numbered SQL migration runner (mirrors spectrum/migrate.py)
+│   ├── clickhouse/migrations/  # 001_init.sql etc.
+│   ├── grafana/provisioning/   # datasource + acars-overview dashboard
+│   └── env.v4-01.example       # leap V4 deployment template
+│
 ├── scripts/
 │   ├── spectrum-scan.sh        # rtl_power wideband scanning with band presets
 │   ├── satellite-pass.sh       # NOAA/Meteor pass recording with rtl_fm
@@ -358,6 +368,47 @@ ClickHouse (ism database, :8125/:9002)
 - 180-day TTL (vs 90 for ADS-B/AIS) — ISM data is interesting for seasonal device patterns
 - raw_json column stores full rtl_433 output — covers all 200+ protocols without explicit field mapping
 
+## ACARS Pipeline Architecture
+
+```
+RTL-SDR V4 (rtl_tcp on leap :1235)
+  └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec:4.1.6Build1494)
+       └→ JSON datagrams (UDP :5550) → acars_ingest.py → ClickHouse
+
+ClickHouse (acars database, :8127/:9004)
+  ├── messages table (MergeTree, partitioned by day, 90-day TTL)
+  ├── hourly_stats (AggregatingMergeTree — counts, uniques, avg level/err)
+  ├── flight_latest (ReplacingMergeTree per flight callsign)
+  ├── tail_latest (ReplacingMergeTree per tail registration — uplinks too)
+  └── freq_activity (ReplacingMergeTree per (freq, dongle) — classifier-feedback hook)
+        └→ Grafana (:3004)
+             └── ACARS Overview dashboard (auto-provisioned)
+                 • Message rate, unique flights/tails (stat row)
+                 • Messages per minute (24h timeseries)
+                 • Top flights, tails, ACARS labels (bar charts)
+                 • Frequency channel activity, signal level over time
+                 • Top OOOI airport pairs (depa→dsta routes)
+                 • Recent messages table (last 100, full text)
+                 • freq_activity (validates classifier-feedback loop)
+```
+
+**Key design decisions:**
+- Decoder is the **airframesio acarsdec fork** via the maintained sdr-enthusiasts
+  Docker image — has SoapySDR + Soapy-rtltcp built-in. Building from TLeconte
+  upstream was rejected because that branch doesn't speak rtl_tcp.
+- **UDP transport** between decoder and ingest (mirrors AIS), not piped stdout
+  (ISM): the decoder image is sealed and doesn't pipe JSON to stdout in the
+  configurations available; UDP-to-acars-ingest:5550 is the supported path.
+- **Numbered SQL migrations** from day 1 (`clickhouse/migrations/NNN_*.sql`)
+  + a Python migrator running at ingest container startup, mirroring spectrum.
+  ISM's single-init.sql pattern doesn't support schema evolution.
+- ACARS gives the **content layer** to ADS-B's positions: joinable on
+  (tail, flight) for crew messages, OOOI events, weather requests, CPDLC
+  app data. The natural pair to the existing aviation pipeline.
+- `freq_activity` is the **classifier-feedback hook**: spectrum-classifier
+  reads it via ClickHouse `remote()` (integration TBD) so confirmed ACARS
+  freqs auto-bump confidence in `spectrum.known_frequencies`.
+
 ## Spectrum Scanner Pipeline Architecture
 
 ```
@@ -455,8 +506,18 @@ The leap host carries a layered reliability stack — each layer catches a failu
 | AIS      | 8124           | 9001              | 3001    | — |
 | ISM      | 8125           | 9002              | 3002    | — |
 | Spectrum | 8126           | 9003              | 3003    | — |
+| ACARS    | 8127           | 9004              | 3004    | — |
 
-Only one pipeline can use rtl_tcp at a time (single dongle). The spectrum scanner is the best "idle mode" — maps the RF environment while not actively tracking ships or aircraft.
+leap currently runs **two dongles** (V3 on rtl_tcp :1234, V4 on :1235), each
+with its own templated systemd stack (`rtl-tcp@<serial>`, `rtl-tcp-watchdog@`,
+`rtl-scanner@`). Decoders that share a dongle must time-share via flock
+once a coordinator lands; today, only one consumer per dongle is supported.
+
+**Dongle assignment policy** (set in each pipeline's env file):
+- **V3 (FM-bandstopped, port 1234)**: kept on wideband scanning. Use V3 for
+  decoders that traverse or sit near the FM band.
+- **V4 (port 1235)**: dedicated to narrow-band decoders. ACARS owns it
+  today. POCSAG/marine voice/PMR446 will join via the coordinator.
 
 ---
 

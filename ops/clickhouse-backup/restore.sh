@@ -83,11 +83,22 @@ if [ "$DRY" -eq 1 ]; then
     exit 0
 fi
 
+# Reattach MVs on ANY exit (including an aborted restore) so a failure never
+# leaves the database with detached rollup views.
+reattach_mvs() {
+    for mv in "${mvs[@]}"; do
+        [ -z "$mv" ] && continue
+        ch --query "ATTACH TABLE ${DB}.${mv}" 2>/dev/null \
+            || warn "could not reattach $mv (may already be attached)"
+    done
+}
+
 info "detaching ${#mvs[@]} materialized views"
 for mv in "${mvs[@]}"; do
     [ -z "$mv" ] && continue
     ch --query "DETACH TABLE ${DB}.${mv}" || warn "could not detach $mv"
 done
+trap reattach_mvs EXIT
 
 restored=0
 for f in "$SNAP"/*.native.gz; do
@@ -102,15 +113,19 @@ for f in "$SNAP"/*.native.gz; do
         continue
     fi
     ch --query "TRUNCATE TABLE ${DB}.${t}"
-    gunzip -c "$f" | ch_in --query "INSERT INTO ${DB}.${t} FORMAT Native"
-    info "restored ${DB}.${t}"
+    # Decompress once. An empty Native dump (a table that held no rows at backup
+    # time) must NOT be piped to INSERT or ClickHouse aborts with
+    # NO_DATA_TO_INSERT; TRUNCATE already left the table empty, matching the snapshot.
+    tmp="$(mktemp)"
+    gunzip -c "$f" > "$tmp"
+    if [ -s "$tmp" ]; then
+        ch_in --query "INSERT INTO ${DB}.${t} FORMAT Native" < "$tmp"
+        info "restored ${DB}.${t}"
+    else
+        info "restored ${DB}.${t} (empty dump; table truncated)"
+    fi
+    rm -f "$tmp"
     restored=$((restored + 1))
-done
-
-info "reattaching materialized views"
-for mv in "${mvs[@]}"; do
-    [ -z "$mv" ] && continue
-    ch --query "ATTACH TABLE ${DB}.${mv}" || warn "could not reattach $mv (ATTACH MATERIALIZED VIEW may be needed)"
 done
 
 info "restore complete: $restored tables into $DB"

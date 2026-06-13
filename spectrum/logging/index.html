@@ -73,7 +73,7 @@
 </div>
 
 <script>
-var CH = 'http://' + window.location.hostname + ':8126/?user=spectrum&password=spectrum_local';
+var CH = 'http://' + window.location.hostname + ':8123/?user=spectrum&password=spectrum_local';
 
 function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
@@ -112,7 +112,7 @@ async function submitLog() {
       st.style.color = '#ff6666';
     }
   } catch (e) {
-    st.textContent = 'Connection failed - ClickHouse :8126 reachable?';
+    st.textContent = 'Connection failed - ClickHouse :8123 reachable?';
     st.style.color = '#ff6666';
   }
 }

@@ -30,10 +30,10 @@ systemctl --user list-units --all 'rtl_tcp*' 'rtl-tcp*' 'spectrum-scanner*' 2>/d
 docker compose -f spectrum/docker-compose.yml ps 2>&1 || true
 
 # ClickHouse reachable?
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" --data-binary "SELECT version()"
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" --data-binary "SELECT version()"
 
 # schema_migrations state
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT version, applied_at FROM spectrum.schema_migrations ORDER BY version FORMAT TSV"
 ```
 
@@ -86,12 +86,12 @@ python3.11 migrate.py
 Verify:
 
 ```bash
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT version FROM spectrum.schema_migrations WHERE version IN ('017','018') ORDER BY version FORMAT TSV"
 # Expect both 017 and 018 listed.
 
 # Confirm columns exist:
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT count() FROM spectrum.scans WHERE dongle_id = 'v3-01'"
 # Expect a large number (> 10M). Newly added rows use the default even before
 # the ALTER UPDATE mutations finish, so this works immediately.
@@ -101,7 +101,7 @@ curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
 completed. Inspect:
 
 ```bash
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SHOW TABLES FROM spectrum" | grep -E '_new|_old'
 ```
 
@@ -236,7 +236,7 @@ systemctl --user disable rtl-scanner 2>/dev/null || true
 cd ~/dev/rf_luv/spectrum
 python3.11 migrate.py
 # 019 should apply in 30–60s depending on scans volume. Verify:
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT version FROM spectrum.schema_migrations WHERE version='019' FORMAT TSV"
 ```
 
@@ -244,7 +244,7 @@ If migration 019 fails:
 
 ```bash
 # Check what happened
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SHOW TABLES FROM spectrum LIKE '%hourly_baseline%' FORMAT TSV"
 # Clean up any _new leftovers; confirm hourly_baseline exists (either old or new form).
 # See followups/dongle_id_downstream.md recovery section.
@@ -262,11 +262,11 @@ journalctl --user -u rtl-scanner@v3-01 -n 30 --no-pager
 
 ```bash
 # Wait ~5 min for a full sweep + next airband, then:
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT dongle_id, count() FROM spectrum.scans WHERE timestamp > now() - INTERVAL 10 MINUTE GROUP BY dongle_id FORMAT TSV"
 # Expect: single row, "v3-01  <count>"
 
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT run_id, dongle_id FROM spectrum.scan_runs WHERE started_at > now() - INTERVAL 30 MINUTE FORMAT TSV"
 # Expect: run_id starts with "run_v3-01_"; dongle_id = "v3-01"
 ```
@@ -346,7 +346,7 @@ python3.11 migrate.py    # idempotent; applies 020
 Verify:
 
 ```bash
-curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
     --data-binary "SELECT count() FROM spectrum.dongle_comparison_view WHERE hour > now() - INTERVAL 1 HOUR FORMAT TSV"
 # Expect: >0 (V3 rows). v4 columns will be NULL until V4 ingests.
 ```

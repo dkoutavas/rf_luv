@@ -1,0 +1,81 @@
+apiVersion: 1
+
+# Consolidated dashboard providers for the shared Grafana instance.
+# One file provider per pipeline, each pointing at its own json subdir and
+# landing dashboards in its own Grafana folder. Flags (editable,
+# disableDeletion) preserved from the per-pipeline originals, which all used
+# editable:true / disableDeletion:false. foldersFromFilesStructure stays false
+# because each provider already targets a single pipeline folder.
+
+providers:
+  - name: ADS-B Dashboards
+    orgId: 1
+    type: file
+    folder: ADS-B
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/adsb
+      foldersFromFilesStructure: false
+
+  - name: AIS Dashboards
+    orgId: 1
+    type: file
+    folder: AIS
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/ais
+      foldersFromFilesStructure: false
+
+  - name: ISM Dashboards
+    orgId: 1
+    type: file
+    folder: ISM
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/ism
+      foldersFromFilesStructure: false
+
+  - name: Spectrum Dashboards
+    orgId: 1
+    type: file
+    folder: Spectrum
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/spectrum
+      foldersFromFilesStructure: false
+
+  - name: ACARS Dashboards
+    orgId: 1
+    type: file
+    folder: ACARS
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/acars
+      foldersFromFilesStructure: false
+
+  - name: NOAA Dashboards
+    orgId: 1
+    type: file
+    folder: NOAA
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/noaa
+      foldersFromFilesStructure: false

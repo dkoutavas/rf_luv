@@ -4,12 +4,15 @@ spectrum-acars-feedback — promote ACARS decode confirmations into
 spectrum.listening_log so the classifier treats those freqs as
 operator-confirmed at confidence 1.0.
 
-Bridges two ClickHouse instances (acars on :8127, spectrum on :8126)
-without using ClickHouse's `remote()` function — keeps the dependency
-graph explicit (one process owns the cross-DB write) and stdlib-only.
+Reads and writes the one shared ClickHouse server (HTTP 8123) without using
+ClickHouse's `remote()` function. That keeps the dependency graph explicit
+(one process owns the cross-DB write) and stdlib-only. The cross-DB read works
+on a single connection because the spectrum user holds SELECT on acars.* (the
+one cross-grant in the bootstrap), so the fully-qualified acars.messages read
+and the spectrum.listening_log write both run as user=spectrum.
 
-Reads:    acars.freq_activity FINAL          (HTTP 8127, user=acars)
-Writes:   spectrum.listening_log INSERT      (HTTP 8126, user=spectrum)
+Reads:    acars.messages aggregate           (HTTP 8123, user=spectrum)
+Writes:   spectrum.listening_log INSERT      (HTTP 8123, user=spectrum)
 
 A row is written for each (freq_mhz) that has had at least
 ACARS_FEEDBACK_MIN_MESSAGES decoded messages in the lookback window
@@ -46,14 +49,12 @@ log = logging.getLogger("spectrum-acars-feedback")
 
 # ─── Config ─────────────────────────────────────────────────
 
-ACARS_HOST = os.environ.get("ACARS_CLICKHOUSE_HOST", "localhost")
-ACARS_PORT = os.environ.get("ACARS_CLICKHOUSE_PORT", "8127")
-ACARS_DB = os.environ.get("ACARS_CLICKHOUSE_DB", "acars")
-ACARS_USER = os.environ.get("ACARS_CLICKHOUSE_USER", "acars")
-ACARS_PASSWORD = os.environ.get("ACARS_CLICKHOUSE_PASSWORD", "acars_local")
-
+# Post-consolidation: one ClickHouse server on :8123 holds every database.
+# The acars read is a fully-qualified cross-DB SELECT run as the spectrum
+# user (which has the SELECT-on-acars cross-grant), so there is no separate
+# acars endpoint or acars credential anymore.
 SPECTRUM_HOST = os.environ.get("CLICKHOUSE_HOST", "localhost")
-SPECTRUM_PORT = os.environ.get("CLICKHOUSE_PORT", "8126")
+SPECTRUM_PORT = os.environ.get("CLICKHOUSE_PORT", "8123")
 SPECTRUM_DB = os.environ.get("CLICKHOUSE_DB", "spectrum")
 SPECTRUM_USER = os.environ.get("CLICKHOUSE_USER", "spectrum")
 SPECTRUM_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "spectrum_local")
@@ -87,7 +88,10 @@ def _ch_query(host: str, port: str, db: str, user: str, password: str,
 
 
 def acars_query(sql: str) -> list[dict]:
-    text = _ch_query(ACARS_HOST, ACARS_PORT, ACARS_DB, ACARS_USER, ACARS_PASSWORD,
+    # Runs on the shared server as user=spectrum (cross-grant SELECT on acars.*).
+    # The caller passes fully-qualified acars.messages so the spectrum database
+    # context on the connection is irrelevant.
+    text = _ch_query(SPECTRUM_HOST, SPECTRUM_PORT, SPECTRUM_DB, SPECTRUM_USER, SPECTRUM_PASSWORD,
                      sql + " FORMAT JSONEachRow")
     return [json.loads(line) for line in text.splitlines() if line]
 
@@ -131,7 +135,9 @@ def main() -> None:
             "ORDER BY message_count DESC"
         )
     except (URLError, HTTPError) as e:
-        log.warning(f"Could not reach acars ClickHouse — pipeline likely not deployed yet ({e})")
+        # The acars database may not exist yet (acars pipeline not deployed on
+        # the shared server). Soft no-op so the timer can land before acars.
+        log.warning(f"Could not read acars.messages; acars pipeline likely not deployed yet ({e})")
         return
 
     if not candidates:

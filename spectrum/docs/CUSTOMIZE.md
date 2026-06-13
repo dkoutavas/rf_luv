@@ -3,7 +3,7 @@
 The defaults in this repo are tuned for an Athens-area RTL-SDR setup
 (see `../README.md` for context). To deploy the same pipeline at your
 location, walk through the four sections below. None of them require
-editing source — everything is exposed via env vars or seed files.
+editing source - everything is exposed via env vars or seed files.
 
 ## 1. Match your dongle
 
@@ -34,7 +34,7 @@ For udev-stable `/dev/rtl_sdr_*` symlinks, see the udev rules in
 ### Antenna metadata
 
 Free-form strings recorded with each scan run for later A/B comparisons.
-None of them affect DSP — they're pure documentation.
+None of them affect DSP - they're pure documentation.
 
 ```ini
 SCAN_ANTENNA_POSITION=window_north   # or rooftop_tripod, patio, etc.
@@ -44,24 +44,30 @@ SCAN_ANTENNA_HEIGHT_M=2
 SCAN_NOTES=stock dipole, sea-facing
 ```
 
-### Known frequencies — the classifier prior
+### Known frequencies - the classifier prior
 
 `spectrum.known_frequencies` is the table that biases the classifier when a
 peak lands within ±150 kHz of a known signal. It starts empty after a fresh
 install. Two paths to populate it:
 
-1. **Use an existing seed** — Athens is provided as an example:
+The Athens seed is loaded automatically by the infra `ch-bootstrap` one-shot, so
+a fresh `bash infra/up.sh` already has it. You only do a manual load for a custom
+catalog:
+
+1. **Use the Athens seed as a reference** (it is already applied; re-running is
+   harmless because it is idempotent):
    ```bash
    cat spectrum/clickhouse/seeds/known_frequencies_athens.sql \
-     | docker exec -i clickhouse-spectrum clickhouse-client \
+     | docker exec -i clickhouse clickhouse-client \
          --user spectrum --password "${CLICKHOUSE_PASSWORD:-spectrum_local}"
    ```
-2. **Write your own** — copy
+2. **Write your own**: copy
    `spectrum/clickhouse/seeds/known_frequencies_template.sql.example`
    to `known_frequencies_<your_location>.sql`, fill in your local FM
-   stations, ATC, marine, ISM, etc., then run the same `docker exec` line.
+   stations, ATC, marine, ISM, etc., then run the same `docker exec` line
+   against the shared `clickhouse` container.
 
-The seed files are idempotent (`WHERE (SELECT count() ...) = 0`) — re-running
+The seed files are idempotent (`WHERE (SELECT count() ...) = 0`), so re-running
 won't duplicate rows.
 
 ### DVB-T exclusion zone
@@ -93,7 +99,7 @@ SCAN_BIN_WIDTH=100000         # 100 kHz bins
 ```
 
 For HF (shortwave, < 30 MHz), the V3 dongle's direct-sampling mode is
-required — that's a different scanner setup not covered here.
+required - that's a different scanner setup not covered here.
 
 The two built-in presets (`full` and `airband`) are hardcoded in
 `scanner.py`'s preset list; if you want to sweep a different fast-cadence
@@ -130,7 +136,7 @@ Some knobs aren't in `.env.example` because they're tied to dongle hardware
 threshold, transient threshold). Edit `scanner.py` directly if you need to
 move those.
 
-The 21 SQL migrations under `clickhouse/migrations/` define the schema —
+The 21 SQL migrations under `clickhouse/migrations/` define the schema -
 they should run unchanged on any deployment. Migration 011
 (`signal_catalog`) seeds ~150 reference rows; a few dozen are
 Athens-specific and can be deleted by hand if they bother you, but the

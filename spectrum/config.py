@@ -28,7 +28,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Config:
     CH_HOST: str = "localhost"
-    CH_PORT: str = "8126"
+    CH_PORT: str = "8123"
     CH_DATABASE: str = "spectrum"
     CH_USER: str = "spectrum"
     CH_PASSWORD: str = "spectrum_local"

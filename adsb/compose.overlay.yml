@@ -1,0 +1,111 @@
+# ADS-B Tracking Pipeline (overlay)
+# readsb (decoder) -> tar1090 (map) + adsb-ingest (SBS->ClickHouse)
+#
+# This is a ROTATING pipeline overlay. The always-on data layer
+# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
+# rf_luv_infra project. Bring infra up first, then this overlay:
+#   docker compose -f infra/compose.yml up -d
+#   docker compose -f adsb/compose.overlay.yml up -d
+#   open http://localhost:8080 for the live map (tar1090)
+#   open http://localhost:3000 for Grafana dashboards (shared)
+#
+# Dongle: rotating decoders point at the V4 dongle on
+# host.docker.internal:1235. The V3 :1234 belongs to the native
+# systemd spectrum scanner.
+#   On Windows/leap: rtl_tcp -a 0.0.0.0 -p 1235 -s 2048000
+#
+# ClickHouse is reached over the shared rf_luv_net network at the
+# alias `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  # --- ADS-B Decoder --------------------------------------
+  readsb:
+    image: ghcr.io/sdr-enthusiasts/docker-readsb-protobuf:v4.0.3
+    container_name: readsb
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    environment:
+      # -- Device config --
+      # Option B: rtl_tcp from the dongle host (default). V4 dongle on 1235.
+      READSB_DEVICE_TYPE: rtltcp
+      READSB_NET_CONNECTOR: "host.docker.internal,1235,raw_in"
+      READSB_GAIN: 40
+
+      # -- Location (Polygono, Athens) --
+      READSB_LAT: "37.989"
+      READSB_LON: "23.736"
+
+      # -- Network outputs --
+      READSB_NET_ENABLE: "true"
+      READSB_NET_SBS_OUTPUT_PORT: "30003"       # BaseStation format (CSV-like)
+      READSB_NET_RAW_OUTPUT_PORT: "30002"
+      READSB_NET_BEAST_OUTPUT_PORT: "30005"     # Beast binary format
+
+      # -- Stats --
+      READSB_STATS_EVERY: "60"
+      READSB_STATS_RANGE: "true"
+    ports:
+      - "30002:30002"   # raw output
+      - "30003:30003"   # SBS/BaseStation output (used by ingest script)
+      - "30005:30005"   # Beast output
+    volumes:
+      - readsb-data:/run/readsb
+    # host.docker.internal -> host IP, so the rtl_tcp dongle bridge is reachable.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # --- Web Map --------------------------------------------
+  tar1090:
+    image: ghcr.io/sdr-enthusiasts/docker-tar1090:v2024.07.10
+    container_name: tar1090
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    depends_on:
+      - readsb
+    environment:
+      BEASTHOST: readsb
+      BEASTPORT: 30005
+      TAR1090_DEFAULTCENTERLAT: "37.989"
+      TAR1090_DEFAULTCENTERLON: "23.736"
+      TAR1090_DEFAULTRANGE: "200"               # default zoom range in NM
+      TAR1090_MESSAGERATEINTITLE: "true"
+      TAR1090_PLANECOUNTINTITLE: "true"
+      UPDATE_TAR1090: "true"
+    ports:
+      - "8080:80"
+    volumes:
+      - readsb-data:/run/readsb:ro
+    tmpfs:
+      - /run:exec,size=256M
+      - /var/log
+
+  # --- ADS-B Ingest Worker --------------------------------
+  # Reads SBS BaseStation output from readsb, inserts into shared ClickHouse.
+  adsb-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: adsb-ingest
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    depends_on:
+      readsb:
+        condition: service_started
+    environment:
+      SBS_HOST: readsb
+      SBS_PORT: "30003"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: adsb
+      CLICKHOUSE_USER: adsb
+      CLICKHOUSE_PASSWORD: adsb_local
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_SECONDS: "5"
+
+volumes:
+  readsb-data:

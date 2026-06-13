@@ -5,18 +5,14 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/spectrum/acars_feedback.py
-# Spectrum side
+# One shared ClickHouse server (post-2026-06 consolidation). The acars read
+# is a cross-DB SELECT run as user=spectrum (cross-grant SELECT on acars.*),
+# so there is no separate acars endpoint or credential.
 Environment=CLICKHOUSE_HOST=localhost
-Environment=CLICKHOUSE_PORT=8126
+Environment=CLICKHOUSE_PORT=8123
 Environment=CLICKHOUSE_DB=spectrum
 Environment=CLICKHOUSE_USER=spectrum
 Environment=CLICKHOUSE_PASSWORD=spectrum_local
-# ACARS side (separate ClickHouse instance — see acars/docker-compose.yml)
-Environment=ACARS_CLICKHOUSE_HOST=localhost
-Environment=ACARS_CLICKHOUSE_PORT=8127
-Environment=ACARS_CLICKHOUSE_DB=acars
-Environment=ACARS_CLICKHOUSE_USER=acars
-Environment=ACARS_CLICKHOUSE_PASSWORD=acars_local
 # Threshold tuning — adjust if LGAV ACARS volume shifts.
 Environment=ACARS_FEEDBACK_LOOKBACK_HOURS=24
 Environment=ACARS_FEEDBACK_MIN_MESSAGES=10

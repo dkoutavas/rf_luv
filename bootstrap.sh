@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║  rf_luv bootstrap — prep a fresh clone                  ║
+# ║  rf_luv bootstrap - prep a fresh clone                  ║
 # ║  Run once: bash bootstrap.sh                            ║
 # ╚══════════════════════════════════════════════════════════╝
 
@@ -48,15 +48,17 @@ info "Bootstrap complete. Next steps:"
 echo ""
 echo "  Host (where the RTL-SDR is plugged in):"
 echo "    Linux:   bash ops/rtl-tcp/install.sh    # systemd rtl_tcp + watchdog"
-echo "    Windows: follow setup/install-windows.md (Zadig → WinUSB → rtl_tcp.exe)"
+echo "    Windows: follow setup/install-windows.md (Zadig, WinUSB, rtl_tcp.exe)"
 echo ""
-echo "  Client (Docker host running the pipeline, can be same machine):"
+echo "  Shared data layer (Docker host, can be same machine):"
 echo "    bash setup/install-wsl.sh               # WSL/openSUSE toolchain (optional)"
-echo "    cd spectrum && docker compose up -d     # primary spectrum pipeline"
-echo "    open http://localhost:3003              # Grafana dashboards"
+echo "    docker network create rf_luv_net        # once"
+echo "    bash infra/up.sh                        # shared ClickHouse 8123/9000 + Grafana 3000"
+echo "    open http://localhost:3000              # Grafana dashboards (one folder per pipeline)"
 echo ""
-echo "  Companion pipelines (one at a time — single dongle):"
-echo "    cd adsb  && docker compose up -d        # aircraft (tar1090 :8080, Grafana :3000)"
-echo "    cd ais   && docker compose up -d        # ships (Grafana :3001)"
-echo "    cd ism   && docker compose up -d        # ISM 433 MHz (Grafana :3002)"
+echo "  Rotating V4 decoders (one decoder per dongle at a time):"
+echo "    bash pipeline.sh up adsb                # aircraft (tar1090 :8080, ADS-B folder)"
+echo "    bash pipeline.sh up ais                 # ships (AIS folder)"
+echo "    bash pipeline.sh up ism                 # ISM 433 MHz (ISM folder)"
+echo "    bash pipeline.sh up acars               # ACARS (ACARS folder)"
 echo ""

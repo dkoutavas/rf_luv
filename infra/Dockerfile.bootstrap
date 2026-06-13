@@ -1,0 +1,31 @@
+# Dedicated image for the ch-bootstrap one-shot.
+#
+# bootstrap.sh needs BOTH:
+#   - clickhouse-client : to apply the raw .sql schema files (PHASE 1 identities,
+#     adsb/ism/ais/spectrum init) over the native protocol as a specific user.
+#   - python3           : to run each pipeline's migrate.py (spectrum/acars/noaa),
+#     which are stdlib-only urllib HTTP migrators.
+#
+# The alpine clickhouse-server image is musl-based; mixing its binary into a
+# glibc python image fails at load time. So this is a multi-stage build that
+# lifts the single statically-resolvable clickhouse binary out of the glibc
+# (non-alpine) clickhouse-server image and drops it into python:3.12-slim
+# (also glibc, Debian). clickhouse-client is the same binary under a different
+# argv[0], so a symlink is all that is needed. Both tags are pinned.
+
+FROM clickhouse/clickhouse-server:24.3 AS chbin
+
+FROM python:3.12-slim
+
+# The clickhouse binary is glibc-linked in the non-alpine image; python:3.12-slim
+# is Debian (glibc) so it runs as-is. clickhouse-client dispatches on argv[0].
+COPY --from=chbin /usr/bin/clickhouse /usr/bin/clickhouse
+RUN ln -sf /usr/bin/clickhouse /usr/bin/clickhouse-client \
+    && clickhouse-client --version
+
+# The repo is bind-mounted read-only at /repo, so Python must not try to write
+# .pyc files next to the source it imports (migrate.py imports db.py, config.py).
+ENV PYTHONDONTWRITEBYTECODE=1
+
+ENTRYPOINT ["/bin/bash"]
+CMD ["/repo/infra/bootstrap.sh"]

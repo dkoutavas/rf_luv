@@ -1,0 +1,97 @@
+apiVersion: 1
+
+# Consolidated datasources for the shared Grafana instance.
+# One datasource per ClickHouse database on the single shared server.
+# All connect over the NATIVE protocol to clickhouse:9000 inside rf_luv_net.
+# Exactly one isDefault:true (spectrum, the primary steady tenant).
+
+datasources:
+  - name: ClickHouse adsb
+    uid: P_ADSB_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: adsb
+      username: adsb
+    secureJsonData:
+      password: adsb_local
+    editable: true
+
+  - name: ClickHouse ais
+    uid: P_AIS_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: ais
+      username: ais
+    secureJsonData:
+      password: ais_local
+    editable: true
+
+  - name: ClickHouse ism
+    uid: P_ISM_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: ism
+      username: ism
+    secureJsonData:
+      password: ism_local
+    editable: true
+
+  - name: ClickHouse spectrum
+    uid: P_SPECTRUM_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: spectrum
+      username: spectrum
+    secureJsonData:
+      password: spectrum_local
+    editable: true
+
+  - name: ClickHouse acars
+    uid: P_ACARS_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: acars
+      username: acars
+    secureJsonData:
+      password: acars_local
+    editable: true
+
+  - name: ClickHouse noaa
+    uid: P_NOAA_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: noaa
+      username: noaa
+    secureJsonData:
+      password: noaa_local
+    editable: true

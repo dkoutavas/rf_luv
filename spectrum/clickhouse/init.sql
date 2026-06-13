@@ -146,7 +146,7 @@ ORDER BY started_at;
 
 -- Listening log -- operator notes from active monitoring sessions
 -- Insert via browser form on the Listening Playbook dashboard,
--- or via CLI: curl 'http://localhost:8126/?user=spectrum&password=spectrum_local' \
+-- or via CLI: curl 'http://localhost:8123/?user=spectrum&password=spectrum_local' \
 --   --data-binary "INSERT INTO spectrum.listening_log (...) VALUES (...)"
 CREATE TABLE IF NOT EXISTS spectrum.listening_log (
     id                  String DEFAULT generateUUIDv4(),

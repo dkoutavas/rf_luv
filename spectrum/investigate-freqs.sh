@@ -16,7 +16,7 @@ set -uo pipefail
 #   433-446 MHz → NFM (ISM/PMR)
 
 CH_HOST="${CLICKHOUSE_HOST:-localhost}"
-CH_PORT="${CLICKHOUSE_PORT:-8126}"
+CH_PORT="${CLICKHOUSE_PORT:-8123}"
 CH_USER="${CLICKHOUSE_USER:-spectrum}"
 CH_PASS="${CLICKHOUSE_PASSWORD:-spectrum_local}"
 CH_URL="http://${CH_HOST}:${CH_PORT}/?user=${CH_USER}&password=${CH_PASS}"

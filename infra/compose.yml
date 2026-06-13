@@ -1,0 +1,109 @@
+# rf_luv shared data layer (always-on lifecycle).
+#
+# Compose project: rf_luv_infra. This is the steady tenant: one ClickHouse, one
+# Grafana, the logging form, and a one-shot bootstrap. The rotating decoder
+# pipelines (acars/adsb/ais/ism/spectrum) live in their own compose projects and
+# attach to the same external network, rf_luv_net. Bring this up with
+# infra/up.sh; bring pipelines up with the top-level pipeline.sh.
+#
+# Host-side access: ClickHouse on 127.0.0.1:8123 (HTTP) / 127.0.0.1:9000
+# (native); Grafana on 127.0.0.1:3000; logging form on 127.0.0.1:8084. The old
+# per-pipeline ports (8124-8128 / 9001-9005, plus 3001-3005) are retired.
+
+networks:
+  rf_luv_net:
+    external: true
+
+volumes:
+  ch-data:
+  grafana-data:
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: clickhouse
+    restart: unless-stopped
+    networks:
+      rf_luv_net:
+        aliases:
+          - clickhouse
+    ports:
+      # Only the single shared instance is exposed to the host now.
+      - "8123:8123"   # HTTP (migrators, host-side probes via CH_URL)
+      - "9000:9000"   # native (clickhouse-client, Grafana datasource)
+    environment:
+      # default = admin / bootstrap identity only; per-db users are created by
+      # ch-bootstrap. No CLICKHOUSE_DB / CLICKHOUSE_USER here: meaningless on a
+      # server that hosts six databases.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_PASSWORD: "${CH_ADMIN_PASSWORD}"
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      # Server-wide CORS (moved out of spectrum): lets browser dashboards and
+      # the logging form hit the HTTP interface cross-origin.
+      - ./clickhouse/cors.xml:/etc/clickhouse-server/config.d/cors.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "${CH_ADMIN_PASSWORD}", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  ch-bootstrap:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.bootstrap
+    container_name: ch-bootstrap
+    restart: on-failure
+    networks:
+      - rf_luv_net
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CH_ADMIN_PASSWORD: "${CH_ADMIN_PASSWORD}"
+      # Repo mount is read-only; never write .pyc next to the imported sources.
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      # Whole repo, read-only: bootstrap.sh reads every pipeline's schema +
+      # migrate.py from here.
+      - ../:/repo:ro
+    command: ["/repo/infra/bootstrap.sh"]
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      - rf_luv_net
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+      # Dashboards embed raw HTML panels (status tables); keep them un-sanitized.
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+      GF_SECURITY_ADMIN_USER: "${GF_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_ADMIN_PASSWORD:-admin}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Provisioning tree (datasources + dashboards) is owned by the grafana
+      # unit; this just binds it in read-only.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+  logging-form:
+    image: nginx:1.27-alpine
+    container_name: logging-form
+    restart: unless-stopped
+    networks:
+      - rf_luv_net
+    ports:
+      - "8084:80"
+    volumes:
+      - ../spectrum/logging/index.html:/usr/share/nginx/html/index.html:ro

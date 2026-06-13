@@ -29,6 +29,7 @@ __pycache__/
 # Environment files (credentials)
 .env
 *.env
+infra/.env
 
 # OS
 .DS_Store

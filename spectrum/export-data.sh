@@ -20,14 +20,14 @@ set -euo pipefail
 #   known_freqs.csv    - reference table of known Athens frequencies
 #   summary.txt        - row counts and time range
 #
-# Requires: curl, ClickHouse running on localhost:8126
+# Requires: curl, ClickHouse running on localhost:8123
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPORT_DIR="$SCRIPT_DIR/exports"
 
 # ClickHouse connection
 CH_HOST="${CLICKHOUSE_HOST:-localhost}"
-CH_PORT="${CLICKHOUSE_PORT:-8126}"
+CH_PORT="${CLICKHOUSE_PORT:-8123}"
 CH_USER="${CLICKHOUSE_USER:-spectrum}"
 CH_PASS="${CLICKHOUSE_PASSWORD:-spectrum_local}"
 CH_URL="http://${CH_HOST}:${CH_PORT}/?user=${CH_USER}&password=${CH_PASS}"

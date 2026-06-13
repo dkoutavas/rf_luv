@@ -1,6 +1,6 @@
 # spectrum-acars-feedback
 
-Hourly cross-pipeline feedback service: takes ACARS decode confirmations from `acars.freq_activity` and promotes them into `spectrum.listening_log` so the spectrum classifier treats those freqs as operator-confirmed at confidence 1.0.
+Hourly cross-pipeline feedback service: takes ACARS decode confirmations from `acars.messages` and promotes them into `spectrum.listening_log` so the spectrum classifier treats those freqs as operator-confirmed at confidence 1.0.
 
 ## Why
 
@@ -9,17 +9,21 @@ The spectrum classifier (`spectrum/classifier.py`) already understands two confi
 1. **`spectrum.known_frequencies`** — soft prior, +3 score in the rule engine. Migration 022 seeds the three EU ACARS freqs (131.525 / 131.725 / 131.825 MHz) here so the classifier knows they exist *in principle*.
 2. **`spectrum.listening_log`** — hard override, sets confidence to 1.0 for matches within 150 kHz tolerance. Originally an operator-only path ("I tuned, I confirmed").
 
-CRC-validated ACARS decodes are ground truth. They belong in the second category — there's no ambiguity to score. This service is the bridge: every hour it reads `acars.freq_activity` (the ReplacingMergeTree of freq → message_count maintained by the acars pipeline) and writes a confirmation row for each freq with ≥ N recent messages. The classifier picks it up on its next 5-min run.
+CRC-validated ACARS decodes are ground truth. They belong in the second category (there's no ambiguity to score). This service is the bridge: every hour it aggregates `acars.messages` (counting decoded messages per freq in the lookback window) and writes a confirmation row for each freq with at least N recent messages. The classifier picks it up on its next 5-min run.
+
+It reads `acars.messages` directly rather than the `acars.freq_activity` materialized view: that MV is `ReplacingMergeTree(last_seen)` with `count()` in its SELECT, so it counts per-batch inserts (typically 1) instead of cumulative messages and undercounts badly (discovered 2026-05-02). The script bypasses the MV and aggregates from the base table.
 
 ## Architecture
 
+After the 2026-06 consolidation every database lives on ONE ClickHouse server (`127.0.0.1:8123`). The acars read and the spectrum write are two queries on that single server, both run as `user=spectrum`. The spectrum user holds a `SELECT ON acars.*` cross-grant, so the fully-qualified `acars.messages` read needs no separate connection or credential.
+
 ```
-acars (ClickHouse :8127)         spectrum (ClickHouse :8126)
-└── freq_activity FINAL  ─[1h]─→ listening_log INSERT  ─[5min]─→ classifier picks up
-       (ground truth)             (operator-confirm path)         confidence=1.0
+ONE ClickHouse server (127.0.0.1:8123), user=spectrum
+  acars.messages  ─[1h aggregate]─→ spectrum.listening_log INSERT  ─[5min]─→ classifier picks up
+   (ground truth)                    (operator-confirm path)                 confidence=1.0
 ```
 
-The script does NOT use ClickHouse `remote()` — keeps the cross-DB write explicit, stdlib-only Python, no extra ClickHouse user permissions.
+The script does NOT use ClickHouse `remote()`. It keeps the cross-DB write explicit, stdlib-only Python, and relies on the single `SELECT ON acars.*` cross-grant rather than per-process secrets.
 
 ## Files
 

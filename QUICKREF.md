@@ -1,4 +1,4 @@
-# RTL-SDR Quick Reference — Athens
+# RTL-SDR Quick Reference - Athens
 
 ## First Boot Checklist
 1. Plug in dongle
@@ -32,8 +32,10 @@ python3 ~/.local/bin/heatmap.py scan.csv scan.png
 ### Continuous spectrum monitoring (Docker, with history + Grafana)
 ```bash
 # rtl_tcp must be running on the host (ops/rtl-tcp/install.sh on Linux)
-cd spectrum && docker compose up -d
-# Grafana: http://localhost:3003 (admin/admin)
+docker network create rf_luv_net   # once
+bash infra/up.sh                   # shared ClickHouse 8123/9000 + Grafana 3000
+# The scanner runs natively under systemd against 127.0.0.1:8123 on the prod host.
+# Grafana: http://localhost:3000 (admin/admin), Spectrum folder
 # Full 88–470 MHz sweep every ~5 min, airband every 60s, peaks + transients stored
 ```
 
@@ -67,7 +69,7 @@ rtl_fm -M fm -f 161.975M -s 12500 -g 40 - | multimon-ng -t raw -a AIS -
 ## SDR++ Direct Sampling (HF/Shortwave)
 1. Source → RTL-SDR → Direct Sampling → Q-branch
 2. Sample rate: 2.048 MHz (gives you 0–1 MHz view window)
-3. Tune to target — remember frequencies are in kHz:
+3. Tune to target (remember frequencies are in kHz):
    - UVB-76: 4625 kHz = 4.625 MHz
    - BBC World Service: 9410 kHz
    - Voice of Greece: 9420 kHz / 9935 kHz

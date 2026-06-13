@@ -24,28 +24,33 @@ only chance, and after that the historical data is accepted as lost.**
 
 ## Step 0: rescue data from the old disk (do this BEFORE wiping it)
 
-Highest-value action. The ClickHouse data lived only in Docker named volumes on
-the failing disk. If the disk still mounts at all, copy them off read-only
-before replacing it.
+Highest-value action. After consolidation all six databases live in a **single**
+ClickHouse Docker named volume, `rf_luv_infra_ch-data` (the `ch-data` volume of
+compose project `rf_luv_infra`). If the disk still mounts at all, copy it off
+read-only before replacing it.
 
 ```bash
-# Docker named volumes live here. Project prefix = pipeline dir name.
-#   spectrum_clickhouse-data, acars_clickhouse-data, noaa_clickhouse-data, ...
+# One shared volume now holds all six databases.
+#   rf_luv_infra_ch-data  (was: per-pipeline spectrum_clickhouse-data, acars_..., etc.)
 # Mount the old disk read-only (or boot a live USB), then:
-tar czf /mnt/rescue/spectrum_clickhouse-data.tgz \
-    -C /var/lib/docker/volumes/spectrum_clickhouse-data/_data .
-# Repeat for acars_clickhouse-data and any others.
+tar czf /mnt/rescue/rf_luv_infra_ch-data.tgz \
+    -C /var/lib/docker/volumes/rf_luv_infra_ch-data/_data .
 ```
 
-Prioritise `spectrum_clickhouse-data` (months of scans + the one-shot
-FM-bandstop A/B baseline, which cannot be re-measured). If the disk will not
-read, use `ddrescue` to image the partition first, then loop-mount the image.
-If nothing reads, accept the loss and continue.
+A 2026-06-era disk may instead carry the *old* per-pipeline volumes
+(`spectrum_clickhouse-data`, `acars_clickhouse-data`, ...). If so, tar each one
+you find; they are imported into the new shared server per database, not by
+dropping the directory in place.
 
-To re-import a rescued volume on the new disk: stop the stack, extract the tgz
-back into `/var/lib/docker/volumes/<name>/_data`, start the stack. Then verify
-row counts before trusting it. (A clean logical restore via Step 6 is preferred
-when a real backup exists.)
+Prioritise the spectrum data (months of scans + the one-shot FM-bandstop A/B
+baseline, which cannot be re-measured). If the disk will not read, use
+`ddrescue` to image the partition first, then loop-mount the image. If nothing
+reads, accept the loss and continue.
+
+To re-import a rescued shared volume on the new disk: stop the stack, extract the
+tgz back into `/var/lib/docker/volumes/rf_luv_infra_ch-data/_data`, start the
+stack. Then verify row counts before trusting it. (A clean logical restore via
+Step 6 is preferred when a real backup exists.)
 
 ---
 
@@ -137,26 +142,29 @@ bash ops/install-trip-hardening.sh        # idempotent, one sudo prompt
 systemctl --user enable --now rtl-reset-failed.timer
 ```
 
-## Step 5: bring up the pipelines
+## Step 5: bring up the shared data layer + pipelines
 
-Migrations / init.sql apply automatically at container start, recreating the
-full schema and the provisioned Grafana dashboards.
+The schema and the Athens known-frequencies seed apply automatically when the
+infra `ch-bootstrap` one-shot runs, recreating all six databases, their users
+and grants, and the provisioned Grafana dashboards and folders.
 
 ```bash
-cd ~/dev/rf_luv/spectrum && docker compose up -d     # primary; scanner native, NOT in compose
-# Companions only if wanted:
-# cd ../adsb && docker compose up -d   (note: adsb CH historically ran on the Windows host)
-# cd ../ais  && docker compose up -d
-# cd ../ism  && docker compose up -d
+docker network create rf_luv_net          # idempotent; up.sh also creates it
+cd ~/dev/rf_luv && bash infra/up.sh        # shared ClickHouse 8123/9000 + Grafana 3000 + logging-form 8084
+# Rotating V4 decoders only if wanted:
+# bash pipeline.sh up adsb   (note: adsb CH historically ran on the Windows host)
+# bash pipeline.sh up ais
+# bash pipeline.sh up ism
 ```
 
-Note: the spectrum scanner runs natively under systemd (Step 4), not in the
-Docker stack (the compose `spectrum-scanner` service is gated behind
-`profiles: ["scanner"]` and stays off). Plain `docker compose up -d` brings up
-ClickHouse, Grafana, and the listening-log nginx form (:8084). The classifier,
-feature extractor, and health monitor run as the systemd timers installed
-below, not as compose services. Dashboards land at the ports in the CLAUDE.md
-"Port Allocation" table (spectrum :3003, etc.).
+Note: the spectrum scanner runs natively under systemd (Step 4), not in a
+container. It writes to the shared ClickHouse on `127.0.0.1:8123` (formerly the
+per-pipeline `:8126`). `bash infra/up.sh` brings up the single ClickHouse,
+Grafana, the listening-log nginx form (`:8084`), and the `ch-bootstrap`
+one-shot. The classifier, feature extractor, and health monitor run as the
+systemd timers installed below, not as containers. Dashboards land in the single
+Grafana on `:3000`, one folder per pipeline (see the CLAUDE.md "Port Allocation"
+section).
 
 Install the spectrum intelligence + feedback timers and the coordinator:
 
@@ -177,10 +185,11 @@ schema):
 ```bash
 # Make the off-host snapshot location available, point the env at it:
 sudo $EDITOR /etc/rtl-scanner/clickhouse-backup.env   # set BACKUP_DIR
+# restore.sh targets the shared container via CH_CONTAINER=clickhouse
 bash ops/clickhouse-backup/restore.sh --db spectrum --latest
 bash ops/clickhouse-backup/restore.sh --db acars --latest
-# Verify:
-docker exec clickhouse-spectrum clickhouse-client --user spectrum \
+# Verify against the single shared server:
+docker exec clickhouse clickhouse-client --user spectrum \
   --password '<pw>' --query "SELECT count(), min(timestamp), max(timestamp) FROM spectrum.scans"
 ```
 
@@ -228,7 +237,7 @@ ACARS deploys clean on the recovered V4 (its soak restarts from zero). Follow
 systemctl --user stop rtl-scanner@v4-01.service     # if V4 was scanning
 systemctl --user disable rtl-scanner@v4-01.service
 cd ~/dev/rf_luv/acars && cp env.v4-01.example .env
-docker compose up -d --build
+cd ~/dev/rf_luv && bash pipeline.sh up acars        # against the always-on infra
 ```
 
 ## Step 10: optional services
@@ -246,7 +255,7 @@ bash ops/remote-desktop/trust-tailscale-iface.sh
 - [ ] `lsusb | grep -i RTL` shows both dongles
 - [ ] `/dev/rtl_sdr_v3` (+ v4 if used) symlinks exist
 - [ ] `systemctl --user is-active rtl-tcp@v3-01 rtl-scanner@v3-01` both `active`
-- [ ] spectrum Grafana at :3003 renders, scans flowing (freshness probe not alerting)
+- [ ] Grafana at :3000 renders the Spectrum folder, scans flowing (freshness probe not alerting)
 - [ ] `clickhouse-backup.timer` enabled, first snapshot has non-zero rows, BACKUP_DIR is off-host
 - [ ] ntfy topic rotated; 09:00 UTC heartbeat reaches the phone
 - [ ] If restoring data: row counts and min/max timestamps look right per pipeline

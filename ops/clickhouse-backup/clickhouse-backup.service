@@ -1,0 +1,19 @@
+[Unit]
+Description=Daily logical backup of rf_luv ClickHouse databases to off-host storage
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Optional per-host overrides (BACKUP_DIR, DATABASES, RETENTION_DAYS, passwords).
+EnvironmentFile=-/etc/rtl-scanner/clickhouse-backup.env
+ExecStart=%h/dev/rf_luv/ops/clickhouse-backup/backup.sh
+# A full logical dump of <5 GB takes well under a minute; allow slack for a
+# cold disk or a busy box.
+TimeoutStartSec=900
+Nice=10
+IOSchedulingClass=idle
+Restart=no
+
+[Install]
+WantedBy=default.target

@@ -7,7 +7,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
+# Run from the infra dir so Compose auto-loads infra/.env (CH_ADMIN_PASSWORD)
+# from the working directory and resolves the relative bind-mount paths.
+cd "$SCRIPT_DIR"
+COMPOSE_FILE="compose.yml"
 PROJECT=rf_luv_infra
 NET=rf_luv_net
 

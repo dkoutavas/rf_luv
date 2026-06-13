@@ -111,6 +111,26 @@ currently-up pipeline live from `docker ps` compose-project labels (not a state
 file), downs it, and brings the target up. `noaa` is a no-op reminder that it
 records via host systemd (`ops/noaa-pass-scheduler`).
 
+## Host prerequisites (SELinux / locked-down home)
+
+Validated live on an openSUSE Tumbleweed host (2026-06-13). Two host-level
+gotchas the containers hit when the repo lives under a restrictive home dir:
+
+- **SELinux enforcing.** Bind-mounted files (cors.xml, the grafana provisioning
+  tree, the `/repo` mount) carry `user_home_t`, which the container is denied.
+  The compose file appends `,z` to those bind mounts so Docker relabels them to
+  `container_file_t`. This is a no-op where SELinux is off, so it is safe
+  everywhere.
+- **`0700` home directory.** ClickHouse (uid 101) and Grafana (uid 472) run
+  non-root and must traverse the path to their bind-mounted files. If the repo
+  sits under a `drwx------` home, add traverse (not list) for others once:
+  `chmod o+x ~` (i.e. `0711`). Root-running containers (logging-form, the
+  bootstrap) are unaffected.
+
+If `infra/up.sh` reports `clickhouse is unhealthy`, check
+`docker logs clickhouse` for a `cors.xml ... Permission denied`; that is one of
+the two above.
+
 ## Backups: do this before collecting new data
 
 All six databases now share one `ch-data` volume on one disk. The 2026-06 leap

@@ -41,7 +41,8 @@ services:
       - ch-data:/var/lib/clickhouse
       # Server-wide CORS (moved out of spectrum): lets browser dashboards and
       # the logging form hit the HTTP interface cross-origin.
-      - ./clickhouse/cors.xml:/etc/clickhouse-server/config.d/cors.xml:ro
+      # ,z relabels for SELinux hosts (container_file_t); no-op where SELinux is off.
+      - ./clickhouse/cors.xml:/etc/clickhouse-server/config.d/cors.xml:ro,z
     ulimits:
       nofile:
         soft: 262144
@@ -71,7 +72,7 @@ services:
     volumes:
       # Whole repo, read-only: bootstrap.sh reads every pipeline's schema +
       # migrate.py from here.
-      - ../:/repo:ro
+      - ../:/repo:ro,z
     command: ["/repo/infra/bootstrap.sh"]
 
   grafana:
@@ -95,7 +96,7 @@ services:
       - grafana-data:/var/lib/grafana
       # Provisioning tree (datasources + dashboards) is owned by the grafana
       # unit; this just binds it in read-only.
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro,z
 
   logging-form:
     image: nginx:1.27-alpine
@@ -106,4 +107,4 @@ services:
     ports:
       - "8084:80"
     volumes:
-      - ../spectrum/logging/index.html:/usr/share/nginx/html/index.html:ro
+      - ../spectrum/logging/index.html:/usr/share/nginx/html/index.html:ro,z

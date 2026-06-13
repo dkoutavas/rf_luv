@@ -32,8 +32,8 @@ services:
   # Connects to rtl_tcp via SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>
   # and ships decoded messages as JSON UDP datagrams to acars-ingest:5550.
   acarsdec:
-    # was :latest_soapy; soak build 4.1.6Build1494; resolve digest on first Omen pull (docker buildx imagetools inspect)
-    image: ghcr.io/sdr-enthusiasts/docker-acarsdec@sha256:TODO_RESOLVE_ON_OMEN_PULL
+    # was :latest_soapy (soak build 4.1.6Build1494); digest resolved 2026-06-13 on Omen via docker buildx imagetools inspect
+    image: ghcr.io/sdr-enthusiasts/docker-acarsdec@sha256:506e422d6fd8462fa42c267e6a480fd260b01b06d62dd4134468869ef3f362d2
     container_name: acarsdec
     restart: unless-stopped
     networks: [rf_luv_net]

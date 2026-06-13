@@ -117,60 +117,54 @@ rf_luv/
 │   ├── install-wsl.sh          # openSUSE Tumbleweed package installer
 │   └── install-windows.md      # Windows-side setup guide (Zadig, SDR++, usbipd)
 │
-├── adsb/                       # ADS-B aircraft tracking pipeline
-│   ├── docker-compose.yml      # readsb + tar1090 + ClickHouse + Grafana + ingest
+├── infra/                      # shared always-on data layer (compose project rf_luv_infra)
+│   ├── compose.yml             # one ClickHouse (8123/9000) + Grafana (3000) + logging-form (8084) + ch-bootstrap
+│   ├── up.sh                   # bring up the data layer (creates rf_luv_net if absent)
+│   ├── bootstrap.sh            # creates the 6 dbs/users + grants, applies schema + Athens seed
+│   ├── Dockerfile.bootstrap    # glibc base with clickhouse-client + python3 for the one-shot
+│   ├── clickhouse/cors.xml     # server-wide CORS (moved out of spectrum)
+│   └── grafana/provisioning/   # 6 datasources + 6 folders, one per pipeline
+│
+├── pipeline.sh                 # bring rotating V4 decoders up/down/rotate: pipeline.sh up|down|rotate <pipe>
+│
+├── adsb/                       # ADS-B aircraft tracking pipeline (rotating V4 decoder)
+│   ├── compose.overlay.yml     # readsb + tar1090 + ingest (no own ClickHouse/Grafana)
 │   ├── Dockerfile.ingest       # container for ingest.py
 │   ├── ingest.py               # SBS BaseStation → ClickHouse batch inserter
-│   ├── clickhouse/
-│   │   └── init.sql            # positions table, materialized views, TTL
-│   └── grafana/
-│       └── provisioning/
-│           ├── datasources/
-│           │   └── clickhouse.yml
-│           └── dashboards/
-│               ├── dashboards.yml
-│               └── json/
-│                   └── adsb-overview.json  # pre-built dashboard
+│   └── clickhouse/
+│       └── init.sql            # positions table, materialized views, TTL (applied by ch-bootstrap)
 │
-├── ais/                        # AIS ship tracking pipeline
-│   ├── docker-compose.yml      # AIS-catcher + ClickHouse + Grafana + ingest
+├── ais/                        # AIS ship tracking pipeline (rotating V4 decoder)
+│   ├── compose.overlay.yml     # AIS-catcher + ingest (no own ClickHouse/Grafana)
 │   ├── Dockerfile.ingest       # container for ais_ingest.py + ais_decoder.py
 │   ├── ais_ingest.py           # NMEA UDP → ClickHouse batch inserter
 │   ├── ais_decoder.py          # stdlib-only AIVDM decoder (msg types 1-3, 5, 18, 24)
-│   ├── clickhouse/
-│   │   └── init.sql            # positions table, ship_latest, hourly_stats views
-│   └── grafana/
-│       └── provisioning/       # datasource + dashboard auto-provisioning
+│   └── clickhouse/
+│       └── init.sql            # positions table, ship_latest, hourly_stats views
 │
-├── ism/                        # ISM band IoT device monitoring pipeline
-│   ├── docker-compose.yml      # rtl_433 + ClickHouse + Grafana
+├── ism/                        # ISM band IoT device monitoring pipeline (rotating V4 decoder)
+│   ├── compose.overlay.yml     # rtl_433 + ingest (no own ClickHouse/Grafana)
 │   ├── Dockerfile.ingest       # rtl_433 + Python in single container
 │   ├── entrypoint.sh           # pipes rtl_433 JSON stdout → ism_ingest.py
 │   ├── ism_ingest.py           # JSON line reader → ClickHouse batch inserter
-│   ├── clickhouse/
-│   │   └── init.sql            # events table, device_latest, hourly_stats views
-│   └── grafana/
-│       └── provisioning/       # datasource + dashboard auto-provisioning
+│   └── clickhouse/
+│       └── init.sql            # events table, device_latest, hourly_stats views
 │
 ├── spectrum/                   # Wideband spectrum scanner ("RF weather station")
-│   ├── docker-compose.yml      # scanner + ClickHouse + Grafana
+│   ├── compose.overlay.yml     # optional containerized scanner (native systemd is the norm)
 │   ├── Dockerfile.scanner      # python:3.12-slim + numpy
 │   ├── entrypoint.sh           # pipes scanner.py → scan_ingest.py
 │   ├── scanner.py              # custom rtl_tcp FFT scanner (replaces rtl_power)
 │   ├── scan_ingest.py          # JSON line reader → ClickHouse batch inserter
-│   ├── clickhouse/
-│   │   └── init.sql            # scans, peaks, events, known_frequencies tables
-│   └── grafana/
-│       └── provisioning/       # datasource + dashboard auto-provisioning
+│   └── clickhouse/             # init.sql + migrations/ + seeds/ (applied by ch-bootstrap)
 │
-├── acars/                      # ACARS aircraft messaging pipeline (Tier 1 #1)
-│   ├── docker-compose.yml      # acarsdec (sdr-enthusiasts image) + ingest + ClickHouse + Grafana
+├── acars/                      # ACARS aircraft messaging pipeline (rotating V4 decoder)
+│   ├── compose.overlay.yml     # acarsdec (sdr-enthusiasts image, @sha256-pinned) + ingest
 │   ├── Dockerfile.ingest       # python:3.12-slim, only the ingest worker; decoder is prebuilt
-│   ├── entrypoint.sh           # runs migrations then UDP listener
+│   ├── entrypoint.sh           # runs UDP listener (schema applied by ch-bootstrap)
 │   ├── acars_ingest.py         # UDP datagram reader → ClickHouse batch inserter
 │   ├── migrate.py              # numbered SQL migration runner (mirrors spectrum/migrate.py)
 │   ├── clickhouse/migrations/  # 001_init.sql etc.
-│   ├── grafana/provisioning/   # datasource + acars-overview dashboard
 │   └── env.v4-01.example       # leap V4 deployment template
 │
 ├── scripts/
@@ -200,7 +194,8 @@ The RTL-SDR is a USB device. WSL cannot see USB hardware without extra steps.
 rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
 
 # WSL tools connect to 127.0.0.1:1234 automatically
-# The ADS-B docker-compose.yml is pre-configured for this (host.docker.internal:1234)
+# The rotating decoder overlays point at host.docker.internal (V4 :1235 by default;
+# the native spectrum scanner uses the V3 :1234)
 ```
 
 ### Approach B: usbipd (full Linux USB passthrough)
@@ -245,12 +240,13 @@ usbipd attach --wsl --busid <BUSID>
 
 ### Phase 3: ADS-B Pipeline
 
-- [ ] **Start rtl_tcp on Windows**: `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`
+- [ ] **Start rtl_tcp on Windows**: `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000` (or point the decoder at the V4 dongle on `host.docker.internal:1235`)
 - [ ] **Set antenna**: dipole arms ~6.5 cm each, vertical, at window or patio
-- [ ] **Launch stack**: `cd adsb && docker compose up -d`
+- [ ] **Bring up the data layer (once)**: `docker network create rf_luv_net` then `bash infra/up.sh` (starts the shared ClickHouse on 8123/9000 and Grafana on 3000)
+- [ ] **Launch the decoder**: `bash pipeline.sh up adsb` (starts the ADS-B readsb + ingest against the always-on infra)
 - [ ] **Verify**: open http://localhost:8080 (tar1090 map), aircraft should appear within minutes
-- [ ] **Check Grafana**: open http://localhost:3000 (admin/admin), ClickHouse datasource should be auto-provisioned, dashboard available under "ADS-B Dashboards"
-- [ ] **Monitor ingest**: `docker compose logs -f adsb-ingest`: should see batch flush messages
+- [ ] **Check Grafana**: open http://localhost:3000 (admin/admin), the ClickHouse adsb datasource is auto-provisioned, dashboards live under the ADS-B folder
+- [ ] **Monitor ingest**: `bash pipeline.sh logs adsb` (or `docker logs -f` the ingest container): should see batch flush messages
 - [ ] **Feeder setup** (optional): register at FlightAware/ADSBx for stats and comparison
 
 ### Phase 4: Ongoing Projects
@@ -355,7 +351,7 @@ ClickHouse (adsb database)
   ├── positions table (MergeTree, partitioned by day, 90-day TTL)
   ├── aircraft_hourly (materialized view, uniq aircraft, avg altitude)
   └── aircraft_latest (materialized view, last known state per hex_ident)
-        └→ Grafana (:3000)
+        └→ Grafana (:3000, ADS-B folder)
              └── adsb-overview dashboard (auto-provisioned)
                  • Aircraft count (live + over time)
                  • Message rate
@@ -377,11 +373,11 @@ RTL-SDR (161.975 + 162.025 MHz, via rtl_tcp on Windows)
   └→ AIS-catcher (Docker, dual-channel decoder)
        └→ NMEA sentences (UDP :10110) → ais_ingest.py → ClickHouse
 
-ClickHouse (ais database, :8124/:9001)
+ClickHouse (ais database, shared server 8123/9000)
   ├── positions table (MergeTree, partitioned by day, 90-day TTL)
   ├── hourly_stats (materialized view, uniq ships, avg speed)
   └── ship_latest (materialized view, last known state per MMSI)
-        └→ Grafana (:3001)
+        └→ Grafana (:3000, AIS folder)
              └── ais-overview dashboard (auto-provisioned)
                  • Ship count (live + over time)
                  • Message rate
@@ -403,11 +399,11 @@ RTL-SDR (433.92 MHz, via rtl_tcp on Windows)
   └→ rtl_433 (in Docker, protocol decoder)
        └→ JSON stdout (pipe) → ism_ingest.py → ClickHouse
 
-ClickHouse (ism database, :8125/:9002)
+ClickHouse (ism database, shared server 8123/9000)
   ├── events table (MergeTree, partitioned by day, 180-day TTL)
   ├── hourly_stats (materialized view, uniq devices, avg temperature)
   └── device_latest (materialized view, last reading per device)
-        └→ Grafana (:3002)
+        └→ Grafana (:3000, ISM folder)
              └── ism-overview dashboard (auto-provisioned)
                  • Active devices + event rate
                  • Device types bar chart
@@ -427,13 +423,13 @@ RTL-SDR V4 (rtl_tcp on leap :1235)
   └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec; see image-tag note below)
        └→ JSON datagrams (UDP :5550) → acars_ingest.py → ClickHouse
 
-ClickHouse (acars database, :8127/:9004)
+ClickHouse (acars database, shared server 8123/9000)
   ├── messages table (MergeTree, partitioned by day, 90-day TTL)
   ├── hourly_stats (AggregatingMergeTree, counts, uniques, avg level/err)
   ├── flight_latest (ReplacingMergeTree per flight callsign)
   ├── tail_latest (ReplacingMergeTree per tail registration, uplinks too)
   └── freq_activity (ReplacingMergeTree per (freq, dongle), classifier-feedback hook)
-        └→ Grafana (:3004)
+        └→ Grafana (:3000, ACARS folder)
              └── ACARS Overview dashboard (auto-provisioned)
                  • Message rate, unique flights/tails (stat row)
                  • Messages per minute (24h timeseries)
@@ -465,11 +461,11 @@ ClickHouse (acars database, :8127/:9004)
   into `spectrum.listening_log` (not `known_frequencies`). The classifier then
   treats those as a soft prior. So this is shipped, not "TBD", and lives in a
   separate process from the classifier.
-- **Image tag:** `acars/docker-compose.yml` currently pins the mutable tag
-  `:latest_soapy` (the SoapySDR variant the soak ran on). This violates the
-  project's "never use latest" rule; capture the resolved digest and `@sha256`-
-  pin it on the next deploy. The pinned build observed during the soak was
-  `4.1.6Build1494`.
+- **Image tag:** the acarsdec decoder is now `@sha256`-pinned in the ACARS
+  overlay (`acars/compose.overlay.yml`), per the project's "never use latest"
+  rule. If the live digest could not be resolved at consolidation time it is
+  left as a clearly-marked TODO placeholder; the SoapySDR build the soak ran on
+  was `4.1.6Build1494`. Resolve and pin the real digest on the next deploy.
 
 ## Spectrum Scanner Pipeline Architecture
 
@@ -478,14 +474,14 @@ RTL-SDR (88-470 MHz sweep, via rtl_tcp on Windows)
   └→ scanner.py (Docker, custom rtl_tcp FFT engine, numpy)
        └→ JSON lines (stdout pipe) → scan_ingest.py → ClickHouse
 
-ClickHouse (spectrum database, :8126/:9003)
+ClickHouse (spectrum database, shared server 8123/9000)
   ├── scans table (MergeTree, one row per freq bin per sweep, 180-day TTL)
   ├── peaks table (spectral peaks, bins above their neighbors)
   ├── events table (transient signals, appeared/disappeared between sweeps)
   ├── known_frequencies (27 Athens signals: FM, ATC, marine, TETRA, ISM, DVB-T, military)
   ├── hourly_baseline (materialized view, avg/stddev per freq per hour)
   └── freq_latest (materialized view, latest reading per bin)
-        └→ Grafana (:3003)
+        └→ Grafana (:3000, Spectrum folder; default datasource)
              └── spectrum-overview dashboard (auto-provisioned)
                  • Current power spectrum (bar chart, full 88-470 MHz)
                  • Signal power over time at known frequencies
@@ -514,11 +510,11 @@ celestrak TLEs (tle_refresh.sh, weekly)  +  RX location (lat/lon/alt)
        └→ noaa.passes (pending rows)  [under NOAA_DRY_RUN=1, the default]
             └→ recorder.py (SCAFFOLD, see below)
 
-ClickHouse (noaa database, :8128/:9005)
+ClickHouse (noaa database, shared server 8123/9000)
   ├── passes table (MergeTree, partitioned by month, 365-day TTL)
   ├── pass_latest (ReplacingMergeTree: canonical state per pass)
   └── monthly_summary (AggregatingMergeTree: decode rate, avg SNR per sat per month)
-        └→ Grafana (:3005), noaa-overview dashboard
+        └→ Grafana (:3000, NOAA folder), noaa-overview dashboard
 ```
 
 **State and key decisions:**
@@ -601,24 +597,48 @@ The leap host carries a layered reliability stack, each layer catches a failure 
 
 ## Port Allocation
 
-| Pipeline | ClickHouse HTTP | ClickHouse Native | Grafana | Extra |
-|----------|----------------|-------------------|---------|-------|
-| ADS-B    | 8123           | 9000              | 3000    | tar1090: 8080 |
-| AIS      | 8124           | 9001              | 3001    | - |
-| ISM      | 8125           | 9002              | 3002    | - |
-| Spectrum | 8126           | 9003              | 3003    | - |
-| ACARS    | 8127           | 9004              | 3004    | - |
-| NOAA     | 8128           | 9005              | 3005    | - |
+The pipelines no longer each run their own ClickHouse and Grafana. There is
+**one shared data layer** (compose project `rf_luv_infra`, file
+`infra/compose.yml`) that every pipeline writes into:
+
+| Service     | Host port | Notes |
+|-------------|-----------|-------|
+| ClickHouse HTTP   | 8123 | one server, six databases (adsb/ais/ism/spectrum/acars/noaa) |
+| ClickHouse native | 9000 | Grafana datasources connect here |
+| Grafana           | 3000 | one instance, six datasources + six folders (one per pipeline) |
+| logging-form      | 8084 | nginx serving the listening-log HTML form |
+| tar1090 (ADS-B)   | 8080 | only when the adsb decoder is up |
+
+**Retired ports.** The old per-pipeline ClickHouse ports 8124-8128 and
+9001-9005, and the old per-pipeline Grafana ports 3001-3005, no longer exist.
+Anything that used to hit `:8126` (spectrum), `:8127` (acars), etc. now hits the
+single server on `127.0.0.1:8123` (HTTP) / `127.0.0.1:9000` (native) from the
+host, or the `clickhouse` container alias from inside the `rf_luv_net` network.
+The six Grafana dashboards now live as six folders inside the single Grafana on
+`:3000` (spectrum is the default datasource).
 
 ClickHouse backups land off-host via `ops/clickhouse-backup/` (no port; daily
 user timer, see "Backups" in Current Project State).
 
+**Bring-up.** Create the shared network once (`docker network create rf_luv_net`)
+then start the always-on data layer with `bash infra/up.sh` (which also creates
+the network if absent). Rotating V4 decoders are managed with
+`bash pipeline.sh up|down|rotate <pipe>` (`<pipe>` is one of adsb/ais/ism/acars);
+each runs as its own compose project (`rf_luv_<pipe>`, file
+`<pipe>/compose.overlay.yml`) attached to the same network and pointed at the
+shared ClickHouse. Schema and the Athens known-frequencies seed are applied
+automatically by the infra `ch-bootstrap` one-shot, so the old manual
+`docker exec -i clickhouse-<db> ... < seed` steps are no longer required.
+
 leap currently runs **two dongles** (V3 on rtl_tcp :1234, V4 on :1235), each
 with its own templated systemd stack (`rtl-tcp@<serial>`, `rtl-tcp-watchdog@`,
-`rtl-scanner@`). Decoders that share a dongle time-share via flock through the
-coordinator: `spectrum/coordinator.py` (installed by `ops/rtl-coordinator/`) is
-wired into `scanner.py`. The mechanism is in place but not yet exercised against
-a real second consumer, so in practice one consumer per dongle still holds today.
+`rtl-scanner@`). The V3 :1234 belongs to the native systemd spectrum scanner
+(it writes to the shared ClickHouse on `127.0.0.1:8123`, formerly `:8126`). The
+V4 :1235 hosts the rotating decoders that `pipeline.sh` manages. Decoders that
+share a dongle time-share via flock through the coordinator:
+`spectrum/coordinator.py` (installed by `ops/rtl-coordinator/`) is wired into
+`scanner.py`. The mechanism is in place but not yet exercised against a real
+second consumer, so in practice one consumer per dongle still holds today.
 
 **Dongle assignment policy** (set in each pipeline's env file):
 - **V3 (FM-bandstopped, port 1234)**: kept on wideband scanning. Use V3 for

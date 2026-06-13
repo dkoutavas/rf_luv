@@ -1,12 +1,13 @@
 -- Athens-area known_frequencies seed for the spectrum.known_frequencies table.
 --
--- Loaded once after `docker compose up -d` to bias the classifier toward known
--- transmitters in the Polygono / Athens region. For other locations, copy this
--- file to `known_frequencies_<your_location>.sql`, replace the rows, and load
--- via:
+-- This seed is applied AUTOMATICALLY by the infra ch-bootstrap one-shot when the
+-- shared data layer comes up (`bash infra/up.sh`), so a fresh install already has
+-- these rows. A manual load is only needed for a custom catalog at another
+-- location. For other locations, copy this file to
+-- `known_frequencies_<your_location>.sql`, replace the rows, and load via:
 --
 --     cat spectrum/clickhouse/seeds/known_frequencies_<your_location>.sql \
---       | docker exec -i clickhouse-spectrum clickhouse-client \
+--       | docker exec -i clickhouse clickhouse-client \
 --           --user spectrum --password spectrum_local
 --
 -- Idempotent: the WHERE clause guards against double-insertion if the table

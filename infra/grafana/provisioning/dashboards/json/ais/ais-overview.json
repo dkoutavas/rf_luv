@@ -1,0 +1,269 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ships Now",
+      "description": "Unique vessels seen in the last 60 seconds",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(mmsi) as count FROM ais.positions WHERE timestamp > now() - INTERVAL 60 SECOND",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "yellow", "value": null },
+              { "color": "green", "value": 5 },
+              { "color": "blue", "value": 30 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Messages / min",
+      "description": "AIS messages received per minute (last 5 min avg)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() / 5 as msg_per_min FROM ais.positions WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique Ships Today",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(mmsi) as count FROM ais.positions WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Messages Today",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() as total FROM ais.positions WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ship Count Over Time",
+      "description": "Unique vessels seen per 5-minute window",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfFiveMinutes(timestamp) AS time, uniq(mmsi) AS ships FROM ais.positions WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Message Rate Over Time",
+      "description": "AIS messages received per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, count() AS messages FROM ais.positions WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Ship Types",
+      "description": "Vessel types seen (from static data messages)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT dictGetOrDefault('ais.ship_types', 'name', toUInt64(ship_type), concat('Type ', toString(ship_type))) AS type_name, uniq(mmsi) AS count FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND ship_type IS NOT NULL AND ship_type > 0 GROUP BY type_name ORDER BY count DESC",
+          "format": 1
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent Ships",
+      "description": "Last 20 vessels with enriched names from ship_latest",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT p.mmsi, sl.ship_name AS name, sl.callsign AS callsign, dictGetOrDefault('ais.ship_types', 'name', toUInt64(coalesce(sl.ship_type, 0)), '') AS type, round(anyLast(p.speed), 1) AS speed_kts, round(anyLast(p.course), 0) AS course_deg, round(anyLast(p.lat), 4) AS lat, round(anyLast(p.lon), 4) AS lon, count() AS msgs, max(p.timestamp) AS last_seen FROM ais.positions AS p LEFT JOIN (SELECT mmsi, ship_name, callsign, ship_type FROM ais.ship_latest FINAL) AS sl ON p.mmsi = sl.mmsi WHERE p.timestamp > now() - INTERVAL 30 MINUTE GROUP BY p.mmsi, sl.ship_name, sl.callsign, sl.ship_type ORDER BY last_seen DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "histogram",
+      "title": "Speed Distribution",
+      "description": "Speed over ground distribution (last hour)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT speed FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND speed IS NOT NULL AND speed > 0 AND speed < 50",
+          "format": 1
+        }
+      ],
+      "options": {
+        "bucketSize": 2,
+        "combine": false,
+        "fillOpacity": 80
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Speed Traces (Top 5 Ships)",
+      "description": "Speed over time for the 5 most active vessels in the last hour",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "WITH top_ships AS (SELECT mmsi FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND speed IS NOT NULL GROUP BY mmsi ORDER BY count() DESC LIMIT 5), ship_names AS (SELECT mmsi, ship_name FROM ais.ship_latest FINAL WHERE mmsi IN (SELECT mmsi FROM top_ships)) SELECT p.timestamp AS time, p.speed AS value, concat(toString(p.mmsi), coalesce(concat(' (', sn.ship_name, ')'), '')) AS metric FROM ais.positions AS p LEFT JOIN ship_names AS sn ON p.mmsi = sn.mmsi WHERE p.timestamp > now() - INTERVAL 1 HOUR AND p.mmsi IN (SELECT mmsi FROM top_ships) AND p.speed IS NOT NULL ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "knots",
+          "custom": {
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        }
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "Ship Positions - Live",
+      "description": "Current ship positions from the last 5 minutes, centered on Piraeus",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT mmsi, ship_name, lat, lon, speed, course, last_seen, dictGetOrDefault('ais.ship_types', 'name', toUInt64(coalesce(ship_type, 0)), 'Unknown') AS type_name FROM ais.ship_latest FINAL WHERE last_seen > now() - INTERVAL 5 MINUTE AND lat IS NOT NULL AND lon IS NOT NULL",
+          "format": 1
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 37.94,
+          "lon": 23.64,
+          "zoom": 11
+        },
+        "basemap": {
+          "type": "default",
+          "name": "OpenStreetMap"
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Ships",
+            "config": {
+              "showLegend": true,
+              "style": {
+                "size": { "fixed": 8 },
+                "color": { "field": "speed", "fixed": "semi-dark-blue" },
+                "symbol": { "fixed": "img/icons/marker/circle.svg" },
+                "rotation": { "field": "course", "mode": "mod", "min": 0, "max": 360 }
+              }
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "tooltip": true
+          }
+        ],
+        "tooltip": { "mode": "details" }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "speed" },
+            "properties": [{ "id": "unit", "value": "knots" }]
+          }
+        ]
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Ships by Zone",
+      "description": "Active vessels per geographic zone (last 5 minutes)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT multiIf(lat >= 37.93 AND lat <= 37.96 AND lon >= 23.60 AND lon <= 23.66, 'Piraeus Port', lat >= 37.90 AND lat <= 37.96 AND lon >= 23.48 AND lon <= 23.58, 'Salamina Strait', lat >= 38.01 AND lat <= 38.06 AND lon >= 23.48 AND lon <= 23.56, 'Elefsina Bay', lat >= 37.50 AND lat <= 38.10 AND lon >= 23.20 AND lon <= 24.00, 'Saronic Open', 'Unknown') AS zone, uniq(mmsi) AS ships FROM ais.ship_latest FINAL WHERE last_seen > now() - INTERVAL 5 MINUTE AND lat IS NOT NULL AND lon IS NOT NULL GROUP BY zone ORDER BY ships DESC",
+          "format": 1
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["ais", "maritime", "rtl-sdr"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "AIS Overview - Piraeus / Saronic Gulf",
+  "uid": "ais-overview-athens"
+}

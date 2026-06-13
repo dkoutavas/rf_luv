@@ -10,7 +10,7 @@ EnvironmentFile=-/etc/rtl-scanner/noaa-scheduler.env
 # above for per-host RX location, horizon, threshold etc.
 Environment=NOAA_DRY_RUN=1
 Environment=CLICKHOUSE_HOST=localhost
-Environment=CLICKHOUSE_PORT=8128
+Environment=CLICKHOUSE_PORT=8123
 Environment=CLICKHOUSE_DB=noaa
 Environment=CLICKHOUSE_USER=noaa
 Environment=CLICKHOUSE_PASSWORD=noaa_local

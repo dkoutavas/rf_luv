@@ -1,0 +1,89 @@
+# ACARS Aircraft Communications Pipeline (overlay)
+# acarsdec (decoder) -> acars-ingest (UDP->ClickHouse)
+#
+# This is a ROTATING pipeline overlay. The always-on data layer
+# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
+# rf_luv_infra project. Bring infra up first, then this overlay:
+#   docker compose -f infra/compose.yml up -d
+#   cp env.v4-01.example .env   # leap deployment
+#   docker compose -f acars/compose.overlay.yml up -d
+#   open http://localhost:3000 for Grafana dashboards (shared)
+#
+# Local smoke testing (no real radio): bring up just the ingest and
+# synthesize ACARS messages with:
+#   docker compose -f acars/compose.overlay.yml up -d acars-ingest
+#   echo '{"timestamp":1764691234.0,"freq":"131.525","level":"-25",...}' | nc -u -w1 localhost 5550
+#
+# Dongle: ACARS owns the V4 dongle on host.docker.internal:1235.
+# The spectrum scanner stays on V3 (:1234).
+#
+# Pipeline pattern: decoder image emits JSON UDP datagrams; the ingest
+# sidecar listens on UDP :5550, batches rows, and INSERTs to the shared
+# ClickHouse over rf_luv_net at the alias `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  # --- ACARS Decoder --------------------------------------
+  # Maintained image with airframesio/acarsdec + SoapySDR + Soapy-rtltcp.
+  # Connects to rtl_tcp via SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>
+  # and ships decoded messages as JSON UDP datagrams to acars-ingest:5550.
+  acarsdec:
+    # was :latest_soapy (soak build 4.1.6Build1494); digest resolved 2026-06-13 on Omen via docker buildx imagetools inspect
+    image: ghcr.io/sdr-enthusiasts/docker-acarsdec@sha256:506e422d6fd8462fa42c267e6a480fd260b01b06d62dd4134468869ef3f362d2
+    container_name: acarsdec
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    depends_on:
+      - acars-ingest
+    environment:
+      # Tuner: full SoapySDR string. On leap, set this to:
+      #   driver=rtltcp,rtltcp=192.168.2.10:1235
+      # Adjust per-deployment via .env.
+      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:1235}"
+      FREQUENCIES: "${ACARS_FREQUENCIES:-131.525;131.725;131.825}"
+      GAIN: "${ACARS_GAIN:-30}"
+      PPM: "${ACARS_PPM:-0}"
+      FEED_ID: "${ACARS_FEED_ID:-rf_luv-v4-01}"
+      # The image ships decoded JSON via the `acars_feeder` s6 service,
+      # which reads SERVER + SERVER_PORT (NOT the `OUTPUT_SERVER*` env
+      # vars implied by the docker-acarsdec README -- that maps to a
+      # different downstream feeder script). Default SERVER is "acarshub"
+      # which doesn't exist on our network -- overriding to our ingest sidecar.
+      SERVER: "acars-ingest"
+      SERVER_PORT: "5550"
+      # Kept for forward compat with any future feeder script that reads them.
+      MODE: "J"
+      OUTPUT_SERVER: "acars-ingest"
+      OUTPUT_SERVER_PORT: "5550"
+      OUTPUT_SERVER_MODE: "udp"
+      QUIET_LOGS: "${ACARS_QUIET_LOGS:-false}"
+      TZ: "${TZ:-UTC}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # --- ACARS Ingest Worker --------------------------------
+  # Listens for JSON UDP from acarsdec, parses fields, batch-inserts to ClickHouse.
+  # entrypoint.sh runs migrate.py first (idempotent safety net; the acars DB +
+  # user already exist by then via the infra bootstrap) then the UDP listener.
+  acars-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: acars-ingest
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    environment:
+      ACARS_UDP_PORT: "5550"
+      ACARS_DONGLE_ID: "${ACARS_DONGLE_ID:-v4-01}"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: acars
+      CLICKHOUSE_USER: acars
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-acars_local}"
+      BATCH_SIZE: "${BATCH_SIZE:-100}"
+      FLUSH_INTERVAL_SECONDS: "${FLUSH_INTERVAL_SECONDS:-10}"
+    # acarsdec -> acars-ingest UDP traffic stays on rf_luv_net (no host port).

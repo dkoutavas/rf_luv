@@ -43,7 +43,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULTS = {
-    "CH_URL": "http://127.0.0.1:8126",
+    "CH_URL": "http://127.0.0.1:8123",
     "CH_USER": "spectrum",
     "CH_PASSWORD": "spectrum_local",
     "CH_DATABASE": "spectrum",

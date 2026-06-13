@@ -6,15 +6,16 @@ Personal RTL-SDR Blog V3 exploration project, based in Athens, Greece. The repo 
 
 ## Quick start
 
-The spectrum pipeline needs two things running: `rtl_tcp` on the host that owns the USB dongle, and a Docker stack anywhere that can reach it over TCP.
+The stack has two halves: `rtl_tcp` on the host that owns the USB dongle, and a Docker data layer (one shared ClickHouse + Grafana) plus the decoder you want, anywhere that can reach the dongle over TCP.
 
 1. **Clone + bootstrap** (one-time): `bash bootstrap.sh`: strips WSL metadata, marks scripts executable, inits git.
 2. **Host side: rtl_tcp**:
    - Linux: `bash ops/rtl-tcp/install.sh`: installs systemd user unit + 30 s watchdog.
-   - Windows: follow [`setup/install-windows.md`](setup/install-windows.md) (Zadig → WinUSB → run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`).
-3. **Client side: pipeline**: `cd spectrum && docker compose up -d` (migrations auto-apply).
-4. **Dashboards**: <http://localhost:3003> (admin/admin). First full sweep completes in ~4 minutes; airband sweeps every 60 s.
-5. **Antenna**: stock dipole, arms sized for the band of interest (see table below), vertical, outdoors if possible.
+   - Windows: follow [`setup/install-windows.md`](setup/install-windows.md) (Zadig, WinUSB, run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`).
+3. **Shared data layer** (once): `docker network create rf_luv_net` then `bash infra/up.sh`. This starts the single ClickHouse (8123/9000) and Grafana (3000), and the `ch-bootstrap` one-shot creates all six databases, users, and schema and loads the Athens known-frequencies seed automatically.
+4. **Decoders**: the native systemd spectrum scanner on V3 writes straight into the shared ClickHouse (no compose needed). Rotating V4 decoders are managed with `bash pipeline.sh up|down|rotate <pipe>` where `<pipe>` is `adsb`, `ais`, `ism`, or `acars`.
+5. **Dashboards**: <http://localhost:3000> (admin/admin); each pipeline has its own Grafana folder. First full spectrum sweep completes in ~4 minutes; airband sweeps every 60 s.
+6. **Antenna**: stock dipole, arms sized for the band of interest (see table below), vertical, outdoors if possible.
 
 If you're on WSL/openSUSE and want the local CLI toolchain (`rtl_433`, `multimon-ng`, `gpredict`, etc.): `bash setup/install-wsl.sh`. Not required for the Docker pipeline, only for ad-hoc CLI experiments.
 
@@ -26,25 +27,27 @@ If you're on WSL/openSUSE and want the local CLI toolchain (`rtl_433`, `multimon
 │ (dongle)    │          │ systemd+watchdog │  :1234  │ (FFT, detection) │   JSON  │ (batch inserter)  │          │              │
 └─────────────┘          └──────────────────┘         └──────────────────┘         └──────────────────┘          └──────┬───────┘
                                                                                                                           │
-                                                                                                                   Grafana :3003
+                                                                                                                   Grafana :3000
 ```
 
-The RTL-SDR is a USB device, so `rtl_tcp` runs on the host that physically owns the dongle and streams IQ samples over TCP. All downstream containers, scanner, ingest, ClickHouse, Grafana, run in Docker and reach `rtl_tcp` via `host.docker.internal`. The same bridge is reused by every pipeline, but **only one pipeline can hold the dongle at a time** (single-client).
+The RTL-SDR is a USB device, so `rtl_tcp` runs on the host that physically owns the dongle and streams IQ samples over TCP. ClickHouse and Grafana are a single shared data layer (compose project `rf_luv_infra`); the scanner, ingest, and rotating decoders attach to the same `rf_luv_net` network and write into the one ClickHouse. Decoders reach `rtl_tcp` via `host.docker.internal` (V4 :1235 by default; the native spectrum scanner uses the V3 :1234). The dongle is single-client, so a given dongle is held by one consumer at a time.
 
 Production host: `leap` (192.168.2.10, openSUSE Leap 15.6), where `rtl_tcp` is wrapped by a layered reliability stack: the user-level **watchdog** in `ops/rtl-tcp/` handles the per-process "RTL0 greeting but zero samples" failure mode (30 s probe, soft restart → USB unbind/rebind, circuit-breaker at fail #10). For unattended operation a root-level **escalator** in `ops/rtl-tcp/rtl-tcp-escalator.py` picks up after the circuit breaker: running the full per-device + xHCI bounce + restart sequence proven on V4, then `systemctl reboot` as a last resort. Two ClickHouse-level probes in `ops/spectrum-monitor/` cover failure modes the per-process watchdog can't see: a **freshness probe** watches `spectrum.scans` to catch downstream stalls (Docker, ingest, ClickHouse itself), and a **signal-quality probe** watches `spectrum.sweep_health.max_power` to catch RF-path failures where data flows but the scanner has gone deaf (antenna disconnect, loose connector, broken filter). Push alerts go via [ntfy.sh](https://ntfy.sh) using the helper in `ops/notify/`; a daily heartbeat confirms the alert pipe is alive. Install with `bash ops/install-trip-hardening.sh`.
 
 ## Pipelines
 
-| Pipeline   | Status | Grafana | ClickHouse | Description |
-|------------|--------|---------|------------|-------------|
-| `spectrum/`| **active**, primary | :3003 | :8126/:9003 | Wideband 88-470 MHz scanner, signal classifier, anomaly detection, baseline |
-| `acars/`   | deployed, soak interrupted | :3004 | :8127/:9004 | ACARS aircraft messaging on V4. Soak started 2026-05-02, redeploys fresh (see [`acars/DEPLOY.md`](acars/DEPLOY.md)) |
-| `noaa/`    | partial | :3005 | :8128/:9005 | NOAA/Meteor pass scheduling + schema. Recorder is a scaffold; capture not implemented yet |
-| `adsb/`    | companion | :3000 | :8123/:9000 | ADS-B aircraft tracking (readsb + tar1090 :8080). Historically ran on the Windows host, not leap |
-| `ais/`     | companion | :3001 | :8124/:9001 | AIS ship tracking (AIS-catcher). Built, not run on leap |
-| `ism/`     | companion | :3002 | :8125/:9002 | ISM 433 MHz device decoding (rtl_433). Built, not run on leap |
+All pipelines share one ClickHouse (`127.0.0.1:8123` HTTP, `:9000` native) and one Grafana (`:3000`). Each pipeline gets its own ClickHouse **database** and its own Grafana **folder** rather than its own server. The old per-pipeline ports (8124-8128, 9001-9005, 3001-3005) are retired.
 
-ClickHouse data for these pipelines is backed up off-host by [`ops/clickhouse-backup/`](ops/clickhouse-backup/) (daily logical snapshots). Deploy it and point `BACKUP_DIR` at off-host storage before collecting data you care about.
+| Pipeline   | Status | Database | Grafana folder | Description |
+|------------|--------|----------|----------------|-------------|
+| `spectrum/`| **active**, primary | `spectrum` | Spectrum (default DS) | Wideband 88-470 MHz scanner, signal classifier, anomaly detection, baseline |
+| `acars/`   | deployed, soak interrupted | `acars` | ACARS | ACARS aircraft messaging on V4. Soak started 2026-05-02, redeploys fresh (see [`acars/DEPLOY.md`](acars/DEPLOY.md)) |
+| `noaa/`    | partial | `noaa` | NOAA | NOAA/Meteor pass scheduling + schema. Recorder is a scaffold; capture not implemented yet |
+| `adsb/`    | companion | `adsb` | ADS-B | ADS-B aircraft tracking (readsb + tar1090 :8080). Historically ran on the Windows host, not leap |
+| `ais/`     | companion | `ais` | AIS | AIS ship tracking (AIS-catcher). Built, not run on leap |
+| `ism/`     | companion | `ism` | ISM | ISM 433 MHz device decoding (rtl_433). Built, not run on leap |
+
+ClickHouse data for these databases is backed up off-host by [`ops/clickhouse-backup/`](ops/clickhouse-backup/) (daily logical snapshots). Deploy it and point `BACKUP_DIR` at off-host storage before collecting data you care about.
 
 ## Custom Python
 
@@ -62,14 +65,15 @@ The spectrum stack is intentionally dependency-light, numpy for DSP, stdlib for 
 ## Running the spectrum pipeline
 
 1. Host-side rtl_tcp: install the reliability stack with `bash ops/rtl-tcp/install.sh` (Linux host) or, on Windows, run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`.
-2. Pipeline: `cd spectrum && docker compose up -d`.
-3. Dashboards: <http://localhost:3003> (admin/admin).
+2. Data layer (once): `docker network create rf_luv_net` then `bash infra/up.sh` (shared ClickHouse + Grafana, schema + seed auto-applied).
+3. Scanner: the production host runs `scanner.py` natively under systemd against the shared ClickHouse on `127.0.0.1:8123`. To run it in a container instead, use the spectrum overlay (see [`spectrum/README.md`](spectrum/README.md)).
+4. Dashboards: <http://localhost:3000> (admin/admin), Spectrum folder.
 
 Full per-platform setup, environment variables, and troubleshooting live in [`spectrum/README.md`](spectrum/README.md). Windows driver swap (Zadig) and SDR++ first-boot are in [`setup/install-windows.md`](setup/install-windows.md).
 
 ## Dashboards & operator tools
 
-Grafana at `:3003` ships with auto-provisioned dashboards: current power spectrum, known-frequency traces, detected peaks, transient events, airband activity, anomaly detection vs. hourly baseline, and a **Listening Playbook** dashboard with an embedded HTML form (served from `spectrum/logging/` via nginx on `:8084`) that writes operator notes directly into `spectrum.listening_log`.
+Grafana at `:3000` (Spectrum folder) ships with auto-provisioned dashboards: current power spectrum, known-frequency traces, detected peaks, transient events, airband activity, anomaly detection vs. hourly baseline, and a **Listening Playbook** dashboard with an embedded HTML form (served by the shared `logging-form` nginx on `:8084`) that writes operator notes directly into `spectrum.listening_log`.
 
 Two helper scripts query ClickHouse over HTTP:
 - `spectrum/export-data.sh`: export scan data to CSV/markdown reports (see `spectrum/exports/`).
@@ -78,7 +82,13 @@ Two helper scripts query ClickHouse over HTTP:
 ## Repo layout
 
 ```
-spectrum/          # primary pipeline: scanner, ingest, intelligence, migrations, Grafana
+infra/             # shared data layer: one ClickHouse + Grafana + logging-form + ch-bootstrap
+  compose.yml        # compose project rf_luv_infra (8123/9000/3000/8084)
+  up.sh              # bring up the data layer (creates rf_luv_net if absent)
+  bootstrap.sh       # creates 6 dbs/users + grants, applies schema + Athens seed
+  grafana/           # 6 datasources + 6 folders, one per pipeline
+pipeline.sh        # bring rotating V4 decoders up/down/rotate: pipeline.sh <action> <pipe>
+spectrum/          # primary pipeline: scanner, ingest, intelligence, migrations
   scanner.py         # rtl_tcp FFT client (custom, replaces rtl_power)
   scan_ingest.py     # JSON to ClickHouse batch inserter
   coordinator.py     # flock dongle lock (wired into scanner.py)
@@ -87,13 +97,13 @@ spectrum/          # primary pipeline: scanner, ingest, intelligence, migrations
   classifier_health.py  # classifier regression sentinel
   acars_feedback.py  # bridges acars.messages into spectrum.listening_log over HTTP
   migrate.py         # numbered-SQL migration runner
-  clickhouse/        # init.sql + migrations/ + seeds/
-  grafana/           # provisioned datasources and dashboards
-  logging/           # operator listening-log HTML form (served on :8084)
+  clickhouse/        # init.sql + migrations/ + seeds/ (applied by infra ch-bootstrap)
+  compose.overlay.yml   # optional containerized scanner (native systemd is the norm)
+  logging/           # operator listening-log HTML form (served by infra logging-form :8084)
   docs/              # session handoffs, briefings, analysis reports
 acars/             # ACARS aircraft messaging (deployed on V4; see DEPLOY.md)
 noaa/              # NOAA/Meteor pass scheduling (recorder is a scaffold)
-adsb/ ais/ ism/    # companion pipelines (see each directory's docker-compose.yml)
+adsb/ ais/ ism/    # companion pipelines (each a compose.overlay.yml decoder)
 ops/rtl-tcp/       # host-side rtl_tcp reliability: systemd unit, watchdog, escalator, USB reset
 ops/rtl-coordinator/   # installs the flock dongle coordinator
 ops/spectrum-monitor/  # ClickHouse freshness + signal-quality probes

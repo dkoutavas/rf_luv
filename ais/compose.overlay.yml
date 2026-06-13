@@ -1,0 +1,62 @@
+# AIS Ship Tracking Pipeline (overlay)
+# AIS-catcher (decoder) -> ais-ingest (NMEA->ClickHouse)
+#
+# This is a ROTATING pipeline overlay. The always-on data layer
+# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
+# rf_luv_infra project. Bring infra up first, then this overlay:
+#   docker compose -f infra/compose.yml up -d
+#   docker compose -f ais/compose.overlay.yml up -d
+#   open http://localhost:3000 for Grafana dashboards (shared)
+#
+# Dongle: rotating decoders point at the V4 dongle on
+# host.docker.internal:1235. The V3 :1234 belongs to the native
+# systemd spectrum scanner.
+#   On Windows/leap: rtl_tcp -a 0.0.0.0 -p 1235 -s 2048000
+#
+# AIS-catcher auto-tunes to 161.975 + 162.025 MHz (dual-channel).
+# Point dipole antenna SW toward Piraeus, arms ~44 cm, vertical.
+#
+# ClickHouse is reached over the shared rf_luv_net network at the
+# alias `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  # --- AIS Decoder ----------------------------------------
+  # AIS-catcher connects to rtl_tcp, demodulates dual-channel AIS,
+  # and sends decoded NMEA sentences to ais-ingest via UDP.
+  ais-decoder:
+    image: ghcr.io/jvde-github/ais-catcher:v0.62
+    container_name: ais-decoder
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    depends_on:
+      - ais-ingest
+    command: >
+      -t rtltcp host.docker.internal 1235
+      -gt tuner 40.0
+      -u ais-ingest 10110
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # --- AIS Ingest Worker ----------------------------------
+  # Receives NMEA over UDP, decodes AIVDM payloads, batch-inserts to ClickHouse.
+  ais-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: ais-ingest
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    environment:
+      AIS_UDP_PORT: "10110"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: ais
+      CLICKHOUSE_USER: ais
+      CLICKHOUSE_PASSWORD: ais_local
+      BATCH_SIZE: "500"
+      FLUSH_INTERVAL_SECONDS: "5"

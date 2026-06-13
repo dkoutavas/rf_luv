@@ -4,7 +4,7 @@ Every item is a runnable command or SQL query against leap / its ClickHouse.
 If an item's expected output doesn't appear, **do not proceed** — fix the
 discrepancy or open a followup first.
 
-Curl queries assume ClickHouse is reachable at `localhost:8126` with user
+Curl queries assume ClickHouse is reachable at `localhost:8123` with user
 `spectrum`/`spectrum_local`, matching the spectrum-scanner container's
 current settings. From leap's shell.
 
@@ -42,7 +42,7 @@ current settings. From leap's shell.
 - [ ] **Migrations 017 / 018 / 019 / 020 applied**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT version FROM spectrum.schema_migrations WHERE version IN ('017','018','019','020') ORDER BY version FORMAT TSV"
   ```
   Expect: 4 rows — `017`, `018`, `019`, `020`.
@@ -52,7 +52,7 @@ current settings. From leap's shell.
   ```bash
   for t in scans peaks events sweep_health scan_runs signal_classifications peak_features compression_events; do
     printf "%-25s " "$t"
-    curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+    curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
         --data-binary "SELECT count() FROM spectrum.$t WHERE dongle_id='' OR dongle_id IS NULL FORMAT TSV"
   done
   ```
@@ -63,7 +63,7 @@ current settings. From leap's shell.
 - [ ] **Scanner running the dongle-aware code, emitting `v3-01`**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT dongle_id, count() FROM spectrum.scans WHERE timestamp > now() - INTERVAL 10 MINUTE GROUP BY dongle_id FORMAT TSV"
   ```
   Expect: exactly one row, `v3-01\t<large number>`. Any blank row means
@@ -73,7 +73,7 @@ current settings. From leap's shell.
 - [ ] **`run_id` format is dongle-prefixed**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT run_id, dongle_id FROM spectrum.scan_runs WHERE started_at > now() - INTERVAL 1 HOUR ORDER BY started_at DESC LIMIT 3 FORMAT TSV"
   ```
   Expect: `run_id` starts with `run_v3-01_`. If it starts with `run_2026...`
@@ -122,7 +122,7 @@ current settings. From leap's shell.
 - [ ] **`dongle_comparison_view` exists and returns V3 rows**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT hour, freq_mhz_tile, v3_avg_power_dbfs, v4_avg_power_dbfs FROM spectrum.dongle_comparison_view WHERE hour > now() - INTERVAL 2 HOUR ORDER BY hour DESC, freq_mhz_tile LIMIT 5 FORMAT TSV"
   ```
   Expect: 5 rows. `v4_avg_power_dbfs` must be `\N` (NULL). If any row has a
@@ -146,7 +146,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
 - [ ] **A/B week completed — ≥7 days of parallel ingest**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT count(DISTINCT hour) FROM spectrum.dongle_comparison_view WHERE v3_avg_power_dbfs IS NOT NULL AND v4_avg_power_dbfs IS NOT NULL FORMAT TSV"
   ```
   Expect: ≥168 (7 days × 24 hours).
@@ -154,7 +154,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
 - [ ] **Quantified: noise-floor delta in FM band meets threshold (≤ -3 dB)**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT avg(delta_noise_floor_db) FROM spectrum.dongle_comparison_view WHERE freq_mhz_tile BETWEEN 88 AND 107 AND hour > now() - INTERVAL 7 DAY FORMAT TSV"
   ```
   Expect: ≤ `-3.0`. If higher (less negative), the filter is weak — see
@@ -163,7 +163,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
 - [ ] **Quantified: passband loss in airband is acceptable (≥ -1 dB)**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT avg(delta_noise_floor_db) FROM spectrum.dongle_comparison_view WHERE freq_mhz_tile BETWEEN 118 AND 136 AND hour > now() - INTERVAL 7 DAY FORMAT TSV"
   ```
   Expect: ≥ `-1.0` (i.e., V4 is no more than 1 dB lower than V3 in airband).
@@ -171,7 +171,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
 - [ ] **Quantified: clip rate reduction ≥ 80%**
 
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT sum(v4_clip_count_per_hour) / sum(v3_clip_count_per_hour) FROM spectrum.dongle_comparison_view WHERE hour > now() - INTERVAL 7 DAY FORMAT TSV"
   ```
   Expect: ≤ `0.2` (V4 clips ≤ 20% as often as V3).
@@ -191,7 +191,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
   scanner/ingest emit the `filter` field, the FM-filter-installed run is
   indistinguishable in scan_runs from a pre-filter run.
   ```bash
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "SELECT count() FROM system.columns WHERE database='spectrum' AND table='scan_runs' AND name='filter' FORMAT TSV"
   ```
   Expect: `1` once the followup is applied. This checklist item is the
@@ -204,7 +204,7 @@ These fire only after V4 has been running for ≥7 days with the filter.
   Plan (documented here, executed during the filter-install window):
   ```bash
   # On install day, truncate V3's baseline and let it rebuild:
-  curl -s "http://localhost:8126/?user=spectrum&password=spectrum_local" \
+  curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
       --data-binary "ALTER TABLE spectrum.hourly_baseline DELETE WHERE dongle_id='v3-01'"
   # Wait ~24h for the MV to accumulate a fresh baseline. During the warmup,
   # detect_compression.py's sig_baseline flag for V3 will be unreliable

@@ -12,8 +12,10 @@ set -euo pipefail
 #
 # HOW IT WORKS (dependency-free: no extra binaries, no server reconfig):
 #   for each configured database -> for each MergeTree-family table:
-#     docker exec clickhouse-<db> clickhouse-client \
+#     docker exec <CONTAINER> clickhouse-client --user <db> --password <pass> \
 #       --query "SELECT * FROM <db>.<table> FORMAT Native" | gzip > table.native.gz
+#   One shared ClickHouse container holds every database (post-consolidation),
+#   so the per-db user/pass select the database, not a per-db container.
 #   ClickHouse Native format preserves AggregateFunction states, so rollup
 #   (AggregatingMergeTree / ReplacingMergeTree) tables restore exactly.
 #   SHOW CREATE output is also captured per snapshot for self-containment,
@@ -35,9 +37,14 @@ ENV_FILE="${CLICKHOUSE_BACKUP_ENV:-/etc/rtl-scanner/clickhouse-backup.env}"
 # mount, rclone-mounted bucket). A backup on the same failing disk is no backup.
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rf-clickhouse}"
 
-# Which databases to dump. Default = the two with irreplaceable data today.
-# adsb/ais/ism are companion pipelines (often empty); add them if they run.
-DATABASES="${DATABASES:-spectrum acars}"
+# Which databases to dump. Post-consolidation all six live on one server;
+# spectrum/acars hold the irreplaceable data, adsb/ais/ism/noaa are companion
+# pipelines (often empty) but cheap to include.
+DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa}"
+
+# The single shared ClickHouse container (post-2026-06 consolidation). All
+# databases live in it; the per-db container names (clickhouse-<db>) are gone.
+CONTAINER="${CH_CONTAINER:-clickhouse}"
 
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 
@@ -71,21 +78,23 @@ fail() { err "$*"; notify_fail "$*"; exit 1; }
 trap 'fail "unexpected error at line $LINENO"' ERR
 
 # ---- main -------------------------------------------------------------------
-info "clickhouse-backup starting (ts=$TS, dir=$BACKUP_DIR, dbs=[$DATABASES])"
+info "clickhouse-backup starting (ts=$TS, dir=$BACKUP_DIR, container=$CONTAINER, dbs=[$DATABASES])"
 mkdir -p "$BACKUP_DIR"
+
+# Test the ONE shared container once, up front. Doing this per-db inside the
+# loop (as a previous version did, keying on a non-existent clickhouse-<db>
+# name) would skip EVERY database and silently produce a zero-table backup,
+# the exact zero-backup trap this whole tool exists to prevent.
+if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" >/dev/null 2>&1; then
+    fail "container '$CONTAINER' not running; nothing to back up. Bring the infra stack up first."
+fi
 
 total_tables=0
 for db in $DATABASES; do
-    container="clickhouse-${db}"
     user="$(db_user "$db")"
     pass="$(db_pass "$db")"
 
-    if ! docker inspect -f '{{.State.Running}}' "$container" >/dev/null 2>&1; then
-        warn "$container not running; skipping $db"
-        continue
-    fi
-
-    ch() { docker exec "$container" clickhouse-client --user "$user" --password "$pass" "$@"; }
+    ch() { docker exec "$CONTAINER" clickhouse-client --user "$user" --password "$pass" "$@"; }
 
     # MergeTree-family base + explicit MV-target tables. Skip Views,
     # MaterializedView definitions, Dictionaries, and implicit .inner tables

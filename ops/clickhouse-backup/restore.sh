@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Procedure (correct-by-construction, no double-counting):
 #   1. The fresh stack must already be up and migrated (tables + MVs exist):
-#        cd <db>/ && docker compose up -d   # migrate.py / init.sql create schema
+#        bash infra/up.sh   # ch-bootstrap migrates schema for all 6 databases
 #   2. DETACH every materialized view so re-inserting base data does NOT fan
 #      out into rollup tables (we restore those rollups from their own dumps).
 #   3. For each dumped table: TRUNCATE then INSERT ... FORMAT Native.
@@ -56,12 +56,14 @@ fi
 [ -d "$SNAP" ] || die "snapshot not found: $SNAP"
 info "restoring $DB from $(readlink -f "$SNAP")"
 
-container="clickhouse-${DB}"
+# Post-consolidation: one shared ClickHouse container holds every database.
+# Per-DB user/pass select the database; CH_CONTAINER overrides the name.
+container="${CH_CONTAINER:-clickhouse}"
 user="$DB"
 pvar="$(echo "$DB" | tr '[:lower:]' '[:upper:]')_PASSWORD"
 pass="${!pvar:-${DB}_local}"
 docker inspect -f '{{.State.Running}}' "$container" >/dev/null 2>&1 \
-    || die "$container is not running. Bring the stack up + migrate first."
+    || die "$container is not running. Bring the infra stack up + migrate first."
 ch() { docker exec "$container" clickhouse-client --user "$user" --password "$pass" "$@"; }
 ch_in() { docker exec -i "$container" clickhouse-client --user "$user" --password "$pass" "$@"; }
 
@@ -81,11 +83,22 @@ if [ "$DRY" -eq 1 ]; then
     exit 0
 fi
 
+# Reattach MVs on ANY exit (including an aborted restore) so a failure never
+# leaves the database with detached rollup views.
+reattach_mvs() {
+    for mv in "${mvs[@]}"; do
+        [ -z "$mv" ] && continue
+        ch --query "ATTACH TABLE ${DB}.${mv}" 2>/dev/null \
+            || warn "could not reattach $mv (may already be attached)"
+    done
+}
+
 info "detaching ${#mvs[@]} materialized views"
 for mv in "${mvs[@]}"; do
     [ -z "$mv" ] && continue
     ch --query "DETACH TABLE ${DB}.${mv}" || warn "could not detach $mv"
 done
+trap reattach_mvs EXIT
 
 restored=0
 for f in "$SNAP"/*.native.gz; do
@@ -100,15 +113,19 @@ for f in "$SNAP"/*.native.gz; do
         continue
     fi
     ch --query "TRUNCATE TABLE ${DB}.${t}"
-    gunzip -c "$f" | ch_in --query "INSERT INTO ${DB}.${t} FORMAT Native"
-    info "restored ${DB}.${t}"
+    # Decompress once. An empty Native dump (a table that held no rows at backup
+    # time) must NOT be piped to INSERT or ClickHouse aborts with
+    # NO_DATA_TO_INSERT; TRUNCATE already left the table empty, matching the snapshot.
+    tmp="$(mktemp)"
+    gunzip -c "$f" > "$tmp"
+    if [ -s "$tmp" ]; then
+        ch_in --query "INSERT INTO ${DB}.${t} FORMAT Native" < "$tmp"
+        info "restored ${DB}.${t}"
+    else
+        info "restored ${DB}.${t} (empty dump; table truncated)"
+    fi
+    rm -f "$tmp"
     restored=$((restored + 1))
-done
-
-info "reattaching materialized views"
-for mv in "${mvs[@]}"; do
-    [ -z "$mv" ] && continue
-    ch --query "ATTACH TABLE ${DB}.${mv}" || warn "could not reattach $mv (ATTACH MATERIALIZED VIEW may be needed)"
 done
 
 info "restore complete: $restored tables into $DB"

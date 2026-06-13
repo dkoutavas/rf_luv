@@ -1,0 +1,52 @@
+# ISM Band Device Monitoring Pipeline (overlay)
+# rtl_433 (decoder) -> ism_ingest.py (JSON->ClickHouse)
+#
+# This is a ROTATING pipeline overlay. The always-on data layer
+# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
+# rf_luv_infra project. Bring infra up first, then this overlay:
+#   docker compose -f infra/compose.yml up -d
+#   docker compose -f ism/compose.overlay.yml up -d
+#   open http://localhost:3000 for Grafana dashboards (shared)
+#
+# Dongle: rotating decoders point at the V4 dongle on
+# host.docker.internal:1235. The V3 :1234 belongs to the native
+# systemd spectrum scanner.
+#   On Windows/leap: rtl_tcp -a 0.0.0.0 -p 1235 -s 2048000
+#
+# Decodes weather stations, tire sensors, doorbells, remotes, etc.
+# at 433.92 MHz. Dipole arms ~16.4 cm, vertical, at window.
+#
+# ClickHouse is reached over the shared rf_luv_net network at the
+# alias `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  # --- rtl_433 + Ingest (combined) ------------------------
+  # Single container: rtl_433 pipes JSON to Python ingest script.
+  # Combined because the pipe is the simplest IPC -- no networking
+  # overhead, no UDP buffering, and rtl_433 exit = ingest exit.
+  rtl433-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: rtl433-ingest
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    environment:
+      RTL_TCP_HOST: host.docker.internal
+      RTL_TCP_PORT: "1235"
+      ISM_FREQ: "433.92M"
+      ISM_GAIN: "40"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: ism
+      CLICKHOUSE_USER: ism
+      CLICKHOUSE_PASSWORD: ism_local
+      BATCH_SIZE: "200"
+      FLUSH_INTERVAL_SECONDS: "10"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

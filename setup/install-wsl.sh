@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# RTL-SDR Lab — openSUSE Tumbleweed (WSL) Package Setup
+# RTL-SDR Lab - openSUSE Tumbleweed (WSL) Package Setup
 # Run: bash setup/install-wsl.sh
 #
 # This installs the SDR toolchain on WSL. The RTL-SDR dongle itself
@@ -83,7 +83,7 @@ build_from_source() {
             return 0
         fi
     fi
-    FAILED+=("$name (build failed — check dependencies)")
+    FAILED+=("$name (build failed - check dependencies)")
     cd /
     rm -rf "$dir"
     return 1
@@ -136,11 +136,11 @@ step "Decoders and signal processing tools"
 try_zypper multimon-ng "multimon-ng (POCSAG, FLEX, EAS, DTMF decoder)" || \
     build_from_source multimon-ng "https://github.com/EliasOeworka/multimon-ng"
 
-try_zypper sox "SoX (audio processing — useful for piping/converting SDR audio)" || true
+try_zypper sox "SoX (audio processing - useful for piping/converting SDR audio)" || true
 try_zypper ffmpeg-8 "FFmpeg (media processing, format conversion)" || \
     try_zypper ffmpeg-7 "FFmpeg (media processing, format conversion)" || true
 
-# rtl_433 — ISM band decoder (weather stations, sensors, car keyfobs)
+# rtl_433 - ISM band decoder (weather stations, sensors, car keyfobs)
 try_zypper rtl_433 "rtl_433 (ISM band protocol decoder)" || \
     build_from_source rtl_433 "https://github.com/merbanan/rtl_433"
 
@@ -148,10 +148,10 @@ try_zypper rtl_433 "rtl_433 (ISM band protocol decoder)" || \
 
 step "ADS-B / aviation tools"
 
-# readsb will run in Docker (see adsb/docker-compose.yml)
+# readsb will run in Docker (see adsb/compose.overlay.yml)
 # but install dump1090 CLI tools if available
 try_zypper dump1090 "dump1090 (Mode S / ADS-B decoder)" || \
-    warn "dump1090 not in repos — will use Docker readsb instead (recommended)"
+    warn "dump1090 not in repos - will use Docker readsb instead (recommended)"
 
 # ─── Satellite Tools ─────────────────────────────────────────
 
@@ -161,19 +161,19 @@ try_zypper gpredict "gpredict (satellite pass prediction GUI)" || true
 try_zypper predict "predict (CLI satellite tracking)" || true
 try_pip orbit-predictor "orbit-predictor (Python satellite prediction library)" || true
 
-# satdump — modern satellite decoder (NOAA APT, Meteor LRPT, etc.)
+# satdump - modern satellite decoder (NOAA APT, Meteor LRPT, etc.)
 # Usually needs to be built from source or grabbed as AppImage
 if ! command -v satdump &>/dev/null; then
-    warn "satdump not in repos — grab AppImage from github.com/SatDump/SatDump/releases"
+    warn "satdump not in repos - grab AppImage from github.com/SatDump/SatDump/releases"
     warn "  or build from source: https://github.com/SatDump/SatDump"
-    FAILED+=("satdump (manual install needed — see above)")
+    FAILED+=("satdump (manual install needed - see above)")
 fi
 
 # ─── Digital Mode Tools ──────────────────────────────────────
 
 step "Digital mode decoders"
 
-# AIS — ship tracking
+# AIS - ship tracking
 try_zypper rtl-ais "rtl-ais (AIS ship tracking decoder)" || \
     build_from_source rtl-ais "https://github.com/dgiardini/rtl-ais" || \
     warn "rtl-ais: try 'pip install pyais' for Python AIS decoding instead"
@@ -186,7 +186,7 @@ step "Data pipeline and visualization"
 if command -v docker &>/dev/null; then
     info "Docker available"
 else
-    warn "Docker not found — install Docker Desktop for Windows or docker-ce in WSL"
+    warn "Docker not found - install Docker Desktop for Windows or docker-ce in WSL"
     FAILED+=("Docker (needed for ADS-B pipeline)")
 fi
 
@@ -199,7 +199,7 @@ fi
 
 # clickhouse-client for ad-hoc queries
 try_zypper clickhouse-client "clickhouse-client (CLI for ClickHouse queries)" || \
-    warn "clickhouse-client not in repos — will use Docker exec instead"
+    warn "clickhouse-client not in repos - will use Docker exec instead"
 
 # Python libs for data processing
 try_pip clickhouse-connect "clickhouse-connect (Python ClickHouse client)" || true
@@ -218,7 +218,7 @@ if [ ! -f "$HOME/.local/bin/heatmap.py" ]; then
         chmod +x "$HOME/.local/bin/heatmap.py"
         INSTALLED+=("heatmap.py (rtl_power visualization)")
     else
-        warn "Could not download heatmap.py — grab it manually from keenerd/rtl-sdr-misc on GitHub"
+        warn "Could not download heatmap.py - grab it manually from keenerd/rtl-sdr-misc on GitHub"
         FAILED+=("heatmap.py (download failed)")
     fi
 else
@@ -232,7 +232,7 @@ step "USB passthrough status"
 if command -v usbip &>/dev/null; then
     info "usbip client available in WSL"
 else
-    warn "usbip not available — USB passthrough from Windows requires usbipd-win"
+    warn "usbip not available - USB passthrough from Windows requires usbipd-win"
     warn "  Install on Windows: winget install usbipd"
     warn "  In WSL you may need: sudo zypper install usbip"
 fi
@@ -264,5 +264,7 @@ echo "  3. When dongle arrives: run Zadig → Bulk-In Interface 0 → replace wi
 echo "  4. Start rtl_tcp on the host:"
 echo "       Windows: rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000"
 echo "       Linux:   bash ops/rtl-tcp/install.sh  (systemd unit + watchdog)"
-echo "  5. Start the primary pipeline: cd spectrum && docker compose up -d"
-echo "     Grafana: http://localhost:3003  (companion pipelines: adsb/ais/ism)"
+echo "  5. Bring up the shared data layer:"
+echo "       docker network create rf_luv_net && bash infra/up.sh"
+echo "       Grafana: http://localhost:3000  (one folder per pipeline)"
+echo "  6. Rotating V4 decoders: bash pipeline.sh up <pipe>  (adsb/ais/ism/acars)"

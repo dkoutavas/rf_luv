@@ -1,7 +1,16 @@
--- Migration: fix ship_latest NULL clobbering + add ship_types dictionary + geofencing zones
+-- SUPERSEDED. Do not run directly.
 --
--- Run this on an existing deployment where ship_latest was created with bare argMax.
--- Procedure:
+-- This standalone migration has been folded into ais/clickhouse/bootstrap.sql,
+-- which is applied (idempotently, as the per-db user 'ais') by the shared-infra
+-- bootstrap (infra/bootstrap.sh, service ch-bootstrap). bootstrap.sql carries
+-- the corrected no-NULL-clobber ship_latest view, the ship_types dictionary
+-- (with the WITH-credentials SOURCE form so it loads under the per-db user),
+-- and the geofencing zones, all guarded for safe re-runs. Use that path on any
+-- new deployment or rebuild. This file is kept only for migration history.
+--
+-- Original purpose: fix ship_latest NULL clobbering + add ship_types dictionary
+-- + geofencing zones on an existing per-container AIS deployment where
+-- ship_latest was created with bare argMax. Original procedure:
 --   1. docker compose stop ais-ingest
 --   2. docker exec -i clickhouse-ais clickhouse-client --user ais --password ais_local --multiquery < clickhouse/migrate_ship_latest.sql
 --   3. docker compose start ais-ingest

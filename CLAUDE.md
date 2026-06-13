@@ -1,20 +1,72 @@
-# rf_luv — RTL-SDR Radio Lab
+# rf_luv: RTL-SDR Radio Lab
 
 ## What This Is
 
-Personal radio exploration project using an RTL-SDR Blog V3 dongle. Based in Athens, Greece (Polygono neighborhood — elevated central Athens). Projects range from spectrum analysis to aircraft tracking to number station hunting.
+Personal radio exploration project using an RTL-SDR Blog V3 dongle. Based in Athens, Greece (Polygono neighborhood, elevated central Athens). Projects range from spectrum analysis to aircraft tracking to number station hunting.
 
 This file is the Claude Code project prompt. It contains everything needed to assist with any task in this project.
+
+---
+
+## Current Project State (2026-06)
+
+> Status snapshot so this prompt reflects reality, not aspiration. Update it when state changes.
+
+**Host incident:** `leap` (192.168.2.10, the 2014 Dell Inspiron that runs the
+pipelines) is **DOWN as of June 2026 with a failing disk**. Recovery plan is a
+new SSD in the same machine. The code, schema, dashboards, systemd units, and
+dongle EEPROM serials all rebuild from this repo. The **data does not**: there
+was no ClickHouse backup strategy, so months of `spectrum.scans` and the
+one-shot FM-bandstop A/B baseline are at risk (see "Backups" below). On
+recovery, attempt a read-only rescue of the ClickHouse Docker volumes from the
+old disk before wiping it.
+
+**Pipeline status (working vs not):**
+
+| Pipeline | State | Reality |
+|----------|-------|---------|
+| **spectrum** | working, primary | The steady tenant. Scanner + ingest + classifier + feature-extractor + health monitor all proven on leap (V3 wideband). Backs the reliability stack. |
+| **acars** | deployed, soak interrupted | Soak started 2026-05-02 on V4; leap went down before the 1-week soak finished and its result was never recorded. Redeploys fresh on recovery (see `acars/DEPLOY.md`). |
+| **noaa** | partial | Scheduler + TLE refresh + ClickHouse schema are real and run hourly under `NOAA_DRY_RUN=1`. The **recorder (`noaa/recorder.py`) is a scaffold** that marks every pass `failed`; no rtl-tcp orchestration, no WAV/PNG capture yet. |
+| **adsb** | companion, dormant | Code complete; historically ran against a **separate ClickHouse on the Windows host**, not leap. Not a steady leap tenant. |
+| **ais** | companion, built-not-deployed | Complete, never run on leap. |
+| **ism** | companion, built-not-deployed | Complete, never run on leap. |
+
+**Cross-pipeline wiring:**
+- **Dongle coordinator: landed and wired.** `spectrum/coordinator.py` (flock
+  lock) is imported and used by `spectrum/scanner.py`; `ops/rtl-coordinator/`
+  installs it. Not yet exercised against a real second consumer (the only
+  intended one, the NOAA recorder, is still a scaffold).
+- **ACARS to classifier feedback: shipped, not "TBD".** `spectrum/acars_feedback.py`
+  (a separate hourly timer, `ops/spectrum-acars-feedback/`) bridges the two
+  ClickHouse instances over **plain HTTP, not `remote()`**, and reads
+  `acars.messages` directly (the `acars.freq_activity` MV undercounts and is
+  effectively dead). It writes confirmed ACARS frequencies into
+  `spectrum.listening_log`. Whether it ever wrote a row was never confirmed
+  before leap went down.
+
+**Backups:** `ops/clickhouse-backup/` provides daily off-host logical snapshots
+of the ClickHouse databases (added 2026-06 in response to the disk failure).
+**This must be deployed and pointed at off-host storage before collecting new
+data** so the next disk failure is not another total loss.
+
+**Recovery:** the full bare-metal rebuild runbook (clone, dongle serials,
+install order, data restore, secret recreation) is in `RESTORE.md`.
+
+**Repo hygiene:** `ble.sh/` at the repo root is an unrelated third-party clone,
+untracked and not gitignored. The companion pipelines (adsb/ais/ism) still use a
+single `init.sql` rather than numbered migrations; spectrum/acars/noaa use
+numbered migrations + `migrate.py`.
 
 ---
 
 ## Owner Profile
 
 - Platform/DevOps engineer, daily driver is Kubernetes, ArgoCD, Docker, observability pipelines
-- Background in audio engineering / DSP — solid on FFT, filtering, sampling, frequency domain
-- New to RF — bridge concepts from audio where possible (IQ samples ↔ mid/side stereo, waterfall ↔ spectrogram, etc.)
+- Background in audio engineering / DSP, solid on FFT, filtering, sampling, frequency domain
+- New to RF, bridge concepts from audio where possible (IQ samples ↔ mid/side stereo, waterfall ↔ spectrogram, etc.)
 - Environment: **WSL openSUSE Tumbleweed** (fish shell) on Windows 11 (HP Omen laptop)
-- Professional stack includes ClickHouse, Grafana, VictoriaMetrics — apply same pipeline patterns here
+- Professional stack includes ClickHouse, Grafana, VictoriaMetrics, apply same pipeline patterns here
 - Tools: git, Docker, Claude Code, VSCodium
 
 ## Hardware
@@ -30,13 +82,13 @@ This file is the Claude Code project prompt. It contains everything needed to as
 ## Physical Location & RF Environment
 
 - Ground floor apartment, Polygono (one of the highest residential points in central Athens)
-- Old stone walls: 6-7m thick in places — **blocks UHF signals aggressively**
+- Old stone walls: 6-7m thick in places, **blocks UHF signals aggressively**
 - Desk faces window directly to street level (pavement)
 - Patio available with more sky view
-- Elevated relative to most of central Athens — good line of sight for VHF/UHF
-- Near Athens airport (LGAV) approach paths — excellent for ADS-B
-- Line of sight toward Piraeus/Saronic Gulf — good for AIS maritime
-- Strong FM transmitters on Lycabettus and Hymettus — potential overload source
+- Elevated relative to most of central Athens, good line of sight for VHF/UHF
+- Near Athens airport (LGAV) approach paths, excellent for ADS-B
+- Line of sight toward Piraeus/Saronic Gulf, good for AIS maritime
+- Strong FM transmitters on Lycabettus and Hymettus, potential overload source
 
 ### Indoor vs Outdoor Reality
 
@@ -45,7 +97,7 @@ This file is the Claude Code project prompt. It contains everything needed to as
 | FM (88-108 MHz) | Works easily | Overkill | Strong signals penetrate walls |
 | HF shortwave | Wire out window | Better | Need long wire antenna regardless |
 | VHF (118-174 MHz) | Window OK | Better | Airband, marine, NOAA sats |
-| UHF (380-470 MHz) | Marginal | Window minimum | TETRA, PMR, ISM — walls block |
+| UHF (380-470 MHz) | Marginal | Window minimum | TETRA, PMR, ISM, walls block |
 | 1090 MHz (ADS-B) | Window only | Best | Needs line of sight to sky |
 | 137 MHz (satellites) | No | Patio required | Need sky view for overhead passes |
 
@@ -113,7 +165,7 @@ rf_luv/
 │
 ├── acars/                      # ACARS aircraft messaging pipeline (Tier 1 #1)
 │   ├── docker-compose.yml      # acarsdec (sdr-enthusiasts image) + ingest + ClickHouse + Grafana
-│   ├── Dockerfile.ingest       # python:3.12-slim — only the ingest worker; decoder is prebuilt
+│   ├── Dockerfile.ingest       # python:3.12-slim, only the ingest worker; decoder is prebuilt
 │   ├── entrypoint.sh           # runs migrations then UDP listener
 │   ├── acars_ingest.py         # UDP datagram reader → ClickHouse batch inserter
 │   ├── migrate.py              # numbered SQL migration runner (mirrors spectrum/migrate.py)
@@ -152,7 +204,7 @@ rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
 ```
 
 ### Approach B: usbipd (full Linux USB passthrough)
-- Attaches USB device to WSL over IP — all tools run natively in WSL
+- Attaches USB device to WSL over IP, all tools run natively in WSL
 - Higher latency, can drop samples at high rates
 ```powershell
 # Windows PowerShell (admin):
@@ -176,15 +228,15 @@ usbipd attach --wsl --busid <BUSID>
 
 ### Phase 1: Before Dongle Arrives
 
-- [ ] **Run bootstrap**: `bash bootstrap.sh` — organizes flat files into directory structure, kills Zone.Identifier files, sets permissions, git inits
-- [ ] **Install WSL packages**: `bash setup/install-wsl.sh` — installs rtl-sdr, GNU Radio, multimon-ng, rtl_433, sox, satellite tools. Note any failures for manual follow-up.
+- [ ] **Run bootstrap**: `bash bootstrap.sh`: organizes flat files into directory structure, kills Zone.Identifier files, sets permissions, git inits
+- [ ] **Install WSL packages**: `bash setup/install-wsl.sh`: installs rtl-sdr, GNU Radio, multimon-ng, rtl_433, sox, satellite tools. Note any failures for manual follow-up.
 - [ ] **Windows setup**: follow `setup/install-windows.md`:
   - Download Zadig (zadig.akeo.ie)
-  - Download SDR++ (github.com/AlexandreRouma/SDRPlusPlus/releases) — Windows x64 zip
+  - Download SDR++ (github.com/AlexandreRouma/SDRPlusPlus/releases), Windows x64 zip
   - Download rtl-sdr Windows binaries (for rtl_tcp.exe): ftp.osmocom.org/binaries/windows/rtl-sdr/
   - Optionally: `winget install usbipd` for USB passthrough
 
-### Phase 2: Dongle Arrives — First Contact
+### Phase 2: Dongle Arrives, First Contact
 
 - [ ] **Driver swap**: plug in dongle → open Zadig → Options → List All Devices → select "Bulk-In, Interface (Interface 0)" → target WinUSB → Replace Driver
 - [ ] **First signal**: open SDR++ → Source: RTL-SDR → sample rate 2.048 MHz → gain 30 dB → tune to ~100 MHz → hear FM radio
@@ -196,9 +248,9 @@ usbipd attach --wsl --busid <BUSID>
 - [ ] **Start rtl_tcp on Windows**: `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`
 - [ ] **Set antenna**: dipole arms ~6.5 cm each, vertical, at window or patio
 - [ ] **Launch stack**: `cd adsb && docker compose up -d`
-- [ ] **Verify**: open http://localhost:8080 (tar1090 map) — aircraft should appear within minutes
-- [ ] **Check Grafana**: open http://localhost:3000 (admin/admin) — ClickHouse datasource should be auto-provisioned, dashboard available under "ADS-B Dashboards"
-- [ ] **Monitor ingest**: `docker compose logs -f adsb-ingest` — should see batch flush messages
+- [ ] **Verify**: open http://localhost:8080 (tar1090 map), aircraft should appear within minutes
+- [ ] **Check Grafana**: open http://localhost:3000 (admin/admin), ClickHouse datasource should be auto-provisioned, dashboard available under "ADS-B Dashboards"
+- [ ] **Monitor ingest**: `docker compose logs -f adsb-ingest`: should see batch flush messages
 - [ ] **Feeder setup** (optional): register at FlightAware/ADSBx for stats and comparison
 
 ### Phase 4: Ongoing Projects
@@ -234,7 +286,7 @@ bash scripts/airband-listen.sh tower     # Athens Tower
 **HF / Number stations (evening project):**
 1. In SDR++: Source → RTL-SDR → Direct Sampling → Q-branch
 2. Tune to 4.625 MHz (UVB-76 "The Buzzer")
-3. Set demod to USB (upper sideband) — wider AM also works
+3. Set demod to USB (upper sideband), wider AM also works
 4. Best after sunset when ionospheric propagation improves
 5. Need long wire antenna: 10-20m stranded copper wire from patio, connected to SMA center pin
 6. 9:1 balun between wire and dongle improves matching but not required initially
@@ -254,7 +306,7 @@ bash scripts/satellite-pass.sh noaa19   # record NOAA 19 pass
 
 ```
 FM Broadcast        88–108 MHz         Strong, indoor test signal
-Athens Approach     118.575 MHz        ATC (AM demod) — may hear from desk
+Athens Approach     118.575 MHz        ATC (AM demod), may hear from desk
 Athens Tower        118.1 MHz          ATC (AM demod)
 ATIS                136.125 MHz        Automated airport weather
 NOAA 15             137.620 MHz        Weather satellite (patio only)
@@ -276,7 +328,7 @@ WWV Time Signal     10.000 MHz         NIST time broadcast (HF, from USA)
 
 ## Antenna Quick Reference
 
-Formula: **arm length (cm) = 7125 / frequency (MHz)** — this gives quarter wavelength per dipole arm.
+Formula: **arm length (cm) = 7125 / frequency (MHz)**: this gives quarter wavelength per dipole arm.
 
 ```
 FM Radio     100 MHz  →  75.0 cm/arm   vertical         indoor OK
@@ -301,8 +353,8 @@ RTL-SDR (1090 MHz, via rtl_tcp on Windows)
 
 ClickHouse (adsb database)
   ├── positions table (MergeTree, partitioned by day, 90-day TTL)
-  ├── aircraft_hourly (materialized view — uniq aircraft, avg altitude)
-  └── aircraft_latest (materialized view — last known state per hex_ident)
+  ├── aircraft_hourly (materialized view, uniq aircraft, avg altitude)
+  └── aircraft_latest (materialized view, last known state per hex_ident)
         └→ Grafana (:3000)
              └── adsb-overview dashboard (auto-provisioned)
                  • Aircraft count (live + over time)
@@ -313,7 +365,7 @@ ClickHouse (adsb database)
 ```
 
 **Key design decisions:**
-- ClickHouse over Postgres/VictoriaMetrics because ADS-B is high-cardinality time series with analytical queries (GROUP BY hex_ident, altitude histograms, position aggregations) — exactly ClickHouse's sweet spot
+- ClickHouse over Postgres/VictoriaMetrics because ADS-B is high-cardinality time series with analytical queries (GROUP BY hex_ident, altitude histograms, position aggregations), exactly ClickHouse's sweet spot
 - ingest.py is stdlib-only Python (no dependencies) to keep the Docker image tiny and the code obvious
 - SBS BaseStation format chosen over Beast binary because it's human-readable CSV, easy to debug and parse
 - Materialized views handle rollups at write time so dashboards query pre-aggregated data
@@ -327,8 +379,8 @@ RTL-SDR (161.975 + 162.025 MHz, via rtl_tcp on Windows)
 
 ClickHouse (ais database, :8124/:9001)
   ├── positions table (MergeTree, partitioned by day, 90-day TTL)
-  ├── hourly_stats (materialized view — uniq ships, avg speed)
-  └── ship_latest (materialized view — last known state per MMSI)
+  ├── hourly_stats (materialized view, uniq ships, avg speed)
+  └── ship_latest (materialized view, last known state per MMSI)
         └→ Grafana (:3001)
              └── ais-overview dashboard (auto-provisioned)
                  • Ship count (live + over time)
@@ -340,8 +392,8 @@ ClickHouse (ais database, :8124/:9001)
 
 **Key design decisions:**
 - AIS-catcher over rtl_ais because it supports rtl_tcp input (rtl_ais requires direct USB)
-- Custom stdlib-only AIVDM decoder (ais_decoder.py) — 6-bit dearmoring, msg types 1-3/5/18/24, multi-sentence reassembly
-- UDP transport from decoder to ingest — one NMEA sentence per datagram, no framing needed
+- Custom stdlib-only AIVDM decoder (ais_decoder.py), 6-bit dearmoring, msg types 1-3/5/18/24, multi-sentence reassembly
+- UDP transport from decoder to ingest, one NMEA sentence per datagram, no framing needed
 - ship_latest view uses argMaxIf to merge position data (types 1-3, 18) with identity data (types 5, 24) without NULL clobbering
 
 ## ISM Pipeline Architecture
@@ -353,8 +405,8 @@ RTL-SDR (433.92 MHz, via rtl_tcp on Windows)
 
 ClickHouse (ism database, :8125/:9002)
   ├── events table (MergeTree, partitioned by day, 180-day TTL)
-  ├── hourly_stats (materialized view — uniq devices, avg temperature)
-  └── device_latest (materialized view — last reading per device)
+  ├── hourly_stats (materialized view, uniq devices, avg temperature)
+  └── device_latest (materialized view, last reading per device)
         └→ Grafana (:3002)
              └── ism-overview dashboard (auto-provisioned)
                  • Active devices + event rate
@@ -364,23 +416,23 @@ ClickHouse (ism database, :8125/:9002)
 ```
 
 **Key design decisions:**
-- rtl_433 and Python ingest in a single container — stdout pipe is the simplest IPC
-- 180-day TTL (vs 90 for ADS-B/AIS) — ISM data is interesting for seasonal device patterns
-- raw_json column stores full rtl_433 output — covers all 200+ protocols without explicit field mapping
+- rtl_433 and Python ingest in a single container, stdout pipe is the simplest IPC
+- 180-day TTL (vs 90 for ADS-B/AIS), ISM data is interesting for seasonal device patterns
+- raw_json column stores full rtl_433 output, covers all 200+ protocols without explicit field mapping
 
 ## ACARS Pipeline Architecture
 
 ```
 RTL-SDR V4 (rtl_tcp on leap :1235)
-  └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec:4.1.6Build1494)
+  └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec; see image-tag note below)
        └→ JSON datagrams (UDP :5550) → acars_ingest.py → ClickHouse
 
 ClickHouse (acars database, :8127/:9004)
   ├── messages table (MergeTree, partitioned by day, 90-day TTL)
-  ├── hourly_stats (AggregatingMergeTree — counts, uniques, avg level/err)
+  ├── hourly_stats (AggregatingMergeTree, counts, uniques, avg level/err)
   ├── flight_latest (ReplacingMergeTree per flight callsign)
-  ├── tail_latest (ReplacingMergeTree per tail registration — uplinks too)
-  └── freq_activity (ReplacingMergeTree per (freq, dongle) — classifier-feedback hook)
+  ├── tail_latest (ReplacingMergeTree per tail registration, uplinks too)
+  └── freq_activity (ReplacingMergeTree per (freq, dongle), classifier-feedback hook)
         └→ Grafana (:3004)
              └── ACARS Overview dashboard (auto-provisioned)
                  • Message rate, unique flights/tails (stat row)
@@ -394,7 +446,7 @@ ClickHouse (acars database, :8127/:9004)
 
 **Key design decisions:**
 - Decoder is the **airframesio acarsdec fork** via the maintained sdr-enthusiasts
-  Docker image — has SoapySDR + Soapy-rtltcp built-in. Building from TLeconte
+  Docker image, has SoapySDR + Soapy-rtltcp built-in. Building from TLeconte
   upstream was rejected because that branch doesn't speak rtl_tcp.
 - **UDP transport** between decoder and ingest (mirrors AIS), not piped stdout
   (ISM): the decoder image is sealed and doesn't pipe JSON to stdout in the
@@ -405,9 +457,19 @@ ClickHouse (acars database, :8127/:9004)
 - ACARS gives the **content layer** to ADS-B's positions: joinable on
   (tail, flight) for crew messages, OOOI events, weather requests, CPDLC
   app data. The natural pair to the existing aviation pipeline.
-- `freq_activity` is the **classifier-feedback hook**: spectrum-classifier
-  reads it via ClickHouse `remote()` (integration TBD) so confirmed ACARS
-  freqs auto-bump confidence in `spectrum.known_frequencies`.
+- `freq_activity` was meant to be the **classifier-feedback hook**, but the
+  shipped implementation diverged from this plan. The actual feedback path is
+  `spectrum/acars_feedback.py` (hourly timer in `ops/spectrum-acars-feedback/`):
+  it reads `acars.messages` directly (not `freq_activity`, whose MV undercounts)
+  over **plain HTTP, not `remote()`**, and writes confirmed ACARS frequencies
+  into `spectrum.listening_log` (not `known_frequencies`). The classifier then
+  treats those as a soft prior. So this is shipped, not "TBD", and lives in a
+  separate process from the classifier.
+- **Image tag:** `acars/docker-compose.yml` currently pins the mutable tag
+  `:latest_soapy` (the SoapySDR variant the soak ran on). This violates the
+  project's "never use latest" rule; capture the resolved digest and `@sha256`-
+  pin it on the next deploy. The pinned build observed during the soak was
+  `4.1.6Build1494`.
 
 ## Spectrum Scanner Pipeline Architecture
 
@@ -418,11 +480,11 @@ RTL-SDR (88-470 MHz sweep, via rtl_tcp on Windows)
 
 ClickHouse (spectrum database, :8126/:9003)
   ├── scans table (MergeTree, one row per freq bin per sweep, 180-day TTL)
-  ├── peaks table (spectral peaks — bins above their neighbors)
-  ├── events table (transient signals — appeared/disappeared between sweeps)
+  ├── peaks table (spectral peaks, bins above their neighbors)
+  ├── events table (transient signals, appeared/disappeared between sweeps)
   ├── known_frequencies (27 Athens signals: FM, ATC, marine, TETRA, ISM, DVB-T, military)
-  ├── hourly_baseline (materialized view — avg/stddev per freq per hour)
-  └── freq_latest (materialized view — latest reading per bin)
+  ├── hourly_baseline (materialized view, avg/stddev per freq per hour)
+  └── freq_latest (materialized view, latest reading per bin)
         └→ Grafana (:3003)
              └── spectrum-overview dashboard (auto-provisioned)
                  • Current power spectrum (bar chart, full 88-470 MHz)
@@ -443,9 +505,42 @@ ClickHouse (spectrum database, :8126/:9003)
 - Transient detection: >15 dB change between consecutive sweeps
 - Reconnect to rtl_tcp for each sweep to prevent TCP buffer stale data accumulation
 
+## NOAA Pipeline Architecture
+
+```
+celestrak TLEs (tle_refresh.sh, weekly)  +  RX location (lat/lon/alt)
+  └→ scheduler.py (hourly :05, systemd user timer)
+       ├→ orbit-predictor: next 12h of NOAA 15/18/19 + Meteor M2 passes
+       └→ noaa.passes (pending rows)  [under NOAA_DRY_RUN=1, the default]
+            └→ recorder.py (SCAFFOLD, see below)
+
+ClickHouse (noaa database, :8128/:9005)
+  ├── passes table (MergeTree, partitioned by month, 365-day TTL)
+  ├── pass_latest (ReplacingMergeTree: canonical state per pass)
+  └── monthly_summary (AggregatingMergeTree: decode rate, avg SNR per sat per month)
+        └→ Grafana (:3005), noaa-overview dashboard
+```
+
+**State and key decisions:**
+- **The recorder is a scaffold, not a working capture path.** `noaa/recorder.py`
+  logs the rtl-tcp orchestration it *would* run (stop the scanner, record the
+  pass with rtl_fm, restart, decode with noaa-apt), then unconditionally marks
+  the pass `failed` with note `scaffold: rtl-tcp orchestration not implemented
+  yet`. No WAV or PNG is produced. Implementing real capture is what would first
+  exercise the dongle coordinator (the recorder is the intended second V3
+  consumer alongside the scanner).
+- The scheduler runs with `NOAA_DRY_RUN=1` by default, which **returns before
+  inserting** pending rows. Flipping to `0` (in `/etc/rtl-scanner/noaa-scheduler.env`)
+  is only meaningful once the recorder is real.
+- Numbered migrations + a stdlib `migrate.py` (same pattern as ACARS), run at
+  the migrator container's startup.
+- NOAA is on **V3** (the wideband dongle): weather-sat passes at 137 MHz sit in
+  the VHF range the V3 scanner already covers, hence the coordinator hand-off
+  rather than a third dongle.
+
 ## Reliability Stack on Leap
 
-The leap host carries a layered reliability stack — each layer catches a failure mode the layer above can't see. Code lives under `ops/`:
+The leap host carries a layered reliability stack, each layer catches a failure mode the layer above can't see. Code lives under `ops/`:
 
 ```
             ┌──────────────────────────────────────────────────────────────┐
@@ -484,34 +579,46 @@ The leap host carries a layered reliability stack — each layer catches a failu
 **Action log**: every layer appends JSON lines to `/var/log/rtl-recovery.log` (logrotate weekly, 4-week retention). On return from a trip, `cat /var/log/rtl-recovery.log | jq` is the single source of truth for what happened.
 
 **State files** (root-owned, world-readable):
-- `/var/lib/rtl-tcp-escalator/state.json` — per-serial unwedge attempts in last 24h, cb_first_seen timestamps, last_reboot_ts
-- `/var/lib/spectrum-monitor/freshness.json` — current freshness level + stale_sec per dongle_id
-- `/var/lib/spectrum-monitor/signal_quality.json` — current signal level + max_pwr per dongle_id over the last 30 min
-- `/run/user/1000/rtl-tcp-watchdog-<serial>.state` — per-serial consecutive_failures + last_hard_reset_ts (user-level, the watchdog's own state)
+- `/var/lib/rtl-tcp-escalator/state.json`: per-serial unwedge attempts in last 24h, cb_first_seen timestamps, last_reboot_ts
+- `/var/lib/spectrum-monitor/freshness.json`: current freshness level + stale_sec per dongle_id
+- `/var/lib/spectrum-monitor/signal_quality.json`: current signal level + max_pwr per dongle_id over the last 30 min
+- `/run/user/1000/rtl-tcp-watchdog-<serial>.state`: per-serial consecutive_failures + last_hard_reset_ts (user-level, the watchdog's own state)
 
-**Install**: `bash ops/install-trip-hardening.sh` — idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v3-01.service` doesn't exist yet).
+**Install**: `bash ops/install-trip-hardening.sh`: idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v3-01.service` doesn't exist yet).
 
 **Failure modes this stack does NOT cover**:
-- Chip-lockup (the 2026-04-28 V3 incident pattern: hot-but-enumerated, no software response). Hardware mitigation only — per-port-power hub (e.g. YEPKIT YKUSH3) or smart plug for whole-machine cycle.
+- Chip-lockup (the 2026-04-28 V3 incident pattern: hot-but-enumerated, no software response). Hardware mitigation only, per-port-power hub (e.g. YEPKIT YKUSH3) or smart plug for whole-machine cycle.
 - Kernel panic / hard hang. `systemctl reboot` can't help; smart plug only.
 - Outbound network down for >24h. ntfy alerts won't reach the phone.
 - Both dongles flapping due to a shared-bus hardware fault. Escalator handles each independently and will reboot per the both-CB-open threshold.
-- Antenna or filter physical failure: signal-quality-probe **alerts** (within 30 min) but cannot self-recover. Operator inspection / re-seat connectors required. The 2026-04-29 V3 RF-chain failure was the canonical case — coax/F-connector at the FM bandstop loosened, sweep `max_power` dropped 30 dB, fixed by replug.
+- Antenna or filter physical failure: signal-quality-probe **alerts** (within 30 min) but cannot self-recover. Operator inspection / re-seat connectors required. The 2026-04-29 V3 RF-chain failure was the canonical case, coax/F-connector at the FM bandstop loosened, sweep `max_power` dropped 30 dB, fixed by replug.
+- **Disk failure / data durability.** This whole stack keeps RF data *flowing*;
+  it does nothing to keep it *safe*. The 2026-06 leap disk failure is the
+  canonical case: all ClickHouse data lived in Docker volumes on one disk with
+  no backup. Mitigation is a separate layer, `ops/clickhouse-backup/` (daily
+  off-host logical snapshots) plus, on recovery, a read-only volume rescue from
+  the dying disk before it is wiped.
 
 ## Port Allocation
 
 | Pipeline | ClickHouse HTTP | ClickHouse Native | Grafana | Extra |
 |----------|----------------|-------------------|---------|-------|
 | ADS-B    | 8123           | 9000              | 3000    | tar1090: 8080 |
-| AIS      | 8124           | 9001              | 3001    | — |
-| ISM      | 8125           | 9002              | 3002    | — |
-| Spectrum | 8126           | 9003              | 3003    | — |
-| ACARS    | 8127           | 9004              | 3004    | — |
+| AIS      | 8124           | 9001              | 3001    | - |
+| ISM      | 8125           | 9002              | 3002    | - |
+| Spectrum | 8126           | 9003              | 3003    | - |
+| ACARS    | 8127           | 9004              | 3004    | - |
+| NOAA     | 8128           | 9005              | 3005    | - |
+
+ClickHouse backups land off-host via `ops/clickhouse-backup/` (no port; daily
+user timer, see "Backups" in Current Project State).
 
 leap currently runs **two dongles** (V3 on rtl_tcp :1234, V4 on :1235), each
 with its own templated systemd stack (`rtl-tcp@<serial>`, `rtl-tcp-watchdog@`,
-`rtl-scanner@`). Decoders that share a dongle must time-share via flock
-once a coordinator lands; today, only one consumer per dongle is supported.
+`rtl-scanner@`). Decoders that share a dongle time-share via flock through the
+coordinator: `spectrum/coordinator.py` (installed by `ops/rtl-coordinator/`) is
+wired into `scanner.py`. The mechanism is in place but not yet exercised against
+a real second consumer, so in practice one consumer per dongle still holds today.
 
 **Dongle assignment policy** (set in each pipeline's env file):
 - **V3 (FM-bandstopped, port 1234)**: kept on wideband scanning. Use V3 for
@@ -535,17 +642,17 @@ once a coordinator lands; today, only one consumer per dongle is supported.
 
 **Docker networking**: `host.docker.internal` resolves to the Windows host from within Docker containers on WSL. If rtl_tcp is running on Windows, containers can reach it at `host.docker.internal:1234`. If this doesn't work, find the Windows IP with `ip route show default` in WSL and use that.
 
-**rtl_tcp connection refused**: check Windows Firewall — it may block rtl_tcp. Allow it through, or use `127.0.0.1` instead of `0.0.0.0` if only connecting from the same machine.
+**rtl_tcp connection refused**: check Windows Firewall, it may block rtl_tcp. Allow it through, or use `127.0.0.1` instead of `0.0.0.0` if only connecting from the same machine.
 
 ---
 
 ## Coding Conventions
 
-- Shell scripts: **bash** (not fish) with `set -euo pipefail` — fish is the interactive shell but scripts need portability
+- Shell scripts: **bash** (not fish) with `set -euo pipefail`: fish is the interactive shell but scripts need portability
 - Python: 3.11+, prefer stdlib, minimal external deps. Type hints welcome but not required.
 - Docker: always pin image tags to specific versions, never use `latest`
 - Data formats: JSON Lines (`.jsonl`) for streaming data, CSV for scan results
-- Comments: explain RF/SDP concepts inline — this is a learning project, not a production codebase
+- Comments: explain RF/SDP concepts inline, this is a learning project, not a production codebase
 - File naming: lowercase, hyphens (not underscores) for scripts
 - Configs: YAML for Docker/Grafana, SQL for ClickHouse
 
@@ -557,4 +664,4 @@ once a coordinator lands; today, only one consumer per dongle is supported.
 - For new signals: reference sigidwiki.com for identification
 - For ADS-B pipeline changes: maintain the readsb → ClickHouse → Grafana architecture
 - When suggesting new tools: prefer packages in Tumbleweed repos, fall back to source builds
-- Legal: listening is legal in Greece (as in most EU countries). Decoding encrypted comms is not. TETRA and some digital services are encrypted — note this when relevant.
+- Legal: listening is legal in Greece (as in most EU countries). Decoding encrypted comms is not. TETRA and some digital services are encrypted, note this when relevant.

@@ -109,10 +109,22 @@ def upsert_status(pass_start: str, satellite: str, status: str, **fields) -> Non
 
 def acquire_dongle_lock(serial: str):
     """Take the rtl-coordinator lock — context manager. Falls back to no-op
-    if the coordinator isn't installed (warns)."""
+    if the coordinator isn't installed (warns).
+
+    DEADLOCK / MISSED-PASS RISK: mode="wait" blocks forever with no timeout.
+    The scanner only ever takes the lock mode="nonblock" (it skips a sweep on
+    a miss), so today a held lock self-clears within one sweep — but a stuck
+    holder (scanner hung mid-sweep, or any future "wait"-mode consumer) would
+    block this recorder past the pass's AOS/LOS window and miss it silently.
+    A satellite pass is time-critical; when the real rtl-tcp orchestration
+    lands, switch to mode="timeout" (timeout < pass lead time) so a stuck
+    holder fails the pass loudly instead of blocking past the window. Left as
+    "wait" only because the orchestration below is still a scaffold.
+    """
     try:
         sys.path.insert(0, str(REPO_ROOT / "spectrum"))
         from coordinator import dongle_lock, CoordinatorMissing
+        # ponytail: mode="wait" is a known ceiling — see deadlock note above; -> "timeout" with the real recorder.
         return dongle_lock(serial, mode="wait")
     except (ImportError, ModuleNotFoundError):
         log.warning("spectrum.coordinator unavailable, running without dongle lock")

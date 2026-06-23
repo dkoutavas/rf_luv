@@ -58,12 +58,12 @@ with dongle_lock("v3-01", mode="nonblock") as ok:
 
 ## Integration with the wideband scanner
 
-`spectrum/scanner.py` is the canonical "I want the dongle for ~30 seconds" consumer. To make it lock-aware (NOT done in this commit — needs a real test on leap):
+`spectrum/scanner.py` is the canonical "I want the dongle for ~30 seconds" consumer, and it is already lock-aware:
 
-1. Add `from coordinator import dongle_lock` to scanner.py.
-2. Wrap the per-sweep `RTLTCPClient(...)` connect in `with dongle_lock(DONGLE_ID, mode="nonblock") as ok:` — skip the sweep on miss.
+1. It imports the helper: `from coordinator import dongle_lock, CoordinatorMissing` (scanner.py).
+2. It wraps the per-sweep `RTLTCPClient(...)` connect in `dongle_lock(DONGLE_ID, mode="nonblock")` and skips the sweep on a miss. If the lock dir is absent it catches `CoordinatorMissing`, warns once, and proceeds unlocked.
 
-The Python helper `spectrum/coordinator.py` exists in this commit; the scanner.py change does NOT, intentionally. Wire it in when the first scheduled decoder (#6 NOAA) lands and there's a real opportunity to test the integration end-to-end.
+What is NOT yet exercised is contention: the scanner is the only live consumer taking the lock. The intended second consumer is the NOAA recorder (`noaa/recorder.py`), which is still a scaffold, so no real handoff has been tested end-to-end on leap. When the recorder gains real rtl-tcp orchestration it should take the lock in a non-blocking or timeout mode (see the note in `noaa/recorder.py:acquire_dongle_lock`) — a satellite pass is time-critical, so blocking forever on a stuck holder would silently miss the pass window.
 
 ## Lock semantics
 

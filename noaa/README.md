@@ -45,10 +45,12 @@ giant unreviewable diff.
 └──────────────────────────────────┘
 ```
 
-The wideband scanner on V3 sees the lock and skips its sweeps during the
-pass (when the spectrum scanner is wired into `spectrum/coordinator.py`,
-which is staged but not yet active - see
-`ops/rtl-coordinator/README.md`).
+The wideband scanner on V3 is already lock-aware: it imports
+`spectrum/coordinator.py` and takes `dongle_lock(DONGLE_ID, mode="nonblock")`
+per sweep, skipping the sweep when the lock is held. The unfinished half is
+this recorder: it must acquire the same lock before stopping rtl-tcp. That
+path is still a scaffold, so the scanner has never actually seen a held lock
+(see `ops/rtl-coordinator/README.md`).
 
 ## What ships in this scaffold
 
@@ -91,9 +93,14 @@ In rough dependency order:
    sequence. Needs operator review of the failure modes (what if rtl_fm
    crashes mid-pass and we can't restart rtl-tcp?). Suggest a context
    manager that always re-starts rtl-tcp on exit.
-3. **Wire `spectrum/coordinator.py`** into `spectrum/scanner.py` so the
-   scanner skips sweeps during locked windows. Without this, scanner crashes
-   while rtl-tcp is stopped during a pass and the watchdog churns.
+3. **Take the coordinator lock in `recorder.py`** before stopping rtl-tcp.
+   The scanner side is already wired (`scanner.py` takes
+   `dongle_lock(..., mode="nonblock")` per sweep), so once the recorder holds
+   the lock during a pass the scanner skips its sweeps cleanly instead of
+   crashing while rtl-tcp is stopped and churning the watchdog. Use a
+   non-blocking or timeout lock mode here, not `mode="wait"` — a pass is a
+   hard AOS/LOS window, and blocking forever on a stuck holder would miss it
+   silently.
 4. **`tle_refresh.sh` + `noaa-pass-scheduler.{service,timer}`** under
    `ops/noaa-pass-scheduler/` - hourly invocation of `scheduler.py` with
    `NOAA_DRY_RUN=0`.

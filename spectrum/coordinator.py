@@ -22,10 +22,12 @@ The lock is released automatically on context exit. fcntl(2) flock
 (LOCK_EX | LOCK_NB / LOCK_EX) is what we use under the hood — same
 kernel state as the bash flock(1) helper, so they interoperate.
 
-NOT WIRED INTO scanner.py YET. See ops/rtl-coordinator/README.md
-section "Integration with the wideband scanner" for the planned
-integration points; do that when the first scheduled decoder (#6 NOAA)
-lands and we can test the handoff end-to-end on leap.
+WIRED INTO scanner.py: it imports dongle_lock and wraps each per-sweep
+RTLTCPClient connect in `with dongle_lock(DONGLE_ID, mode="nonblock")`,
+skipping the sweep when another consumer holds the lock. What is NOT yet
+exercised is contention: the only intended second consumer is the NOAA
+recorder (noaa/recorder.py), which is still a scaffold, so no two
+consumers have ever actually contended for a dongle on a live host.
 """
 
 from __future__ import annotations

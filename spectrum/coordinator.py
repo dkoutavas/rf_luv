@@ -43,6 +43,10 @@ log = logging.getLogger("coordinator")
 
 LOCK_DIR = Path(os.environ.get("RTL_COORDINATOR_LOCK_DIR", "/var/lib/rtl-coordinator"))
 
+# One-time "coordinator not installed" warning so the per-sweep caller does not
+# spam the log.
+_warned_missing = False
+
 
 class CoordinatorMissing(RuntimeError):
     """Raised if /var/lib/rtl-coordinator doesn't exist — installer wasn't run."""
@@ -73,14 +77,32 @@ def dongle_lock(serial: str, *, mode: str = "wait", timeout: float = 0.0) -> Ite
 
     Notes:
         - Advisory only; consumers that bypass this break the model.
-        - Falls back to a no-op if LOCK_DIR doesn't exist (raises
-          CoordinatorMissing). Set RTL_COORDINATOR_LOCK_DIR=/tmp/... in
-          tests, or guard callers with `try: ... except CoordinatorMissing`.
+        - If LOCK_DIR doesn't exist (coordinator not installed) this yields a
+          no-op lock (acquired=True) and warns once, so a single-consumer host
+          runs unlocked instead of crashing. Set RTL_COORDINATOR_LOCK_DIR to a
+          writable dir (e.g. /tmp/...) to enable real flock coordination.
     """
     if not LOCK_DIR.is_dir():
-        raise CoordinatorMissing(
-            f"{LOCK_DIR} not present — run ops/rtl-coordinator/install.sh"
-        )
+        # Coordinator not installed -> degrade to a no-op lock (acquired=True)
+        # and warn once, so a single-consumer host runs unlocked instead of
+        # crashing. We must handle this HERE, not by raising: dongle_lock is a
+        # @contextmanager, so the body (and any raise) runs at __enter__ (the
+        # caller's `with`), NOT at the dongle_lock() call. A caller that wrapped
+        # only the dongle_lock() call in try/except CoordinatorMissing (as
+        # scanner.py did) never caught it and crashed. Yielding True makes the
+        # documented "falls back to a no-op" actually hold for every caller.
+        # CoordinatorMissing stays defined for callers that want to assert
+        # installation explicitly.
+        global _warned_missing
+        if not _warned_missing:
+            log.warning(
+                "%s not present — running unlocked. Run "
+                "ops/rtl-coordinator/install.sh to enable dongle coordination.",
+                LOCK_DIR,
+            )
+            _warned_missing = True
+        yield True
+        return
 
     lock_path = LOCK_DIR / f"{serial}.lock"
     lock_path.touch(exist_ok=True)

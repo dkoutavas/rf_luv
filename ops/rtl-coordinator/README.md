@@ -81,6 +81,7 @@ Every lock event is appended to `/var/log/rtl-recovery.log` (the same log the wa
 - **Bypass.** Any process that opens rtl_tcp without taking the lock breaks the model. Scanner + every documented decoder is on the honor system.
 - **rtl_tcp single-client kick.** rtl_tcp itself drops the previous client when a new one connects, regardless of any flock state. The coordinator prevents this happening but doesn't react if it does. If you see scanner sweeps with truncated data after a coordinator-bypassing consumer connects, that's why.
 - **Stale lock from a crashed process.** flock auto-releases on FD close, so even SIGKILL releases the lock. Truly stuck only if the kernel itself is hung.
+- **Shared-bus flapping / USB contention / a rogue second process.** If a dongle is flapping from USB-bus disturbance, power starvation, or a stray process claiming the device (e.g. the leftover system-level `rtl-tcp.service` behind the 2026-04-23 V3 cascade — see `spectrum/docs/archive/20260423_deployment_status.md`), the coordinator does **nothing**: it only governs consumers that cooperatively take the lock. That failure class belongs to `ops/rtl-tcp-escalator/` (USB reset, xHCI bounce, circuit breaker), not here. The coordinator time-shares a dongle *among intended, well-behaved consumers*; it does not fight an uncooperative one. Do not reach for it to fix flapping.
 
 ## Related
 

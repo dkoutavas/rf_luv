@@ -9,9 +9,9 @@
 #   open http://localhost:3000 for Grafana dashboards (shared)
 #
 # Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1235. The V3 :1234 belongs to the native
+# host.docker.internal:1234. The V3 :1234 belongs to the native
 # systemd spectrum scanner.
-#   On Windows/leap: rtl_tcp -a 0.0.0.0 -p 1235 -s 2048000
+#   On Windows: rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
 #
 # AIS-catcher auto-tunes to 161.975 + 162.025 MHz (dual-channel).
 # Point dipole antenna SW toward Piraeus, arms ~44 cm, vertical.
@@ -36,7 +36,7 @@ services:
     depends_on:
       - ais-ingest
     command: >
-      -t rtltcp host.docker.internal 1235
+      -t rtltcp host.docker.internal 1234
       -gt tuner 40.0
       -u ais-ingest 10110
     extra_hosts:

@@ -1,0 +1,11 @@
+{
+  "freq_hz": 433920000,
+  "sample_rate_hz": 256000,
+  "duration_s": 0.6,
+  "gain_db": 0.0,
+  "dongle_id": "demo",
+  "trigger_id": "",
+  "captured_at": "1970-01-01 00:00:00.000",
+  "format": "cs8",
+  "note": "synthetic 2-FSK, 2000 baud, +/-22000 Hz tones \u2014 offline demo"
+}

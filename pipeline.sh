@@ -7,13 +7,15 @@
 #   ./pipeline.sh logs <pipe>      tail the pipeline's container logs (no follow)
 #   ./pipeline.sh ps <pipe>        show the pipeline's container status
 #
-# Valid pipes: acars adsb ais ism rds spectrum.
-#   - The five decoders (acars/adsb/ais/ism/rds) share the single V4 dongle on
-#     host.docker.internal:1235, so only one runs at a time; 'rotate' swaps them.
+# Valid pipes: acars adsb ais ism rds spectrum.  (Plus:  ./pipeline.sh demo)
+#   - One local V4 = one rtl_tcp (host.docker.internal:1234), single-tenant per
+#     session: the box is EITHER sweeping OR running one decoder, never both. The
+#     five decoders (acars/adsb/ais/ism/rds) share that one dongle, so only one
+#     runs at a time; 'rotate' swaps them.
 #     rds decodes the 57 kHz RDS subcarrier and needs the V4 with the FM notch
-#     REMOVED (the V3 :1234 is FM-bandstopped by design and will never see RDS).
-#   - spectrum's overlay is the profile-gated scanner, an Omen smoke-test only
-#     (the real scanner runs as native systemd on leap against the V3 dongle).
+#     REMOVED (with the notch on, the FM band is attenuated and RDS is invisible).
+#   - spectrum's overlay is the profile-gated containerized scanner (a smoke-test);
+#     the steady scanner runs as native systemd on the local host (ops/rtl-scanner).
 #
 # Guardrail: 'infra' is refused and project rf_luv_infra is never targeted, so
 # this script can never tear down the always-on data layer.
@@ -25,8 +27,9 @@ CH_PING_URL="http://127.0.0.1:8123/ping"
 VALID_PIPES="acars adsb ais ism rds spectrum"
 
 usage() {
-    echo "usage: $0 up|down|rotate|logs|ps <pipe>" >&2
+    echo "usage: $0 up|down|rotate|logs|ps <pipe>   |   $0 demo" >&2
     echo "  pipes: $VALID_PIPES (and 'noaa' for the no-op systemd reminder)" >&2
+    echo "  demo:  blind-analyze the bundled sample capture (no hardware needed)" >&2
     exit 2
 }
 
@@ -164,7 +167,20 @@ cmd_ps() {
     compose_pipe "$pipe" ps
 }
 
+# demo: run the blind analyzer on the bundled sample capture. No hardware, no
+# Docker, no ClickHouse — the offline "it works" hit before any host bring-up.
+cmd_demo() {
+    local sample="$SCRIPT_DIR/samples/demo.cs8"
+    if [ ! -f "$sample" ]; then
+        echo "[pipeline] $sample missing; regenerate with: python3 samples/make_demo.py" >&2
+        exit 1
+    fi
+    echo "[pipeline] blind signal autopsy of the bundled sample (no hardware needed):"
+    python3 "$SCRIPT_DIR/spectrum/analysis/blind_analyze.py" --file "$sample" --dry-run
+}
+
 main() {
+    if [ "${1:-}" = "demo" ]; then cmd_demo; return; fi
     [ $# -eq 2 ] || usage
     local action="$1" pipe="$2"
     case "$action" in

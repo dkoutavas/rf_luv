@@ -9,7 +9,7 @@ set -eo pipefail
 # acars/noaa). Running it here too keeps the containerized pipeline
 # self-sufficient on hosts where ch-bootstrap has not been run.
 #
-# rds_reader.py connects to rtl_tcp on the V4 (:1235), tunes RDS_FREQ_HZ at
+# rds_reader.py connects to rtl_tcp on the V4 (:1234), tunes RDS_FREQ_HZ at
 # 228000 S/s, runs the numpy DSP chain, and prints one JSON line per decoded
 # RDS group to stdout. rds_ingest.py batches those into ClickHouse.
 

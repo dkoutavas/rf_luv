@@ -33,7 +33,7 @@ from rds_decoder import RDSDemodulator, FS_DEFAULT
 # ─── Config ──────────────────────────────────────────────
 
 RTL_HOST = os.environ.get("RTL_TCP_HOST", "host.docker.internal")
-RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1235"))
+RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
 FREQ_HZ = int(os.environ.get("RDS_FREQ_HZ", "99600000"))
 GAIN_DB = float(os.environ.get("RDS_GAIN", "29.7"))
 DONGLE_ID = os.environ.get("RDS_DONGLE_ID", "v4-01")

@@ -10,9 +10,9 @@
 #   open http://localhost:3000 for Grafana dashboards (shared)
 #
 # Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1235. The V3 :1234 belongs to the native
+# host.docker.internal:1234. The V3 :1234 belongs to the native
 # systemd spectrum scanner.
-#   On Windows/leap: rtl_tcp -a 0.0.0.0 -p 1235 -s 2048000
+#   On Windows: rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
 #
 # ClickHouse is reached over the shared rf_luv_net network at the
 # alias `clickhouse` on HTTP port 8123.
@@ -31,9 +31,9 @@ services:
     networks: [rf_luv_net]
     environment:
       # -- Device config --
-      # Option B: rtl_tcp from the dongle host (default). V4 dongle on 1235.
+      # Option B: rtl_tcp from the dongle host (default). V4 dongle on 1234.
       READSB_DEVICE_TYPE: rtltcp
-      READSB_NET_CONNECTOR: "host.docker.internal,1235,raw_in"
+      READSB_NET_CONNECTOR: "host.docker.internal,1234,raw_in"
       READSB_GAIN: 40
 
       # -- Location (Polygono, Athens) --

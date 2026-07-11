@@ -2,44 +2,55 @@
 
 ## What This Is
 
-Personal radio exploration project using an RTL-SDR Blog V3 dongle. Based in Athens, Greece (Polygono neighborhood, elevated central Athens). Projects range from spectrum analysis to aircraft tracking to number station hunting.
+Personal radio exploration project using an RTL-SDR Blog V4 dongle. Based in Athens, Greece (Polygono neighborhood, elevated central Athens). Projects range from spectrum analysis to aircraft tracking to number station hunting.
 
 This file is the Claude Code project prompt. It contains everything needed to assist with any task in this project.
 
 ---
 
-## Current Project State (2026-06)
+## Current Project State (2026-07)
 
 > Status snapshot so this prompt reflects reality, not aspiration. Update it when state changes.
 
-**Host incident:** `leap` (192.168.2.10, the 2014 Dell Inspiron that runs the
-pipelines) is **DOWN as of June 2026 with a failing disk**. Recovery plan is a
-new SSD in the same machine. The code, schema, dashboards, systemd units, and
-dongle EEPROM serials all rebuild from this repo. The **data does not**: there
-was no ClickHouse backup strategy, so months of `spectrum.scans` and the
-one-shot FM-bandstop A/B baseline are at risk (see "Backups" below). On
-recovery, attempt a read-only rescue of the ClickHouse Docker volumes from the
-old disk before wiping it.
+**Platform:** the target is one **local openSUSE Tumbleweed PC (WSL2)**, user
+`dio_nysi` (`/home/dio_nysi`, `python3` = 3.13), with **one RTL-SDR Blog V4
+(`v4-01`)**. The V4's FM notch is an inline SMA filter that unscrews for FM-band
+work (RDS, WFM); leave it on for wideband scanning. A V3 is optional. On this
+host the V4 is the scanner dongle. **Stage 0 (single-host reset)** is landing on
+branch `refactor/stage0-single-host-reset`: repoint `python3.11`→`python3`,
+reconcile user `dio_nysis`→`dio_nysi`, collapse the two-dongle defaults to
+`v4-01`, and drop the leap-only remote/USB-recovery machinery. Until Stage 0
+boots clean on this host, the reliability units silently fail to start.
+
+**Leap is retired.** `leap` (192.168.2.10, openSUSE Leap 15.6, user `dio_nysis`,
+the 2014 Dell Inspiron that ran the pipelines) went down in June 2026 with a
+failed disk and is **not coming back in the near term** (financial). Do not plan
+around its return. The code, schema, dashboards, and systemd units rebuild from
+this repo onto the local host; the **data did not survive** — there was no
+ClickHouse backup, so months of `spectrum.scans` and the one-shot FM-bandstop
+A/B baseline are gone. Every post-processing feature needs a fresh local
+collection runway first, and a backup running before data accumulates.
 
 **Pipeline status (working vs not):**
 
 | Pipeline | State | Reality |
 |----------|-------|---------|
-| **spectrum** | working, primary | The steady tenant. Scanner + ingest + classifier + feature-extractor + health monitor all proven on leap (V3 wideband). Backs the reliability stack. |
-| **acars** | deployed, soak interrupted | Soak started 2026-05-02 on V4; leap went down before the 1-week soak finished and its result was never recorded. Redeploys fresh on recovery (see `acars/DEPLOY.md`). |
+| **spectrum** | working, primary | The steady tenant. Scanner + ingest + classifier + feature-extractor + health monitor, proven on leap (now retired) against the V3; on the local host they run against the V4. Backs the reliability stack. |
+| **acars** | built, soak interrupted | Soak started 2026-05-02 on leap's V4; leap went down before the 1-week soak finished and its result was never recorded. Redeploys fresh on the local V4 (see `acars/DEPLOY.md`). |
 | **noaa** | partial | Scheduler + TLE refresh + ClickHouse schema are real and run hourly under `NOAA_DRY_RUN=1`. The **recorder (`noaa/recorder.py`) is a scaffold** that marks every pass `failed`; no rtl-tcp orchestration, no WAV/PNG capture yet. |
-| **adsb** | companion, dormant | Code complete; historically ran against a **separate ClickHouse on the Windows host**, not leap. Not a steady leap tenant. |
-| **ais** | companion, built-not-deployed | Complete, never run on leap. |
-| **ism** | companion, built-not-deployed | Complete, never run on leap. |
+| **adsb** | companion, dormant | Code complete; historically ran against a **separate ClickHouse on the Windows host**, not leap. Never a steady tenant. |
+| **ais** | companion, built-not-deployed | Complete, never deployed. |
+| **ism** | companion, built-not-deployed | Complete, never deployed. |
 
 **Cross-pipeline wiring:**
 - **Dongle coordinator: landed and wired.** `spectrum/coordinator.py` (flock
   lock) is imported and used by `spectrum/scanner.py`; `ops/rtl-coordinator/`
   installs it. Not yet exercised against a real second consumer (the only
-  intended one, the NOAA recorder, is still a scaffold).
+  intended one, the NOAA recorder, is still a scaffold). With one V4, the
+  coordinator matters once a second consumer time-shares that dongle.
 - **ACARS to classifier feedback: shipped, not "TBD".** `spectrum/acars_feedback.py`
   (a separate hourly timer, `ops/spectrum-acars-feedback/`) bridges the two
-  ClickHouse instances over **plain HTTP, not `remote()`**, and reads
+  ClickHouse databases over **plain HTTP, not `remote()`**, and reads
   `acars.messages` directly (the `acars.freq_activity` MV undercounts and is
   effectively dead). It writes confirmed ACARS frequencies into
   `spectrum.listening_log`. Whether it ever wrote a row was never confirmed
@@ -47,16 +58,17 @@ old disk before wiping it.
 
 **Backups:** `ops/clickhouse-backup/` provides daily off-host logical snapshots
 of the ClickHouse databases (added 2026-06 in response to the disk failure).
-**This must be deployed and pointed at off-host storage before collecting new
-data** so the next disk failure is not another total loss.
+Consolidation put all six databases in one Docker volume, so the single-disk
+SPOF is now worse than it was on leap. **Deploy this and point `BACKUP_DIR` off
+the local disk before collecting new data** so the next disk failure is not
+another total loss.
 
-**Recovery:** the full bare-metal rebuild runbook (clone, dongle serials,
+**Restore:** the ordered local-host restore runbook (clone, dongle serial,
 install order, data restore, secret recreation) is in `RESTORE.md`.
 
-**Repo hygiene:** `ble.sh/` at the repo root is an unrelated third-party clone,
-untracked and not gitignored. The companion pipelines (adsb/ais/ism) still use a
-single `init.sql` rather than numbered migrations; spectrum/acars/noaa use
-numbered migrations + `migrate.py`.
+**Repo hygiene:** the companion pipelines (adsb/ais/ism) still use a single
+`init.sql` rather than numbered migrations; spectrum/acars/noaa use numbered
+migrations + `migrate.py`.
 
 ---
 
@@ -71,11 +83,17 @@ numbered migrations + `migrate.py`.
 
 ## Hardware
 
-- **RTL-SDR Blog V3**: R860 tuner, RTL2832U ADC, 1PPM TCXO, SMA connector
+- **RTL-SDR Blog V4** (`v4-01`, the local host's dongle): R828D tuner, RTL2832U
+  ADC, 1PPM TCXO, SMA connector. On this host the V4 is the scanner dongle.
+  - Same 500 kHz – 1766 MHz normal / 0 – 28.8 MHz direct-sampling range as the V3
+  - Max stable sample rate: 2.048 MS/s; 8-bit ADC (~50 dB dynamic range)
+  - **FM notch is a removable inline SMA filter**: screw it in for wideband
+    scanning (rejects the strong Lycabettus/Hymettus FM transmitters), unscrew it
+    for FM-band work like RDS or WFM.
+- **RTL-SDR Blog V3** (`v3-01`, optional): R860 tuner, RTL2832U ADC, 1PPM TCXO.
   - Normal mode: 500 kHz – 1766 MHz
   - Direct sampling (Q-branch): 0 – 28.8 MHz (HF/shortwave)
-  - Max stable sample rate: 2.048 MS/s
-  - 8-bit ADC (~50 dB dynamic range)
+  - Max stable sample rate: 2.048 MS/s; 8-bit ADC (~50 dB dynamic range)
 - **Dipole antenna kit**: telescoping elements, magnetic base, SMA pigtail
 - USB access: dongle is a USB device, WSL doesn't see USB natively (see USB strategy below)
 
@@ -165,7 +183,7 @@ rf_luv/
 │   ├── acars_ingest.py         # UDP datagram reader → ClickHouse batch inserter
 │   ├── migrate.py              # numbered SQL migration runner (mirrors spectrum/migrate.py)
 │   ├── clickhouse/migrations/  # 001_init.sql etc.
-│   └── env.v4-01.example       # leap V4 deployment template
+│   └── env.v4-01.example       # V4 deployment template
 │
 ├── scripts/
 │   ├── spectrum-scan.sh        # rtl_power wideband scanning with band presets
@@ -174,10 +192,14 @@ rf_luv/
 │   ├── ais-monitor.sh          # AIS ship tracking (161/162 MHz)
 │   └── airband-listen.sh       # Athens ATC listener (AM airband)
 │
-├── config/                     # tool configs (SDR++ settings, etc.)
-├── recordings/                 # IQ recordings, scan CSVs, decoded images
-└── notes/                      # signal identification logs
+├── notes/                      # signal identification logs, listening playbook
+└── docs/archive/               # dated historical runbooks (e.g. old morning-checks)
 ```
+
+(`infra/`, `ops/`, `setup/` also live at the repo root; see README.md for the
+full tree. `config/` (SDR++ settings) and `recordings/` (IQ/CSV/PNG captures)
+are gitignored working dirs created on demand, not tracked, so they may not be
+present in a fresh clone.)
 
 ---
 
@@ -194,8 +216,8 @@ The RTL-SDR is a USB device. WSL cannot see USB hardware without extra steps.
 rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
 
 # WSL tools connect to 127.0.0.1:1234 automatically
-# The rotating decoder overlays point at host.docker.internal (V4 :1235 by default;
-# the native spectrum scanner uses the V3 :1234)
+# The native spectrum scanner and the rotating decoder overlays both point at
+# the single V4 on host.docker.internal:1234 (they time-share it via the coordinator)
 ```
 
 ### Approach B: usbipd (full Linux USB passthrough)
@@ -240,7 +262,7 @@ usbipd attach --wsl --busid <BUSID>
 
 ### Phase 3: ADS-B Pipeline
 
-- [ ] **Start rtl_tcp on Windows**: `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000` (or point the decoder at the V4 dongle on `host.docker.internal:1235`)
+- [ ] **Start rtl_tcp on Windows**: `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000` (the single V4 on `host.docker.internal:1234`)
 - [ ] **Set antenna**: dipole arms ~6.5 cm each, vertical, at window or patio
 - [ ] **Bring up the data layer (once)**: `docker network create rf_luv_net` then `bash infra/up.sh` (starts the shared ClickHouse on 8123/9000 and Grafana on 3000)
 - [ ] **Launch the decoder**: `bash pipeline.sh up adsb` (starts the ADS-B readsb + ingest against the always-on infra)
@@ -419,7 +441,7 @@ ClickHouse (ism database, shared server 8123/9000)
 ## ACARS Pipeline Architecture
 
 ```
-RTL-SDR V4 (rtl_tcp on leap :1235)
+RTL-SDR V4 (rtl_tcp :1234, time-shared with the scanner via the coordinator)
   └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec; see image-tag note below)
        └→ JSON datagrams (UDP :5550) → acars_ingest.py → ClickHouse
 
@@ -461,11 +483,7 @@ ClickHouse (acars database, shared server 8123/9000)
   into `spectrum.listening_log` (not `known_frequencies`). The classifier then
   treats those as a soft prior. So this is shipped, not "TBD", and lives in a
   separate process from the classifier.
-- **Image tag:** the acarsdec decoder is now `@sha256`-pinned in the ACARS
-  overlay (`acars/compose.overlay.yml`), per the project's "never use latest"
-  rule. If the live digest could not be resolved at consolidation time it is
-  left as a clearly-marked TODO placeholder; the SoapySDR build the soak ran on
-  was `4.1.6Build1494`. Resolve and pin the real digest on the next deploy.
+- **Image tag:** the acarsdec decoder is `@sha256`-pinned in `acars/compose.overlay.yml` (never `latest`); resolve and pin the live digest on the next deploy (the soak ran on SoapySDR build `4.1.6Build1494`).
 
 ## Spectrum Scanner Pipeline Architecture
 
@@ -523,20 +541,29 @@ ClickHouse (noaa database, shared server 8123/9000)
   pass with rtl_fm, restart, decode with noaa-apt), then unconditionally marks
   the pass `failed` with note `scaffold: rtl-tcp orchestration not implemented
   yet`. No WAV or PNG is produced. Implementing real capture is what would first
-  exercise the dongle coordinator (the recorder is the intended second V3
-  consumer alongside the scanner).
+  exercise the dongle coordinator (the recorder is the intended second consumer
+  time-sharing the V4 alongside the scanner).
 - The scheduler runs with `NOAA_DRY_RUN=1` by default, which **returns before
   inserting** pending rows. Flipping to `0` (in `/etc/rtl-scanner/noaa-scheduler.env`)
   is only meaningful once the recorder is real.
 - Numbered migrations + a stdlib `migrate.py` (same pattern as ACARS), run at
   the migrator container's startup.
-- NOAA is on **V3** (the wideband dongle): weather-sat passes at 137 MHz sit in
-  the VHF range the V3 scanner already covers, hence the coordinator hand-off
-  rather than a third dongle.
+- NOAA runs on the scanner dongle (the V4 locally; the V3 on leap): weather-sat
+  passes at 137 MHz sit in the VHF range the scanner already covers, so the
+  recorder time-shares that dongle through the coordinator rather than adding a
+  second one.
 
-## Reliability Stack on Leap
+## Reliability Stack
 
-The leap host carries a layered reliability stack, each layer catches a failure mode the layer above can't see. Code lives under `ops/`:
+The local host carries a layered reliability stack, each layer catches a failure
+mode the layer above can't see. Code lives under `ops/`. It was built and proven
+on leap (now retired); Stage 0 prunes the leap-only remote/USB-recovery pieces
+that are inert or harmful on a local WSL2 desk: the escalator's `systemctl
+reboot` rung is disabled by default (`REBOOT_ENABLED=0` — on WSL2 a reboot
+bounces the VM, not the USB-owning Windows host), the ssh-based unwedge scripts
+are gone, and `notify.py` falls back to a local desktop popup (`notify-send`)
+when no ntfy topic is set. The data/RF probes, the coordinator, and the
+serial-identity layer stay.
 
 ```
             ┌──────────────────────────────────────────────────────────────┐
@@ -580,20 +607,22 @@ The leap host carries a layered reliability stack, each layer catches a failure 
 - `/var/lib/spectrum-monitor/signal_quality.json`: current signal level + max_pwr per dongle_id over the last 30 min
 - `/run/user/1000/rtl-tcp-watchdog-<serial>.state`: per-serial consecutive_failures + last_hard_reset_ts (user-level, the watchdog's own state)
 
-**Install**: `bash ops/install-trip-hardening.sh`: idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v3-01.service` doesn't exist yet).
+**Install**: `bash ops/install-trip-hardening.sh`: idempotent, one sudo prompt. Picks up the existing `ops/rtl-tcp/install.sh` watchdog stack as a prerequisite (run that first if `rtl-tcp@v4-01.service` doesn't exist yet).
 
 **Failure modes this stack does NOT cover**:
 - Chip-lockup (the 2026-04-28 V3 incident pattern: hot-but-enumerated, no software response). Hardware mitigation only, per-port-power hub (e.g. YEPKIT YKUSH3) or smart plug for whole-machine cycle.
 - Kernel panic / hard hang. `systemctl reboot` can't help; smart plug only.
 - Outbound network down for >24h. ntfy alerts won't reach the phone.
-- Both dongles flapping due to a shared-bus hardware fault. Escalator handles each independently and will reboot per the both-CB-open threshold.
+- Shared-bus hardware fault flapping the dongle. On the single-V4 local host the reboot rung is disabled, so this needs the smart-plug / powered-hub mitigation below. (On leap's two-dongle host the escalator handled each serial independently and could reboot per the both-CB-open threshold.)
 - Antenna or filter physical failure: signal-quality-probe **alerts** (within 30 min) but cannot self-recover. Operator inspection / re-seat connectors required. The 2026-04-29 V3 RF-chain failure was the canonical case, coax/F-connector at the FM bandstop loosened, sweep `max_power` dropped 30 dB, fixed by replug.
 - **Disk failure / data durability.** This whole stack keeps RF data *flowing*;
-  it does nothing to keep it *safe*. The 2026-06 leap disk failure is the
-  canonical case: all ClickHouse data lived in Docker volumes on one disk with
-  no backup. Mitigation is a separate layer, `ops/clickhouse-backup/` (daily
-  off-host logical snapshots) plus, on recovery, a read-only volume rescue from
-  the dying disk before it is wiped.
+  it does nothing to keep it *safe*. The 2026-06 leap disk failure was the
+  canonical case: all ClickHouse data lived in Docker volumes on one disk with no
+  backup, and that data is gone. Mitigation is a separate layer,
+  `ops/clickhouse-backup/` (daily off-host logical snapshots), which must be
+  running before the local host collects data worth keeping. Consolidation put
+  all six databases in one Docker volume, so the single-disk SPOF is worse than
+  it was on leap.
 
 ## Port Allocation
 
@@ -630,21 +659,27 @@ shared ClickHouse. Schema and the Athens known-frequencies seed are applied
 automatically by the infra `ch-bootstrap` one-shot, so the old manual
 `docker exec -i clickhouse-<db> ... < seed` steps are no longer required.
 
-leap currently runs **two dongles** (V3 on rtl_tcp :1234, V4 on :1235), each
-with its own templated systemd stack (`rtl-tcp@<serial>`, `rtl-tcp-watchdog@`,
-`rtl-scanner@`). The V3 :1234 belongs to the native systemd spectrum scanner
-(it writes to the shared ClickHouse on `127.0.0.1:8123`, formerly `:8126`). The
-V4 :1235 hosts the rotating decoders that `pipeline.sh` manages. Decoders that
-share a dongle time-share via flock through the coordinator:
-`spectrum/coordinator.py` (installed by `ops/rtl-coordinator/`) is wired into
-`scanner.py`. The mechanism is in place but not yet exercised against a real
-second consumer, so in practice one consumer per dongle still holds today.
+The local host runs **one dongle**, the V4 on rtl_tcp :1234, with its templated
+systemd stack (`rtl-tcp@v4-01`, `rtl-tcp-watchdog@v4-01`, `rtl-scanner@v4-01`).
+The V4 belongs to the native systemd spectrum scanner, which writes to the
+shared ClickHouse on `127.0.0.1:8123`. A second consumer time-shares the same
+dongle via flock through the coordinator: `spectrum/coordinator.py` (installed by
+`ops/rtl-coordinator/`) is wired into `scanner.py`. The mechanism is in place but
+not yet exercised against a real second consumer, so in practice one consumer
+holds the dongle today.
 
-**Dongle assignment policy** (set in each pipeline's env file):
-- **V3 (FM-bandstopped, port 1234)**: kept on wideband scanning. Use V3 for
-  decoders that traverse or sit near the FM band.
-- **V4 (port 1235)**: dedicated to narrow-band decoders. ACARS owns it
-  today. POCSAG/marine voice/PMR446 will join via the coordinator.
+History: leap ran **two** dongles — V3 on :1234 for the scanner, V4 on :1235 for
+the rotating `pipeline.sh` decoders — each with its own templated stack. That
+split retired with leap; on the local host the scanner and any rotating decoder
+share the single V4 through the coordinator.
+
+**Dongle assignment policy:**
+- **V4 (`v4-01`, port 1234)**: the local host's only dongle. Runs the wideband
+  scanner by default with the FM notch screwed in. Narrow-band decoders (ACARS,
+  POCSAG/marine voice/PMR446) time-share it through the coordinator. Unscrew the
+  inline notch for FM-band work (RDS, WFM); screw it back for wideband sweeps.
+- **V3 (optional)**: a second dongle, if added, can take FM-bandstopped wideband
+  scanning so the V4 is free for narrow-band or FM-band work.
 
 ---
 

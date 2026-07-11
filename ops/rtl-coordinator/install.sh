@@ -28,7 +28,7 @@ BIN_DIR="/usr/local/bin"
 
 step "Lock directory"
 # Mode 0777 (world-writable) so unprivileged decoders running as
-# dio_nysis can create their per-serial lockfiles. The directory is
+# dio_nysi can create their per-serial lockfiles. The directory is
 # created root-owned but the lock files inside are world-creatable.
 # Lockfile contents are irrelevant (flock is in-kernel state); the
 # directory is just a rendezvous point.
@@ -51,11 +51,11 @@ systemctl --user daemon-reload
 info "$USER_UNIT_DIR/rtl-coordinator@.service"
 
 step "Smoke test"
-out=$(rtl-coordinator-run v3-01 --nonblock -- /bin/true 2>&1) && exit_code=$? || exit_code=$?
+out=$(rtl-coordinator-run v4-01 --nonblock -- /bin/true 2>&1) && exit_code=$? || exit_code=$?
 if [ "$exit_code" -eq 0 ]; then
-    info "Smoke test passed (acquired + released lock for v3-01)"
+    info "Smoke test passed (acquired + released lock for v4-01)"
 elif [ "$exit_code" -eq 75 ]; then
-    warn "Smoke test: lock for v3-01 is currently HELD — that's OK if a real consumer is using it"
+    warn "Smoke test: lock for v4-01 is currently HELD — that's OK if a real consumer is using it"
 else
     err "Smoke test failed (exit $exit_code): $out"
     exit 1

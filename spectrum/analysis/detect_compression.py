@@ -55,7 +55,7 @@ import db  # noqa: E402
 
 # sweep_id format ({preset}:{ts}) is shared across dongles per commit 91d3860,
 # so every scanner-table query must filter by dongle_id or risk conflating regimes.
-DONGLE_ID: str = "v3-01"
+DONGLE_ID: str = "v4-01"
 
 # Scanner geometry (matches spectrum/scanner.py)
 FREQ_START = 88_000_000
@@ -548,8 +548,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="compute + print, do not INSERT")
     ap.add_argument("--min-tier", choices=["low", "medium", "high"], default="medium",
                     help="minimum match_tier to persist (default: medium)")
-    ap.add_argument("--dongle-id", type=str, default="v3-01",
-                    help="filter scans/sweep_health/hourly_baseline by this dongle (default: v3-01)")
+    ap.add_argument("--dongle-id", type=str, default="v4-01",
+                    help="filter scans/sweep_health/hourly_baseline by this dongle (default: v4-01)")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 

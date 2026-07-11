@@ -138,7 +138,7 @@ def main() -> None:
     p.add_argument("--freq-mhz", type=float, required=True)
     p.add_argument("--duration", type=int, required=True, help="seconds")
     p.add_argument("--decoder",  default="noaa-apt", choices=("noaa-apt", "satdump"))
-    p.add_argument("--dongle",   default="v3-01")
+    p.add_argument("--dongle",   default="v4-01")
     p.add_argument("--pass-start", default=None, help="ISO8601; defaults to now")
     args = p.parse_args()
 

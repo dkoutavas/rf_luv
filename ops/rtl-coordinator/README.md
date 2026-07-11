@@ -39,8 +39,8 @@ If you're building a decoder that needs continuous access to a dongle (like ACAR
 
 Bash:
 ```bash
-rtl-coordinator-run v3-01 --timeout 30 -- \
-    /home/dio_nysis/dev/rf_luv/scripts/satellite-pass.sh noaa18
+rtl-coordinator-run v4-01 --timeout 30 -- \
+    /home/dio_nysi/dev/rf_luv/scripts/satellite-pass.sh noaa18
 # Exits 75 if the lock can't be acquired in 30s.
 ```
 
@@ -49,7 +49,7 @@ Python (for tools that already have a long-lived process):
 # spectrum/coordinator.py provides a context manager
 from spectrum.coordinator import dongle_lock
 
-with dongle_lock("v3-01", mode="nonblock") as ok:
+with dongle_lock("v4-01", mode="nonblock") as ok:
     if not ok:
         log.info("Skipping sweep — coordinator lock held by another consumer")
         return

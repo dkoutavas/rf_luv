@@ -4,7 +4,7 @@ Standing reference for what to expect across the spectrum and how to identify ne
 
 - `QUICKREF.md` (root) - terminal cheat sheet, command-line one-liners.
 - `notes/signal-log.txt` - free-form journal of individual finds, dated.
-- `spectrum/logging/index.html` + `spectrum.listening_log` table: structured per-session form (Grafana dashboard at `http://scanner:3000`, Spectrum folder, Listening Playbook; the form itself is served by the shared logging-form on `:8084`).
+- `spectrum/logging/index.html` + `spectrum.listening_log` table: structured per-session form (Grafana dashboard at `http://localhost:3000`, Spectrum folder, Listening Playbook; the form itself is served by the shared logging-form on `:8084`).
 
 This file is the "what should I expect at frequency X" + "I heard Y, what is it?" reference. Update when new emitters are identified or new modes are encountered.
 

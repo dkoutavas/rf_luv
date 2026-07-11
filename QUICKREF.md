@@ -34,7 +34,7 @@ python3 ~/.local/bin/heatmap.py scan.csv scan.png
 # rtl_tcp must be running on the host (ops/rtl-tcp/install.sh on Linux)
 docker network create rf_luv_net   # once
 bash infra/up.sh                   # shared ClickHouse 8123/9000 + Grafana 3000
-# The scanner runs natively under systemd against 127.0.0.1:8123 on the prod host.
+# The scanner runs natively under systemd against 127.0.0.1:8123 on the local host.
 # Grafana: http://localhost:3000 (admin/admin), Spectrum folder
 # Full 88–470 MHz sweep every ~5 min, airband every 60s, peaks + transients stored
 ```
@@ -119,7 +119,7 @@ UVB-76 (HF)       4.625 MHz        Number station (direct sampling)
 - **No signal at all**: Zadig wrong interface, or antenna not connected
 - **Signal but no audio**: check demod mode (WFM for broadcast, NFM for comms, AM for airband)
 - **Ghost signals everywhere**: gain too high, reduce by 10 dB
-- **Signals drift**: normal for non-TCXO dongles, your V3 has TCXO so drift should be <1 ppm
+- **Signals drift**: normal for non-TCXO dongles, your V4 has a 1 PPM TCXO so drift should be <1 ppm
 - **USB drops / glitches**: try lower sample rate (1.024 MS/s), shorter USB cable
 - **rtl_tcp connection refused**: check Windows firewall, or use 127.0.0.1 not localhost
 - **WSL can't see USB**: need usbipd-win, or use rtl_tcp bridge instead

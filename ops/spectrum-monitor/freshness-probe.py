@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6).
 """ClickHouse-level freshness probe for the spectrum pipeline.
 
@@ -39,7 +39,7 @@ DEFAULTS = {
     "STATE_FILE": "/var/lib/spectrum-monitor/freshness.json",
     "ACTION_LOG": "/var/log/rtl-recovery.log",
     "NOTIFY_BIN": "/usr/local/bin/rf-notify",
-    "EXPECTED_DONGLES": "v3-01,v4-01",
+    "EXPECTED_DONGLES": "v4-01",
 }
 
 

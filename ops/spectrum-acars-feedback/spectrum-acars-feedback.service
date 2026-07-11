@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/spectrum/acars_feedback.py
+ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/acars_feedback.py
 # One shared ClickHouse server (post-2026-06 consolidation). The acars read
 # is a cross-DB SELECT run as user=spectrum (cross-grant SELECT on acars.*),
 # so there is no separate acars endpoint or credential.

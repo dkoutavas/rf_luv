@@ -39,7 +39,7 @@ class Config:
     PEAK_NEIGHBOR_BINS: int = 5
     TRANSIENT_THRESHOLD_DB: float = 15.0
 
-    DONGLE_ID: str = "v3-01"
+    DONGLE_ID: str = "v4-01"
 
 
 def _load() -> Config:

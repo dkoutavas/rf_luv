@@ -933,8 +933,39 @@ def insert_result(v: Verdict, *, capture_id: str = "", trigger_id: str = "",
     _ch_insert("blind_signal_features", [row])
 
 
+# ─── Waterfall thumbnail (cosmetic, numpy-only) ──────────
+_WF_RAMP = " ▁▂▃▄▅▆▇█"   # 9 shades, low -> high power
+
+
+def waterfall_thumbnail(x: np.ndarray, fs: float, rows: int = 6,
+                        cols: int = 48) -> list[str]:
+    """A compact time x frequency waterfall as Unicode shading — rows are time
+    (top = earliest), columns are frequency (DC centered). A tiny STFT over the
+    loaded IQ: split into `rows` time slices, FFT each, bin to `cols`, map power
+    to a shade. Purely for the identity card; no effect on classification.
+    """
+    n = x.size
+    if n < rows * cols * 2:
+        return []
+    x = x - np.mean(x)
+    seg = n // rows
+    win = np.hanning(seg)
+    grid = np.empty((rows, cols), dtype=np.float64)
+    for r in range(rows):
+        s = x[r * seg:(r + 1) * seg] * win
+        p = np.abs(np.fft.fftshift(np.fft.fft(s))) ** 2
+        b = p.size // cols
+        grid[r] = 10.0 * np.log10(p[:b * cols].reshape(cols, b).mean(axis=1) + 1e-12)
+    lo = np.percentile(grid, 20.0)
+    hi = np.percentile(grid, 99.5)
+    idx = np.rint(np.clip((grid - lo) / (hi - lo + 1e-9), 0.0, 1.0)
+                  * (len(_WF_RAMP) - 1)).astype(int)
+    return ["".join(_WF_RAMP[i] for i in row) for row in idx]
+
+
 # ─── Identity-card printer ───────────────────────────────
-def print_identity_card(v: Verdict, *, freq_hz: int = 0) -> None:
+def print_identity_card(v: Verdict, *, freq_hz: int = 0,
+                        waterfall: list[str] | None = None) -> None:
     center = f"{freq_hz / 1e6:.4f} MHz" if freq_hz else "unknown (offset relative to capture center)"
     baud = "n/a" if v.baud_hz is None else f"{v.baud_hz:,.0f} Bd ({v.baud_confidence})"
     ofdm = "no"
@@ -950,6 +981,12 @@ def print_identity_card(v: Verdict, *, freq_hz: int = 0) -> None:
         f"  │ symbol/baud     : {baud}",
         f"  │ OFDM            : {ofdm}",
         f"  │ SNR (est)       : {v.snr_db:.1f} dB",
+    ]
+    if waterfall:
+        lines.append("  │ waterfall       :  time ↓  freq across (DC centered)")
+        for row in waterfall:
+            lines.append("  │   " + row)
+    lines += [
         "  └───────────────────────────────────────────────────────",
         "  reasoning:",
     ]
@@ -1015,7 +1052,8 @@ def main(argv=None) -> int:
             "features": v.features, "reasoning": v.reasoning,
         }, indent=2))
     else:
-        print_identity_card(v, freq_hz=freq_hz)
+        wf = waterfall_thumbnail(x, float(rate))
+        print_identity_card(v, freq_hz=freq_hz, waterfall=wf)
 
     if args.dry_run:
         log.info("dry-run: skipping INSERT.")

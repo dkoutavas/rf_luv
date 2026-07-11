@@ -1,6 +1,15 @@
 # Forensic capture — design
 
-**Status: design only. No code or infra changes for immediate merge. Requires Phase 3's rtl_tcp concurrency verification before any implementation begins.**
+**Status: implemented (D2).** The design below is realized as the standalone
+`spectrum/iq_capture.py` consumer, which time-shares the V4 with the scanner via
+the flock coordinator (`spectrum/coordinator.py`, `mode="timeout"`) rather than
+capturing inline in the scanner loop. Schema is migration `023_add_iq_captures.sql`
+(`spectrum.forensic_trigger` + `spectrum.iq_captures`). Deviations from this doc
+are listed in the `iq_capture.py` module docstring (db.py direct writes instead
+of the scan-ingest marker path; `dongle_id` and a `blocked` status added). The
+coordinator-contention concern this doc flagged is covered by a real flock test
+in `spectrum/tests/test_iq_capture.py`; live capture against a real rtl_tcp is
+still to be run on the host.
 
 ## Goal
 

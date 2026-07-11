@@ -1,0 +1,30 @@
+[Unit]
+Description=rf_luv forensic IQ recorder (coordinator-shared raw-IQ capture daemon)
+# Long-running poll loop (NOT a oneshot+timer like spectrum-features): it polls
+# spectrum.forensic_trigger every few seconds and time-shares the V4 dongle with
+# the scanner via the flock coordinator. Only start once ClickHouse is reachable.
+After=network-online.target
+
+[Service]
+Type=simple
+# Path is resolved via %h = $HOME (local: /home/dio_nysi/dev/rf_luv)
+ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/iq_capture.py
+Environment=CLICKHOUSE_HOST=localhost
+Environment=CLICKHOUSE_PORT=8123
+Environment=CLICKHOUSE_DB=spectrum
+Environment=CLICKHOUSE_USER=spectrum
+Environment=CLICKHOUSE_PASSWORD=spectrum_local
+# Local single-host: one V4 dongle on rtl_tcp 127.0.0.1:1234 (host-run, NOT the
+# scanner's host.docker.internal). SCAN_DONGLE_ID keys the coordinator lock file
+# ($RTL_COORDINATOR_LOCK_DIR/<serial>.lock) that the scanner also takes.
+Environment=RTL_TCP_HOST=127.0.0.1
+Environment=RTL_TCP_PORT=1234
+Environment=SCAN_DONGLE_ID=v4-01
+Environment=RTL_COORDINATOR_LOCK_DIR=/var/lib/rtl-coordinator
+Environment=IQ_CAPTURE_DIR=/var/lib/spectrum/iq_captures
+# Poll loop is resilient; restart it if it dies but don't hammer.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

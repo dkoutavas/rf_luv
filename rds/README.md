@@ -18,12 +18,12 @@ urban canyon shows up as `block_errors` (CRC-failed blocks) climbing on the
 dashboard; a fringe station may only assemble PS/RadioText intermittently. The
 full EN 50067 Annex E character set is not implemented — non-ASCII code points
 render as spaces (fine for Greek stations, which mostly send basic ASCII). And
-crucially this **must run on the V4 with the FM broadcast notch REMOVED**: the
-V3 is FM-bandstopped by design and will never see RDS.
+crucially this **must run on the V4 with the FM broadcast notch REMOVED** — with
+the notch screwed in, the 88-108 MHz FM band is attenuated and RDS is invisible.
 
 ## Run
 
-Rotating V4 decoder (shares `:1235`; rotate other V4 pipes down first):
+Rotating V4 decoder (shares the one V4 rtl_tcp on `:1234`; rotate other V4 pipes down first):
 
 ```bash
 cp rds/env.v4-01.example rds/.env      # edit RDS_FREQ_HZ / gain as needed
@@ -46,8 +46,9 @@ python3 rds/rds_reader.py --file kosmos.cs8
 cat kosmos.cs8 | redsea -r 228000 -f s8
 ```
 
-PS and PI should match. The offline `--file` path is also the D2 synergy path:
-any `iq_capture` `.cs8` decodes without a live dongle.
+PS and PI should match. The offline `--file` path also decodes a D2 `iq_capture`
+`.cs8` — set `RDS_SAMPLE_RATE` to match the capture's rate (`--file` reads samples
+at `RDS_SAMPLE_RATE`, default 228000; a mismatch silently garbles the decode).
 
 ## Self-test
 

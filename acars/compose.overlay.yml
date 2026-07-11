@@ -14,7 +14,7 @@
 #   docker compose -f acars/compose.overlay.yml up -d acars-ingest
 #   echo '{"timestamp":1764691234.0,"freq":"131.525","level":"-25",...}' | nc -u -w1 localhost 5550
 #
-# Dongle: ACARS owns the V4 dongle on host.docker.internal:1235.
+# Dongle: ACARS owns the V4 dongle on host.docker.internal:1234.
 # The spectrum scanner stays on V3 (:1234).
 #
 # Pipeline pattern: decoder image emits JSON UDP datagrams; the ingest
@@ -41,9 +41,9 @@ services:
       - acars-ingest
     environment:
       # Tuner: full SoapySDR string. On leap, set this to:
-      #   driver=rtltcp,rtltcp=192.168.2.10:1235
+      #   driver=rtltcp,rtltcp=<dongle-host>:1234
       # Adjust per-deployment via .env.
-      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:1235}"
+      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:1234}"
       FREQUENCIES: "${ACARS_FREQUENCIES:-131.525;131.725;131.825}"
       GAIN: "${ACARS_GAIN:-30}"
       PPM: "${ACARS_PPM:-0}"

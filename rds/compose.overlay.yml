@@ -9,11 +9,11 @@
 #   open http://localhost:3000 for Grafana dashboards (shared)
 #
 # Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1235. RDS lives in the 57 kHz MPX subcarrier of an
+# host.docker.internal:1234. RDS lives in the 57 kHz MPX subcarrier of an
 # FM broadcast station, so this pipeline REQUIRES the V4 with the FM
 # broadcast notch REMOVED. The V3 :1234 is FM-bandstopped by design and
 # will never see RDS.
-#   On Windows: rtl_tcp.exe -a 0.0.0.0 -p 1235 -s 2048000
+#   On Windows: rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
 #
 # Decodes PUBLIC broadcast metadata only: station name (PS), PI code,
 # RadioText, PTY, TP/TA, clock-time. Reference station: 99.6 MHz Kosmos FM.
@@ -41,7 +41,7 @@ services:
     networks: [rf_luv_net]
     environment:
       RTL_TCP_HOST: ${RTL_TCP_HOST:-host.docker.internal}
-      RTL_TCP_PORT: ${RTL_TCP_PORT:-1235}
+      RTL_TCP_PORT: ${RTL_TCP_PORT:-1234}
       RDS_FREQ_HZ: ${RDS_FREQ_HZ:-99600000}
       RDS_GAIN: ${RDS_GAIN:-29.7}
       RDS_DONGLE_ID: ${RDS_DONGLE_ID:-v4-01}

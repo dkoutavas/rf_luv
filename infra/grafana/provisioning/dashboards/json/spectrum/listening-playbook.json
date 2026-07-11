@@ -11,6 +11,59 @@
   "panels": [
     {
       "type": "table",
+      "title": "Forensic IQ Captures",
+      "description": "Raw-IQ capture queue + results from spectrum/iq_capture.py (feature D2). Shows the last 50 forensic_trigger rows across all statuses (pending/captured/blocked/rate_limited/failed). 'captured' rows have a .cs8 path on the host under /var/lib/spectrum/iq_captures — pull it into SDR++/inspectrum. 'blocked' = TETRA/cellular legal blocklist refusal.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_SPECTRUM_CLICKHOUSE"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT   ft.requested_at AS requested_at,   round(ft.freq_hz / 1000000.0, 3) AS freq_mhz,   ft.status AS status,   ft.duration_s AS duration_s,   ft.gain_db AS gain_db,   ft.source AS source,   ft.capture_bytes AS capture_bytes,   ft.capture_path AS capture_path,   ft.error AS error FROM spectrum.forensic_trigger AS ft ORDER BY ft.requested_at DESC LIMIT 50",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "freq_mhz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "MHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "capture_bytes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decbytes"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
       "title": "Tune To These",
       "description": "Most interesting frequencies right now, ranked by unusual activity, burstiness, and signal strength. Based on latest full sweep vs 24h history.",
       "gridPos": {

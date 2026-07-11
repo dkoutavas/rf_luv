@@ -22,6 +22,16 @@ RTL-SDR (via rtl_tcp) -> scanner.py (FFT) -> scan_ingest.py (JSON) -> ClickHouse
 
 **Output contract** - one JSON line per bin, plus separate lines for peaks, transient events, sweep health, and run-start / run-update / run-end markers. `scan_ingest.py` reads the stream, routes each message type to its table, and batch-inserts on size-or-interval.
 
+## Signal autopsy (blind analyzer)
+
+The scanner only ever stores FFT *power* - it can locate a signal in frequency but not tell you *what it is*. `analysis/blind_analyze.py` (feature D3) closes that gap: it eats a `.cs8` raw-IQ capture (produced by D2's `iq_capture.py`, results table `spectrum.iq_captures`) and prints an "identity card" - occupied bandwidth, modulation family (CW / AM / WFM / NFM / OOK / 2FSK / 4FSK / BPSK / QPSK-PSK / OFDM / noise / digital-unknown), symbol/baud rate, carrier offset, and an OFDM flag - with **zero prior knowledge** of the emitter. It is rule-based blind signal analysis: a Welch PSD for occupied bandwidth, the FFT-based analytic signal for instantaneous amplitude/phase/frequency discriminants, 2nd/4th-order cumulants to separate PSK from AM/FM/noise, and the squaring-trick spectral line (a cyclostationary estimate, cross-checked against envelope autocorrelation) for baud. Run it with `--file <path.cs8>` (fully offline; reads the `.json` sidecar for sample rate / center freq) or `--capture-id <uuid>` (looks the path up in `iq_captures`). Each run prints a numbered reasoning trace and, unless `--dry-run`, writes one `spectrum.blind_signal_features` row (migration 024). Structure mirrors `analysis/detect_compression.py`: a numpy-only feature library plus a main that writes its own table.
+
+**Honest limits.** Correctness is gated only on *clean* rect-pulse synthetics; the classifier is rule-based and makes no claims about low-SNR, fading, or pulse-shaped robustness - real captures may legitimately land in `digital-unknown` / low-confidence. The 2.048 MS/s dongle ceiling caps observable baud well under ~1 Msym/s: fine for NFM / FSK / paging / marine-data, but wideband OFDM / DVB-T only *partially* fits one capture span, so those verdicts are emitted low-confidence and flagged as such in the reasoning. Baud, OFDM `Tu`, and subcarrier spacing are `Nullable` and come back NULL when the estimate does not clear its confidence bar (the honest-NULL posture of `compression_events`).
+
+**Legal stance.** Characterizing a waveform's modulation and baud is analysis of *physics* and extracts no message content - it works on encrypted carriers without ever touching payload. Digital signals that fire no known family are labeled `digital-unknown` with the fixed note *"digital, likely encrypted -> out of scope; payload will not be decoded"*; decode is never attempted.
+
+**Roadmap - D3.1 (not built here).** A follow-up will wire blind verdicts into the classifier via a new `modulation_in` evidence axis in `signal_classes.evidence_rules`: a small `latest_modulation_for(freq_hz)` helper plus a few lines in `classifier.score_class` rewarding a class whose expected modulation matches the observed family, weighted by confidence. That needs its own migration + classifier re-baseline, so it deliberately does **not** ride along with D3.
+
 ## Setup
 
 The shared data layer (one ClickHouse + Grafana, compose project `rf_luv_infra`)

@@ -547,6 +547,95 @@
       "options": {
         "showHeader": true
       }
+    },
+    {
+      "type": "table",
+      "title": "Blind Signal Features",
+      "description": "Modulation identity cards from spectrum/analysis/blind_analyze.py (feature D3). Each row is one .cs8 capture analyzed blind: modulation family, occupied bandwidth, carrier offset, baud, and OFDM flag. 'digital-unknown' = encrypted/unrecognized, labeled out-of-scope, never decoded. baud/OFDM cells are blank when the estimate did not clear its confidence bar.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_SPECTRUM_CLICKHOUSE"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT   analyzed_at,   round(freq_hz / 1000000.0, 3) AS freq_mhz,   modulation,   round(confidence, 2) AS confidence,   round(occupied_bw_hz / 1000.0, 1) AS occupied_bw_khz,   round(carrier_offset_hz / 1000.0, 2) AS carrier_offset_khz,   baud_hz,   baud_confidence,   ofdm_flag,   ofdm_tu_us,   round(snr_db, 1) AS snr_db,   source FROM spectrum.blind_signal_features ORDER BY analyzed_at DESC LIMIT 50",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "freq_mhz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "MHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "occupied_bw_khz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "kHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "carrier_offset_khz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "kHz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "baud_hz"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Hz"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "snr_db"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dB"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ],
   "refresh": "60s",

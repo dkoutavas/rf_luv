@@ -101,4 +101,14 @@ log "PHASE 2f: noaa migrate.py"
   CLICKHOUSE_PASSWORD=noaa_local \
   python3 migrate.py )
 
+# rds: migrate.py only (same pattern as acars/noaa; does NOT create the database).
+log "PHASE 2g: rds migrate.py"
+( cd "$REPO/rds" && \
+  CLICKHOUSE_HOST="$CH_HOST" \
+  CLICKHOUSE_PORT="$CH_HTTP_PORT" \
+  CLICKHOUSE_DB=rds \
+  CLICKHOUSE_USER=rds \
+  CLICKHOUSE_PASSWORD=rds_local \
+  python3 migrate.py )
+
 log "bootstrap complete"

@@ -35,6 +35,10 @@ CREATE DATABASE IF NOT EXISTS noaa;
 CREATE USER IF NOT EXISTS noaa IDENTIFIED BY 'noaa_local';
 GRANT ALL ON noaa.* TO noaa;
 
+CREATE DATABASE IF NOT EXISTS rds;
+CREATE USER IF NOT EXISTS rds IDENTIFIED BY 'rds_local';
+GRANT ALL ON rds.* TO rds;
+
 -- Cross-grant: the spectrum-acars feedback path (spectrum/acars_feedback.py)
 -- now runs against ONE server, so it can read acars.messages directly as the
 -- spectrum user instead of the old cross-instance HTTP hop. Read-only.

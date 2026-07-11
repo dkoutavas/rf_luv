@@ -7,9 +7,11 @@
 #   ./pipeline.sh logs <pipe>      tail the pipeline's container logs (no follow)
 #   ./pipeline.sh ps <pipe>        show the pipeline's container status
 #
-# Valid pipes: acars adsb ais ism spectrum.
-#   - The four decoders (acars/adsb/ais/ism) share the single V4 dongle on
+# Valid pipes: acars adsb ais ism rds spectrum.
+#   - The five decoders (acars/adsb/ais/ism/rds) share the single V4 dongle on
 #     host.docker.internal:1235, so only one runs at a time; 'rotate' swaps them.
+#     rds decodes the 57 kHz RDS subcarrier and needs the V4 with the FM notch
+#     REMOVED (the V3 :1234 is FM-bandstopped by design and will never see RDS).
 #   - spectrum's overlay is the profile-gated scanner, an Omen smoke-test only
 #     (the real scanner runs as native systemd on leap against the V3 dongle).
 #
@@ -20,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NET=rf_luv_net
 CH_PING_URL="http://127.0.0.1:8123/ping"
-VALID_PIPES="acars adsb ais ism spectrum"
+VALID_PIPES="acars adsb ais ism rds spectrum"
 
 usage() {
     echo "usage: $0 up|down|rotate|logs|ps <pipe>" >&2

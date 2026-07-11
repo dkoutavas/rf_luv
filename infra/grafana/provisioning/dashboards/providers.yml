@@ -79,3 +79,15 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards/json/noaa
       foldersFromFilesStructure: false
+
+  - name: RDS Dashboards
+    orgId: 1
+    type: file
+    folder: RDS
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/rds
+      foldersFromFilesStructure: false

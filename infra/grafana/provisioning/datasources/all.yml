@@ -95,3 +95,18 @@ datasources:
     secureJsonData:
       password: noaa_local
     editable: true
+
+  - name: ClickHouse rds
+    uid: P_RDS_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: rds
+      username: rds
+    secureJsonData:
+      password: rds_local
+    editable: true

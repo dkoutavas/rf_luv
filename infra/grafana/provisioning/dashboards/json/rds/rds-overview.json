@@ -1,0 +1,158 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Station (PS)",
+      "description": "Programme Service name most recently assembled (last 1h)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT argMaxIf(ps, timestamp, ps != '') AS station FROM rds.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        }
+      },
+      "options": { "textMode": "value", "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "PI Code",
+      "description": "Programme Identification (hex) of the most recent group",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT concat('0x', upper(hex(argMax(pi_code, timestamp)))) AS pi FROM rds.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "PTY",
+      "description": "Programme Type code of the most recent group",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT argMax(pty, timestamp) AS pty FROM rds.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "TP / TA",
+      "description": "Traffic Programme / Traffic Announcement flags (most recent group)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT concat(toString(argMax(tp, timestamp)), ' / ', toString(argMax(ta, timestamp))) AS tp_ta FROM rds.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ],
+      "options": { "textMode": "value", "colorMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "RadioText",
+      "description": "Most recent fully-assembled RadioText (last 1h)",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT argMaxIf(radiotext, timestamp, radiotext != '') AS radiotext FROM rds.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        }
+      },
+      "options": { "textMode": "value", "colorMode": "none", "wideLayout": true }
+    },
+    {
+      "type": "table",
+      "title": "Stations Seen",
+      "description": "Latest known state per PI code (rds.station_latest)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT concat('0x', upper(hex(pi_code))) AS pi, ps, freq_hz / 1e6 AS freq_mhz, pty, tp, ta, radiotext, last_seen, group_count FROM rds.station_latest FINAL ORDER BY last_seen DESC LIMIT 20",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Groups / min by Type",
+      "description": "Decoded RDS groups per minute, split by group type",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, group_type AS metric, count() AS groups FROM rds.messages WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time, group_type ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 20,
+            "showPoints": "never"
+          },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg Block Errors",
+      "description": "Average CRC-failed blocks per emitted group (pipe-health signal)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_RDS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, avg(block_errors) AS avg_block_errors FROM rds.messages WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "gradientMode": "scheme",
+            "showPoints": "never"
+          },
+          "color": { "mode": "continuous-GrYlRd" }
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["rds", "fm", "broadcast", "rtl-sdr"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "RDS Overview - FM Broadcast Metadata",
+  "uid": "rds-overview"
+}

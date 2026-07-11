@@ -43,8 +43,8 @@ if [ ! -f "$SCANNER_PY" ] || [ ! -f "$INGEST_PY" ]; then
     exit 1
 fi
 
-if ! command -v python3.11 >/dev/null 2>&1; then
-    err "python3.11 not in PATH (matches spectrum-features / classifier path)"
+if ! command -v python3 >/dev/null 2>&1; then
+    err "python3 not in PATH (matches spectrum-features / classifier path)"
     exit 1
 fi
 
@@ -79,13 +79,13 @@ else
 fi
 
 echo
-echo "Next steps:"
+echo "Next steps (local single-host: the V4 is the scanner):"
 echo "  1. Copy the example and populate the real env file, then:"
-echo "       sudo install -m 0644 $ENV_DIR/v3-01.env.example $ENV_DIR/v3-01.env"
-echo "       sudo \$EDITOR $ENV_DIR/v3-01.env"
+echo "       sudo install -m 0644 $ENV_DIR/v4-01.env.example $ENV_DIR/v4-01.env"
+echo "       sudo \$EDITOR $ENV_DIR/v4-01.env"
 echo "  2. Install the sibling rtl-tcp@ units first:  bash ops/rtl-tcp/install.sh"
-echo "  3. Enable + start (cutover runbook):"
-echo "       systemctl --user enable --now rtl-tcp@v3-01 rtl-scanner@v3-01"
+echo "  3. Enable + start:"
+echo "       systemctl --user enable --now rtl-tcp@v4-01 rtl-scanner@v4-01"
 echo "  4. Verify one sweep reaches ClickHouse (see preflight checklist)."
 echo
-echo "Logs:   journalctl --user -u rtl-scanner@v3-01 -f"
+echo "Logs:   journalctl --user -u rtl-scanner@v4-01 -f"

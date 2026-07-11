@@ -51,4 +51,4 @@ systemctl --user --no-pager status spectrum-classifier-health.service | head -10
 
 echo
 echo "Logs:   journalctl --user -u spectrum-classifier-health -f"
-echo "Manual: /usr/bin/python3.11 $SCRIPT"
+echo "Manual: /usr/bin/python3 $SCRIPT"

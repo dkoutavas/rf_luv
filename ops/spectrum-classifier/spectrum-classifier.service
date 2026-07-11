@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/spectrum/classifier.py
+ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/classifier.py
 Environment=CLICKHOUSE_HOST=localhost
 Environment=CLICKHOUSE_PORT=8123
 Environment=CLICKHOUSE_DB=spectrum

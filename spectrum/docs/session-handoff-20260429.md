@@ -23,7 +23,7 @@ Three layers added on top of the existing `rtl-tcp-watchdog@<serial>` user-level
 
 1. **`rtl-tcp-escalator`** (root system service, every 5 min) — catches CB-open at watchdog fail #10. Runs the proven manual recipe: `rtl-usb-reset <serial>` → xHCI bounce on PCI `0000:00:14.0` → restart user unit. After 3 failed unwedges/24h on one serial OR both serials CB-open ≥30 min, triggers `systemctl reboot` (rate-limited 1/6h). Validated end-to-end against the 2026-04-29 V3 firmware-starvation incident — auto-recovered in 22 s.
 2. **`rf-freshness-probe`** (root, every 5 min) — queries `spectrum.scans` per dongle; WARN >10 min stale, CRITICAL >25 min stale. Catches Docker / ClickHouse / ingest failures invisible to the per-process watchdog.
-3. **`rf-notify` + `rf-heartbeat`** — stdlib `urllib.request` POST to ntfy.sh; topic `rf_luv_mnz10pds` configured at `/etc/rtl-scanner/notify.env`. Daily heartbeat at 09:00 UTC confirms the alert pipe is alive.
+3. **`rf-notify` + `rf-heartbeat`** — stdlib `urllib.request` POST to ntfy.sh; topic `<NTFY_TOPIC>` configured at `/etc/rtl-scanner/notify.env`. Daily heartbeat at 09:00 UTC confirms the alert pipe is alive. (Security: the real topic that was committed here leaked and MUST be rotated — pick a new random topic on the local host and never commit it.)
 
 Action log at `/var/log/rtl-recovery.log` (logrotate weekly, 4 weeks retention) captures every layer's transitions as JSON.
 

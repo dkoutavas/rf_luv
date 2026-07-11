@@ -78,10 +78,10 @@ SCAN_NOTES = os.environ.get("SCAN_NOTES", "")
 
 # Dongle identity — tags every output line so downstream queries can
 # slice by source dongle. See spectrum/docs/dongle_identity.md.
-# Default matches the V3 serial so single-dongle deployments continue
+# Default matches the local V4 serial so single-dongle deployments continue
 # to work without extra config; log a warning when we hit the default
 # so misconfigured instances are visible.
-DONGLE_ID = os.environ.get("SCAN_DONGLE_ID", "v3-01")
+DONGLE_ID = os.environ.get("SCAN_DONGLE_ID", "v4-01")
 
 logging.basicConfig(
     level=logging.INFO,

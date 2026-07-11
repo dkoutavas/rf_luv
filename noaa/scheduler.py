@@ -257,7 +257,7 @@ def main() -> None:
             "duration_s":    p["duration_s"],
             "decoder":       p["decoder"],
             "status":        "pending",
-            "dongle_id":     "v3-01",  # NOAA freqs in scanner band → V3 default
+            "dongle_id":     "v4-01",  # local single-host: shares the V4 scanner dongle
         })
 
         # AOS - 30s gives rtl_fm time to start before the satellite rises

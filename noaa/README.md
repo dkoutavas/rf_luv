@@ -36,16 +36,16 @@ giant unreviewable diff.
 ┌──────────────────────────────────┐│
 │  recorder (host, systemd-run)    ││
 │  1. acquire rtl-coordinator lock ┃│
-│     for V3 dongle                ││
-│  2. stop rtl-tcp@v3-01.service   ││
+│     for V4 dongle                ││
+│  2. stop rtl-tcp@v4-01.service   ││
 │  3. rtl_fm record (12 min)       ││
-│  4. start rtl-tcp@v3-01.service  ││
+│  4. start rtl-tcp@v4-01.service  ││
 │  5. decode (noaa-apt / satdump)  ┼┘
 │  6. INSERT decoded row           │
 └──────────────────────────────────┘
 ```
 
-The wideband scanner on V3 is already lock-aware: it imports
+The wideband scanner on the V4 is already lock-aware: it imports
 `spectrum/coordinator.py` and takes `dongle_lock(DONGLE_ID, mode="nonblock")`
 per sweep, skipping the sweep when the lock is held. The unfinished half is
 this recorder: it must acquire the same lock before stopping rtl-tcp. That
@@ -64,8 +64,8 @@ path is still a scaffold, so the scanner has never actually seen a held lock
 | schema (`clickhouse/migrations/`) | ✅ Production-ready | Applied into the shared ClickHouse (`noaa` database) by the infra ch-bootstrap; no per-pipeline ClickHouse or Grafana anymore. |
 | `grafana/provisioning/` | ✅ Production-ready | NOAA Overview dashboard (passes table, daily count, by-satellite bar chart, decode rate), provisioned from `infra/grafana/` into the shared Grafana NOAA folder. |
 | `tle_refresh.sh` | ❌ TODO | Should pull NOAA + METEOR TLEs from celestrak weekly. |
-| `env.v3-01.example` | ❌ TODO | Per-host overrides (RX lat/lon, gain, decoder choice). |
-| `DEPLOY.md` | ❌ TODO | The V3 takeover dance is more delicate than ACARS - has to coordinate with the running scanner. |
+| `env.v4-01.example` | ❌ TODO | Per-host overrides (RX lat/lon, gain, decoder choice). |
+| `DEPLOY.md` | ❌ TODO | The V4 takeover dance is more delicate than ACARS - has to coordinate with the running scanner. |
 | `../ops/noaa-pass-scheduler/` | ❌ TODO | Hourly systemd timer that runs `scheduler.py`. |
 
 ## Status (lifecycle of a pass row)
@@ -89,7 +89,7 @@ In rough dependency order:
 1. **`tle_refresh.sh`** - weekly cron pulling fresh TLEs from
    `celestrak.org/NORAD/elements/weather.txt` to `/var/lib/noaa/tles.txt`.
 2. **rtl-tcp orchestration** in `recorder.py` - the actual
-   `systemctl stop rtl-tcp@v3-01.service` / `rtl_fm` / `systemctl start`
+   `systemctl stop rtl-tcp@v4-01.service` / `rtl_fm` / `systemctl start`
    sequence. Needs operator review of the failure modes (what if rtl_fm
    crashes mid-pass and we can't restart rtl-tcp?). Suggest a context
    manager that always re-starts rtl-tcp on exit.
@@ -112,7 +112,7 @@ In rough dependency order:
 7. **Image gallery in Grafana** - embed the decoded PNGs (Grafana 11
    supports image links in tables; needs a static file server or absolute
    paths reachable from the browser).
-8. **`DEPLOY.md` runbook** - V3 takeover sequence + first-pass validation.
+8. **`DEPLOY.md` runbook** - V4 takeover sequence + first-pass validation.
 
 ## Local smoke test
 
@@ -130,7 +130,7 @@ docker exec clickhouse clickhouse-client --user noaa --password noaa_local \
                         duration_s, decoder, snr_db, image_path, status, dongle_id)
     VALUES (now() - INTERVAL 30 MINUTE, now() - INTERVAL 18 MINUTE,
             'NOAA-19', 137.100, 64.5, 720, 'noaa-apt', 28.4,
-            '/srv/noaa/2026-05-02_noaa19.png', 'decoded', 'v3-01')"
+            '/srv/noaa/2026-05-02_noaa19.png', 'decoded', 'v4-01')"
 
 # Open http://localhost:3000 (NOAA folder): NOAA Overview should show 1 row.
 

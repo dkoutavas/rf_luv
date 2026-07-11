@@ -18,7 +18,7 @@ EnvironmentFile=/etc/rtl-scanner/%i.env
 # `exec` replaces itself with scanner.py, and scan_ingest.py runs as a child).
 # %h is the user's home directory (= /home/<user> on leap), matching the
 # pattern used by spectrum-features/classifier units.
-ExecStart=/bin/bash -c 'exec /usr/bin/python3.11 %h/dev/rf_luv/spectrum/scanner.py | /usr/bin/python3.11 %h/dev/rf_luv/spectrum/scan_ingest.py'
+ExecStart=/bin/bash -c 'exec /usr/bin/python3 %h/dev/rf_luv/spectrum/scanner.py | /usr/bin/python3 %h/dev/rf_luv/spectrum/scan_ingest.py'
 Restart=on-failure
 RestartSec=5
 # Long sweeps on the full preset take ~30-40s; the default TimeoutStopSec

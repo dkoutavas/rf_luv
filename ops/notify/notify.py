@@ -1,10 +1,14 @@
-#!/usr/bin/env python3.11
-# Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6).
-"""ntfy.sh notifier for the RF reliability stack.
+#!/usr/bin/env python3
+# Stdlib-only; runs on the local host's python3 (3.13).
+"""ntfy.sh + local desktop notifier for the RF reliability stack.
 
 Stdlib-only POST to https://ntfy.sh/<topic>. Reads NTFY_TOPIC + NTFY_URL from
 /etc/rtl-scanner/notify.env (KEY=VALUE lines). Idempotent within a 5-min
 window per (level,title) pair, so repeated CB-open ticks don't spam the phone.
+
+For a local desk (no phone), leave NTFY_TOPIC unset and alerts pop up via
+notify-send (libnotify) instead; set NTFY_LOCAL=1 to also mirror ntfy sends to
+the desktop.
 
 Importable: from notify import send
 CLI: notify.py LEVEL TITLE [-m MESSAGE] [-t TAG ...]
@@ -18,6 +22,7 @@ Levels map to ntfy priorities:
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -50,6 +55,21 @@ def load_env(path: str = ENV_PATH) -> dict:
     return out
 
 
+def _desktop_notify(level: str, title: str, message: str) -> bool:
+    """Best-effort local desktop popup via notify-send (libnotify). Returns
+    True if the command was launched. ponytail: native desktop tool, no new
+    dependency; a silent no-op if notify-send is absent (headless / no session
+    bus), which is fine — the action log still carries the alert."""
+    urgency = {"INFO": "low", "WARN": "normal", "CRITICAL": "critical"}.get(level, "normal")
+    try:
+        subprocess.run(["notify-send", "-u", urgency,
+                        f"rf_luv: {title}", message or title],
+                       check=False, timeout=10)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _dedup_key(level: str, title: str) -> Path:
     safe = "".join(c if c.isalnum() else "_" for c in f"{level}_{title}")[:120]
     return DEDUP_DIR / f"last-notify-{safe}.ts"
@@ -66,7 +86,7 @@ def _is_duplicate(level: str, title: str) -> bool:
 
 def _record_sent(level: str, title: str) -> None:
     # Best-effort: dedup is a nice-to-have, not load-bearing. If the running
-    # user can't write the dedup dir (e.g., dio_nysis CLI invocation against a
+    # user can't write the dedup dir (e.g., dio_nysi CLI invocation against a
     # root-owned dir), we still want the notification to count as sent.
     try:
         DEDUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,12 +105,17 @@ def send(level: str, title: str, message: str = "", tags: list | None = None,
     env = load_env()
     topic = env.get("NTFY_TOPIC", "").strip()
     base = env.get("NTFY_URL", "https://ntfy.sh").strip()
+    local = env.get("NTFY_LOCAL", "").strip().lower() in ("1", "true", "yes")
     if not topic:
-        # No topic configured — operate in dry-run mode (don't crash; let
-        # the action log carry the signal until owner sets up the topic).
-        print(f"[notify] no NTFY_TOPIC; would send: {level} {title}: {message}",
-              file=sys.stderr, flush=True)
-        return False
+        # No topic configured — the local single-host default: pop up a desktop
+        # notification instead of a phone push. The action log still carries the
+        # signal regardless.
+        shown = _desktop_notify(level, title, message)
+        if not shown:
+            print(f"[notify] no NTFY_TOPIC and no desktop; would send: "
+                  f"{level} {title}: {message}", file=sys.stderr, flush=True)
+        _record_sent(level, title)
+        return shown
     headers = {
         "Title": title.encode("utf-8"),
         "Priority": LEVEL_PRIORITY[level],
@@ -108,6 +133,8 @@ def send(level: str, title: str, message: str = "", tags: list | None = None,
         print(f"[notify] send failed: {e}", file=sys.stderr, flush=True)
         return False
     _record_sent(level, title)
+    if local:
+        _desktop_notify(level, title, message)
     return True
 
 

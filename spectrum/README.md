@@ -89,21 +89,21 @@ docker compose -f compose.overlay.yml up -d
 # 5. Open Grafana at http://localhost:3000 (admin/admin), Spectrum folder
 ```
 
-The containerized scanner is optional: on production hosts the scanner runs
+The containerized scanner is optional: on the local host the scanner runs
 natively under systemd, so you only need `infra/up.sh` for the data layer.
 
 The overlay uses `extra_hosts: host.docker.internal:host-gateway` so the scanner reaches a host-side `rtl_tcp`. This works on Linux Docker 20.10+, WSL2 Docker, and Docker Desktop without further config.
 
-### Option B: systemd watchdog stack (production)
+### Option B: systemd watchdog stack (unattended)
 
-Used on the project's `leap` host. Adds USB recovery, freshness monitoring, alerting:
+The default on the local host. Adds USB recovery, freshness monitoring, alerting:
 
 ```bash
 bash ../ops/rtl-tcp/install.sh           # systemd user units + watchdog
 bash ../ops/install-trip-hardening.sh    # root escalator + freshness + ntfy
 ```
 
-ClickHouse and Grafana come from the shared `bash ../infra/up.sh` data layer; the native scanner writes into it on `127.0.0.1:8123`. See `../ops/rtl-tcp/install.sh` and the `Reliability Stack on Leap` section in the top-level `../CLAUDE.md` for details.
+ClickHouse and Grafana come from the shared `bash ../infra/up.sh` data layer; the native scanner writes into it on `127.0.0.1:8123`. See `../ops/rtl-tcp/install.sh` and the `Reliability Stack` section in the top-level `../CLAUDE.md` for details.
 
 ## Configuration
 
@@ -113,7 +113,7 @@ The most commonly-overridden vars:
 
 | Variable | Default | When to change |
 |---|---|---|
-| `SCAN_DONGLE_ID` | `v3-01` | Match your EEPROM serial (`rtl_eeprom -d 0`) |
+| `SCAN_DONGLE_ID` | `v4-01` | Match your EEPROM serial (`rtl_eeprom -d 0`) |
 | `SCAN_GAIN` | `12` | Adapt to your RF environment (auto-reduces on clipping) |
 | `SCAN_FREQ_START`/`SCAN_FREQ_END` | `88000000`/`470000000` | Different band of interest |
 | `RTL_TCP_HOST` | `host.docker.internal` | rtl_tcp on a different machine |
@@ -143,7 +143,7 @@ Two read-only lookup tables seeded by migration `003_add_classifier_tables.sql`:
 - `allocations` - regulatory / observed frequency ranges (`freq_start_hz`, `freq_end_hz`, `service`, `region`, `source`, `notes`). Covers 87.5 MHz–446.2 MHz with Greek/EU priors plus local observations. Use with a range lookup (`WHERE freq_start_hz <= X AND freq_end_hz > X`).
 - `signal_classes` - canonical feature signatures for a forthcoming rule-based classifier (`class_id`, `bw_min_hz`, `bw_max_hz`, `modulation`, `duty_pattern`, burst durations, `evidence_rules` JSON). Loosely matched by `known_frequencies.class_id` and `listening_log.class_id`; no FK enforcement.
 
-## Batch jobs (systemd-deployed on the production host)
+## Batch jobs (systemd-deployed on the local host)
 
 Three Python scripts run on a 5-minute cadence as systemd user timers - they read from the ingest tables, compute features / classifications / health diagnostics, and write back. They're not part of the live ingest path; the scanner+ingest pipeline runs without them.
 
@@ -153,7 +153,7 @@ Three Python scripts run on a 5-minute cadence as systemd user timers - they rea
 | `classifier.py` | `peak_features`, `known_frequencies`, `allocations`, `signal_classes`, `listening_log` | `signal_classifications` | 5 min |
 | `classifier_health.py` | `signal_classifications`, baselines | `classifier_health` | 5 min |
 
-On leap they're deployed as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/spectrum/<file>.py`. Status: `systemctl --user list-timers | grep spectrum-`.
+They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/<file>.py` (Tumbleweed's `python3` is 3.13). Status: `systemctl --user list-timers | grep spectrum-`.
 
 A fourth, `analysis/detect_compression.py`, is a one-shot/backfill tool - runnable manually for archaeology, no production timer.
 
@@ -170,8 +170,8 @@ Both scripts connect to the shared ClickHouse at `localhost:8123` by default.
 
 **`usb_open error -3`** - udev rule missing or permissions wrong. Check `/etc/udev/rules.d/20-rtlsdr.rules` and reload.
 
-**No data in Grafana** - check scanner logs: `docker compose -f compose.overlay.yml logs -f` (containerized) or `journalctl --user -u rtl-scanner@v3-01` (systemd). Common causes: rtl_tcp not running, wrong host/port, firewall blocking 1234.
+**No data in Grafana** - check scanner logs: `docker compose -f compose.overlay.yml logs -f` (containerized) or `journalctl --user -u rtl-scanner@v4-01` (systemd). Common causes: rtl_tcp not running, wrong host/port, firewall blocking 1234.
 
 **Connection refused to rtl_tcp** - either rtl_tcp isn't running, or it's bound to `127.0.0.1` instead of `0.0.0.0`. Containers need to reach it via the Docker bridge, so bind to `0.0.0.0`.
 
-**One consumer per dongle** - the RTL-SDR dongle is single-client. The native V3 scanner owns the V3 :1234; rotating V4 decoders (`pipeline.sh up <pipe>`) share the V4 :1235 one at a time. Stop a V4 decoder before starting another on the same dongle.
+**One consumer per dongle** - the RTL-SDR dongle is single-client. On the local host the native scanner owns the single V4 on :1234; a rotating decoder (`pipeline.sh up <pipe>`) time-shares it through the coordinator. Stop one V4 consumer before starting another, or let the coordinator's flock arbitrate.

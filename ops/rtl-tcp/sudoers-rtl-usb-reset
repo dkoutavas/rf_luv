@@ -8,5 +8,4 @@
 # Add a new line here to allow a new dongle serial (e.g. v3-02 as a
 # replacement V3 unit).
 __USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset
-__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset v3-01
 __USER__ ALL=(root) NOPASSWD: /usr/local/sbin/rtl-usb-reset v4-01

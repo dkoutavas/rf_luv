@@ -14,7 +14,7 @@ Environment=CLICKHOUSE_PORT=8123
 Environment=CLICKHOUSE_DB=noaa
 Environment=CLICKHOUSE_USER=noaa
 Environment=CLICKHOUSE_PASSWORD=noaa_local
-ExecStart=/usr/bin/python3.11 %h/dev/rf_luv/noaa/scheduler.py
+ExecStart=/usr/bin/python3 %h/dev/rf_luv/noaa/scheduler.py
 TimeoutStartSec=120
 Restart=no
 

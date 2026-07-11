@@ -11,7 +11,7 @@ set -euo pipefail
 #
 # Prerequisites:
 #   - noaa/ pipeline ClickHouse stack running (docker compose up -d in noaa/)
-#   - python3.11 + orbit-predictor pip package installed:
+#   - python3 + orbit-predictor pip package installed:
 #       pip install --user orbit-predictor
 #
 # Run on leap after `git pull`:
@@ -62,7 +62,7 @@ systemctl --user daemon-reload
 info "$USER_UNIT_DIR"
 
 step "Check orbit-predictor installed"
-if python3.11 -c "import orbit_predictor" 2>/dev/null; then
+if python3 -c "import orbit_predictor" 2>/dev/null; then
     info "orbit-predictor present"
 else
     warn "orbit-predictor not installed; scheduler.py will warn and exit cleanly until you run:"

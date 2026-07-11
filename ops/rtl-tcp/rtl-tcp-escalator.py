@@ -1,6 +1,6 @@
-#!/usr/bin/env python3.11
-# Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6) and the
-# code uses PEP 604 `dict | None` annotations.
+#!/usr/bin/env python3
+# The code uses PEP 604 `dict | None` annotations, so it needs python3 >= 3.10.
+# The local Tumbleweed host ships 3.13.
 """Escalator past the rtl_tcp watchdog circuit breaker.
 
 The user-level watchdog gives up at MAX_CONSECUTIVE_FAILURES (10) and just
@@ -10,7 +10,7 @@ becomes silent permanent failure.
 
 This script runs as root every 5 min, reads the watchdog state files, and
 escalates anything that has been CB-open for ≥CB_OPEN_DURATION_S to a full
-unwedge sequence (the proven manual recipe from ops/rtl-tcp/unwedge-v4.sh):
+unwedge sequence (the 2026-04-29 manual recovery recipe):
 
     1. Per-device USB unbind/rebind for the stuck dongle (rtl-usb-reset)
     2. Full xHCI controller bounce on PCI 0000:00:14.0 (clears stuck tuner i2c)
@@ -18,8 +18,13 @@ unwedge sequence (the proven manual recipe from ops/rtl-tcp/unwedge-v4.sh):
     4. Record the attempt; back off UNWEDGE_COOLDOWN_S before retrying
 
 If we've done REBOOT_AFTER_UNWEDGES on a single serial in 24h, OR both serials
-have been CB-open for ≥REBOOT_BOTH_CB_S, trigger systemctl reboot.
-Rate-limited to one reboot per REBOOT_COOLDOWN_S (default 6h).
+have been CB-open for ≥REBOOT_BOTH_CB_S, the reboot rung fires. It is DISABLED
+by default (REBOOT_ENABLED=0): on the WSL2 local host `systemctl reboot` bounces
+the VM, not the Windows host that owns the USB dongle, so it destroys state
+without recovering anything. Set REBOOT_ENABLED=1 (in escalator.env) on a future
+bare-metal host to re-arm it. When armed it is rate-limited to one reboot per
+REBOOT_COOLDOWN_S (default 6h). The USB-recovery steps 1-2 also assume a native
+Linux USB stack; they are inert if rtl_tcp runs on the Windows side.
 
 All actions append a JSON line to /var/log/rtl-recovery.log. State transitions
 (CB opened, CB cleared, unwedge attempt, reboot) emit ntfy alerts via rf-notify.
@@ -35,9 +40,9 @@ from pathlib import Path
 
 # Defaults (overridable via /etc/rtl-scanner/escalator.env, KEY=VALUE).
 DEFAULTS = {
-    "TARGET_USER": "dio_nysis",
+    "TARGET_USER": "dio_nysi",
     "TARGET_UID": "1000",
-    "SERIALS": "v3-01,v4-01",
+    "SERIALS": "v4-01",
     "WATCHDOG_STATE_DIR": "/run/user/1000",
     "XHCI_PCI": "0000:00:14.0",
     "RTL_USB_RESET": "/usr/local/sbin/rtl-usb-reset",
@@ -48,6 +53,8 @@ DEFAULTS = {
     "REBOOT_AFTER_UNWEDGES": "3",     # reboot if 3 unwedges/24h on one serial
     "REBOOT_BOTH_CB_S": "1800",       # reboot if both serials CB ≥30 min
     "REBOOT_COOLDOWN_S": "21600",     # 6h between reboots
+    "REBOOT_ENABLED": "0",            # WSL2: reboot bounces the VM, not the USB host — off by default
+
     "STATE_FILE": "/var/lib/rtl-tcp-escalator/state.json",
     "ACTION_LOG": "/var/log/rtl-recovery.log",
     "NOTIFY_BIN": "/usr/local/bin/rf-notify",
@@ -199,6 +206,15 @@ def unwedge(cfg: dict, serial: str, dry_run: bool) -> dict:
 
 
 def reboot(cfg: dict, reason: str, dry_run: bool) -> None:
+    if cfg.get("REBOOT_ENABLED", "0") != "1":
+        # Disabled by default. On WSL2 `systemctl reboot` bounces the VM, not the
+        # Windows host that owns the USB dongle, so it loses state without fixing
+        # anything. Log + alert so the operator knows a bare-metal host would have
+        # rebooted here, but do not execute.
+        log_action(cfg, "reboot_suppressed", reason=reason)
+        notify(cfg, "CRITICAL", "rf_luv: reboot suppressed (REBOOT_ENABLED=0)",
+               message=f"would reboot: {reason}", force=True)
+        return
     log_action(cfg, "reboot", reason=reason, dry_run=dry_run)
     notify(cfg, "CRITICAL", "rf_luv: REBOOT triggered",
            message=f"reason: {reason}", force=True)

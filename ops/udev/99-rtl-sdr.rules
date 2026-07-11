@@ -6,14 +6,17 @@
 # rtl-usb-reset) resolve the current USB index via these symlinks so
 # enumeration order cannot cross the streams.
 #
-# Install on leap with:
+# Install on the local host with:
 #   sudo cp ops/udev/99-rtl-sdr.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload
 #   sudo udevadm trigger --subsystem-match=usb
 #
-# After install, each dongle re-enumeration will create /dev/rtl_sdr_v3
-# and /dev/rtl_sdr_v4 per its serial. See spectrum/docs/dongle_identity.md
-# for the full setup procedure.
+# After install, each dongle re-enumeration creates /dev/rtl_sdr_v4 per its
+# serial. See spectrum/docs/dongle_identity.md for the full setup procedure.
+# (Only relevant when the dongle is on a native Linux USB stack, e.g. usbipd —
+# not when rtl_tcp runs on the Windows side.)
 
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v3-01", SYMLINK+="rtl_sdr_v3", MODE="0666", GROUP="plugdev"
+# The V4 is the local scanner dongle.
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v4-01", SYMLINK+="rtl_sdr_v4", MODE="0666", GROUP="plugdev"
+# V3 is optional; uncomment if you add it back.
+#SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v3-01", SYMLINK+="rtl_sdr_v3", MODE="0666", GROUP="plugdev"

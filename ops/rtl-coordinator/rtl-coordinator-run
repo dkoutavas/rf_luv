@@ -11,14 +11,14 @@ set -euo pipefail
 #     rtl-coordinator-run <serial> [--wait | --nonblock | --timeout <sec>] -- <cmd> [args...]
 #
 # Examples:
-#     # NOAA pass recording on V3, wait if scanner is mid-sweep
-#     rtl-coordinator-run v3-01 -- noaa-record-pass.sh 137.62
+#     # NOAA pass recording on the V4, wait if scanner is mid-sweep
+#     rtl-coordinator-run v4-01 -- noaa-record-pass.sh 137.62
 #
 #     # Skip if dongle is busy (return exit code 75 = EX_TEMPFAIL)
-#     rtl-coordinator-run v3-01 --nonblock -- some-decoder ...
+#     rtl-coordinator-run v4-01 --nonblock -- some-decoder ...
 #
 #     # Wait up to 10s for the dongle, then bail
-#     rtl-coordinator-run v3-01 --timeout 10 -- some-decoder ...
+#     rtl-coordinator-run v4-01 --timeout 10 -- some-decoder ...
 #
 # Exit codes:
 #     0       — command ran (its exit code is propagated)

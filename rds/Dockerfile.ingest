@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+WORKDIR /app
+# numpy is the only non-stdlib dependency; it is already the host baseline
+# (numpy 2.5.0 on the local host), so adding it in-container is not a new dep.
+RUN pip install --no-cache-dir 'numpy>=2,<3'
+COPY rds_decoder.py rds_reader.py rds_ingest.py migrate.py entrypoint.sh ./
+COPY clickhouse/migrations/ ./clickhouse/migrations/
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]

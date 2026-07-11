@@ -1,0 +1,58 @@
+# RDS (Radio Data System) Decoder Pipeline (overlay)
+# rds_reader.py (rtl_tcp -> numpy DSP -> group dicts) -> rds_ingest.py (JSON->ClickHouse)
+#
+# This is a ROTATING pipeline overlay. The always-on data layer
+# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
+# rf_luv_infra project. Bring infra up first, then this overlay:
+#   docker compose -f infra/compose.yml up -d
+#   docker compose -f rds/compose.overlay.yml up -d
+#   open http://localhost:3000 for Grafana dashboards (shared)
+#
+# Dongle: rotating decoders point at the V4 dongle on
+# host.docker.internal:1235. RDS lives in the 57 kHz MPX subcarrier of an
+# FM broadcast station, so this pipeline REQUIRES the V4 with the FM
+# broadcast notch REMOVED. The V3 :1234 is FM-bandstopped by design and
+# will never see RDS.
+#   On Windows: rtl_tcp.exe -a 0.0.0.0 -p 1235 -s 2048000
+#
+# Decodes PUBLIC broadcast metadata only: station name (PS), PI code,
+# RadioText, PTY, TP/TA, clock-time. Reference station: 99.6 MHz Kosmos FM.
+# Dipole arms ~75 cm, vertical, at window (strong FM penetrates walls).
+#
+# ClickHouse is reached over the shared rf_luv_net network at the
+# alias `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  # --- RDS reader + ingest (combined) ---------------------
+  # Single container: rds_reader.py pipes JSON groups to Python ingest.
+  # Combined because the pipe is the simplest IPC -- reader exit = ingest exit
+  # (pipefail in entrypoint.sh), mirroring ism.
+  rds-decoder:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    container_name: rds-decoder
+    restart: unless-stopped
+    networks: [rf_luv_net]
+    environment:
+      RTL_TCP_HOST: ${RTL_TCP_HOST:-host.docker.internal}
+      RTL_TCP_PORT: ${RTL_TCP_PORT:-1235}
+      RDS_FREQ_HZ: ${RDS_FREQ_HZ:-99600000}
+      RDS_GAIN: ${RDS_GAIN:-29.7}
+      RDS_DONGLE_ID: ${RDS_DONGLE_ID:-v4-01}
+      RDS_SAMPLE_RATE: ${RDS_SAMPLE_RATE:-228000}
+      RDS_PILOT_THRESH: ${RDS_PILOT_THRESH:-0.0}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: rds
+      CLICKHOUSE_USER: rds
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-rds_local}
+      BATCH_SIZE: "50"
+      FLUSH_INTERVAL_SECONDS: "5"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

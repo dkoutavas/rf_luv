@@ -27,6 +27,7 @@ import dsp
 import delay_estimate
 import bandlimit
 import audio_io
+import fingerprint
 
 FS = 48000
 
@@ -89,6 +90,23 @@ def test_audio_io_ffmpeg_roundtrip():
         freqs = np.fft.rfftfreq(back.size, 1.0 / FS)
         peak = freqs[int(np.argmax(spec[1:]) + 1)]
         assert abs(peak - 1000.0) < 20.0, f"decoded tone peak {peak:.0f} Hz"
+
+
+def test_fingerprint_reuse_detection():
+    if not fingerprint.have_fpcalc():
+        print("SKIP fingerprint (fpcalc absent)")
+        return
+    t = np.arange(FS * 8)
+    tone = 0.5 * np.sin(2 * np.pi * 440.0 * t / FS)
+    noise = _noise(FS * 8, seed=9) * 0.5
+    fp_tone_a = fingerprint.fingerprint_audio(tone, FS)
+    fp_tone_b = fingerprint.fingerprint_audio(tone, FS)
+    fp_noise = fingerprint.fingerprint_audio(noise, FS)
+    assert fp_tone_a.size >= fingerprint.MIN_FRAMES, "too few fingerprint frames"
+    same = fingerprint.similarity(fp_tone_a, fp_tone_b)
+    diff = fingerprint.similarity(fp_tone_a, fp_noise)
+    assert same > 0.95, f"identical clips scored {same:.3f}"
+    assert diff < same - 0.15, f"different clips scored {diff:.3f} vs {same:.3f}"
 
 
 def _run_all():

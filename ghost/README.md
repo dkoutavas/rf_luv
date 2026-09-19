@@ -28,6 +28,7 @@ the length of a session through the coordinator. Host bring-up is in
 | `forensics/audio_io.py` | `yt-dlp` fetch + `ffmpeg` decode of public video audio to a numpy array. |
 | `forensics/delay_estimate.py` | Measures the slapback echo (ms + feedback) on a "voice" segment (autocorrelation + cepstrum). A consistent tap across episodes is a plugin setting. |
 | `forensics/bandlimit.py` | Measures the effective upper audio bandwidth. A hard shelf the room audio lacks points to a Bluetooth speaker rendering the "voice". |
+| `forensics/fingerprint.py` | Chromaprint (`fpcalc`) fingerprints; a near-identical fingerprint across episodes proves the clip was pre-recorded, not captured live. |
 | `migrate.py`, `clickhouse/migrations/` | The `ghost` database schema (`spins`, `stations`, `segments`). |
 
 ## Spirit-box quick start
@@ -53,11 +54,12 @@ receipt: every "word" in the WAV is tied to the station and frequency it came fr
 ```bash
 python3 ghost/forensics/delay_estimate.py <file-or-url> --start 12.0 --dur 4.0
 python3 ghost/forensics/bandlimit.py <file-or-url> --start 12.0 --dur 4.0
+python3 ghost/forensics/fingerprint.py ep1.opus ep2.opus   # flag reused clips
 ```
 
-`fingerprint.py` (reused-clip detection) needs `fpcalc`: `sudo zypper install
-chromaprint-fpcalc`. It is planned for the next batch, along with `spectrogram.py`,
-`reverb_match.py`, and `emf_sync.py`.
+`fingerprint.py` shells out to `fpcalc` (chromaprint), installed via `sudo zypper
+install chromaprint-fpcalc`. Still planned: `spectrogram.py`, `reverb_match.py`, and
+`emf_sync.py`.
 
 ## Tests (headless, no hardware)
 
@@ -69,7 +71,8 @@ python3 ghost/migrate.py --dry-run        # schema (needs the shared ClickHouse 
 
 ## Scope
 
-Built now: the spirit box, RDS labels, and the two forensic tools above. Designed but
-not yet built: the rest of the forensics suite, the K-II EMF replication (module 3,
+Built now: the spirit box, RDS labels, and three forensic tools (slapback delay, audio
+bandlimit, chromaprint reused-clip detection). Designed but not yet built: the rest of
+the forensics suite, the K-II EMF replication (module 3,
 hardware-gated), the Grafana Ghost dashboards, the perception blind test, and
 `REPORT.md`. See the plan for the full design.

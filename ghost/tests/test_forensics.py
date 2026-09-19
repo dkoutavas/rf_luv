@@ -28,6 +28,9 @@ import delay_estimate
 import bandlimit
 import audio_io
 import fingerprint
+import spectrogram
+import reverb_match
+import emf_sync
 
 FS = 48000
 
@@ -107,6 +110,53 @@ def test_fingerprint_reuse_detection():
     diff = fingerprint.similarity(fp_tone_a, fp_noise)
     assert same > 0.95, f"identical clips scored {same:.3f}"
     assert diff < same - 0.15, f"different clips scored {diff:.3f} vs {same:.3f}"
+
+
+def test_spectrogram_chirp_ridge_and_png():
+    n = FS * 2
+    t = np.arange(n) / FS
+    f = 500 + (8000 - 500) * (t / t[-1])          # rising chirp
+    chirp = np.sin(2 * np.pi * np.cumsum(f) / FS)
+    freqs, times, mag = spectrogram.stft(chirp, FS)
+    peak_start = freqs[int(np.argmax(mag[:, 1]))]
+    peak_end = freqs[int(np.argmax(mag[:, -2]))]
+    assert peak_end > peak_start + 2000, f"ridge did not rise: {peak_start}->{peak_end}"
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as d:
+        png = os.path.join(d, "s.png")
+        spectrogram.save_png(mag, png)
+        with open(png, "rb") as fh:
+            assert fh.read(8) == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    tone = np.sin(2 * np.pi * 200 * t)
+    assert spectrogram.high_band_ratio(chirp, FS) > spectrogram.high_band_ratio(tone, FS)
+
+
+def test_reverb_rt60_recovers_target():
+    target = 0.6
+    tau_a = 0.1448 * target                        # amplitude decay for a 60 dB energy drop
+    t = np.arange(int(FS * 2)) / FS
+    x = _noise(t.size, seed=5) * np.exp(-t / tau_a)
+    r = reverb_match.rt60(x, FS)["rt60_s"]
+    assert r is not None and abs(r - target) < 0.25 * target, f"rt60 {r} vs {target}"
+
+
+def test_emf_sync_bursts_and_gsm():
+    n = FS * 6
+    sig = _noise(n, seed=6) * 0.02
+    for tsec in (1.0, 3.0):
+        i = int(tsec * FS)
+        sig[i:i + int(0.02 * FS)] += 1.0            # impulsive burst
+    bursts = emf_sync.detect_bursts(sig, FS)
+    assert any(abs(b - 1.0) < 0.05 for b in bursts), f"missed 1.0s burst: {bursts}"
+    assert any(abs(b - 3.0) < 0.05 for b in bursts), f"missed 3.0s burst: {bursts}"
+
+    t = np.arange(FS) / FS
+    gsm = (1 + 0.8 * np.sin(2 * np.pi * 217 * t)) * np.sin(2 * np.pi * 1000 * t)
+    clean = np.sin(2 * np.pi * 1000 * t)
+    assert emf_sync.gsm_buzz_score(gsm, FS) > 3 * emf_sync.gsm_buzz_score(clean, FS)
+
+    m = emf_sync.sync([1.0, 3.0, 5.0], [1.02, 3.01], tol_s=0.5)
+    assert m[0]["coincident"] and m[1]["coincident"] and not m[2]["coincident"]
 
 
 def _run_all():

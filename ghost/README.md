@@ -29,6 +29,9 @@ the length of a session through the coordinator. Host bring-up is in
 | `forensics/delay_estimate.py` | Measures the slapback echo (ms + feedback) on a "voice" segment (autocorrelation + cepstrum). A consistent tap across episodes is a plugin setting. |
 | `forensics/bandlimit.py` | Measures the effective upper audio bandwidth. A hard shelf the room audio lacks points to a Bluetooth speaker rendering the "voice". |
 | `forensics/fingerprint.py` | Chromaprint (`fpcalc`) fingerprints; a near-identical fingerprint across episodes proves the clip was pre-recorded, not captured live. |
+| `forensics/spectrogram.py` | STFT time-frequency view (terminal heatmap + stdlib grayscale PNG) of a voice segment vs room tone. |
+| `forensics/reverb_match.py` | RT60 (Schroeder decay) of the room's claps vs the reverb tail on a "voice"; a mismatch means the tail was added in the box. |
+| `forensics/emf_sync.py` | Lines up logged EMF-LED timestamps with impulsive bursts / 217 Hz GSM buzz in the audio; a coincidence means a radio, not a ghost. |
 | `migrate.py`, `clickhouse/migrations/` | The `ghost` database schema (`spins`, `stations`, `segments`). |
 
 ## Spirit-box quick start
@@ -58,8 +61,7 @@ python3 ghost/forensics/fingerprint.py ep1.opus ep2.opus   # flag reused clips
 ```
 
 `fingerprint.py` shells out to `fpcalc` (chromaprint), installed via `sudo zypper
-install chromaprint-fpcalc`. Still planned: `spectrogram.py`, `reverb_match.py`, and
-`emf_sync.py`.
+install chromaprint-fpcalc`; every other forensic tool is numpy + stdlib.
 
 ## Tests (headless, no hardware)
 
@@ -71,8 +73,8 @@ python3 ghost/migrate.py --dry-run        # schema (needs the shared ClickHouse 
 
 ## Scope
 
-Built now: the spirit box, RDS labels, and three forensic tools (slapback delay, audio
-bandlimit, chromaprint reused-clip detection). Designed but not yet built: the rest of
-the forensics suite, the K-II EMF replication (module 3,
+Built now: the spirit box, RDS labels, and the full forensics suite (slapback delay,
+audio bandlimit, chromaprint reuse, spectrogram, RT60 reverb match, EMF/RF sync).
+Designed but not yet built: the K-II EMF replication (module 3,
 hardware-gated), the Grafana Ghost dashboards, the perception blind test, and
 `REPORT.md`. See the plan for the full design.

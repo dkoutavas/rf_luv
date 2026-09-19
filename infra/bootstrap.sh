@@ -111,4 +111,14 @@ log "PHASE 2g: rds migrate.py"
   CLICKHOUSE_PASSWORD=rds_local \
   python3 migrate.py )
 
+# ghost: migrate.py only (same pattern as rds; does NOT create the database).
+log "PHASE 2h: ghost migrate.py"
+( cd "$REPO/ghost" && \
+  CLICKHOUSE_HOST="$CH_HOST" \
+  CLICKHOUSE_PORT="$CH_HTTP_PORT" \
+  CLICKHOUSE_DB=ghost \
+  CLICKHOUSE_USER=ghost \
+  CLICKHOUSE_PASSWORD=ghost_local \
+  python3 migrate.py )
+
 log "bootstrap complete"

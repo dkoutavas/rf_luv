@@ -26,7 +26,7 @@ FLUSH_INTERVAL = int(os.environ.get("FLUSH_INTERVAL_SECONDS", "5"))
 # Fallback dongle_id when the incoming JSON line lacks the field. Matches
 # scanner.py's default. A WARN is logged on fallback so a scanner that
 # forgot to emit dongle_id is loudly visible in logs.
-DEFAULT_DONGLE_ID = "v3-01"
+DEFAULT_DONGLE_ID = "v4-01"
 _dongle_warn_emitted = False
 
 logging.basicConfig(

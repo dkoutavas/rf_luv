@@ -1,0 +1,183 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Spins logged",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count() AS spins FROM ghost.spins",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Stations identified",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count() AS stations FROM ghost.stations",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "RDS stations (freq -> name)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT round(freq_hz/1e6,1) AS mhz, ps, radiotext, pi_code, round(rssi_dbfs,1) AS rssi FROM ghost.stations ORDER BY freq_hz",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Recent spins",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT timestamp, round(freq_hz/1e6,1) AS mhz, station_name AS station, round(rssi_dbfs,1) AS rssi, sweep_mode FROM ghost.spins ORDER BY timestamp DESC LIMIT 200",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Forensic segments",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT analyzed_at, video_id, kind, delay_ms, upper_bw_hz, rt60_s, notes FROM ghost.segments ORDER BY analyzed_at DESC LIMIT 200",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "ghost"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Ghost Overview",
+  "uid": "ghost-overview"
+}

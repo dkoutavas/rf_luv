@@ -110,3 +110,18 @@ datasources:
     secureJsonData:
       password: rds_local
     editable: true
+
+  - name: ClickHouse ghost
+    uid: P_GHOST_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: ghost
+      username: ghost
+    secureJsonData:
+      password: ghost_local
+    editable: true

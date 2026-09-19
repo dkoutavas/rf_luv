@@ -19,12 +19,12 @@ unwedge sequence (the 2026-04-29 manual recovery recipe):
 
 If we've done REBOOT_AFTER_UNWEDGES on a single serial in 24h, OR both serials
 have been CB-open for ≥REBOOT_BOTH_CB_S, the reboot rung fires. It is DISABLED
-by default (REBOOT_ENABLED=0): on the WSL2 local host `systemctl reboot` bounces
-the VM, not the Windows host that owns the USB dongle, so it destroys state
-without recovering anything. Set REBOOT_ENABLED=1 (in escalator.env) on a future
-bare-metal host to re-arm it. When armed it is rate-limited to one reboot per
-REBOOT_COOLDOWN_S (default 6h). The USB-recovery steps 1-2 also assume a native
-Linux USB stack; they are inert if rtl_tcp runs on the Windows side.
+by default (REBOOT_ENABLED=0): on this personal desktop a whole-machine reboot
+is disruptive and rarely the right recovery, so it stays off. The Omen runs
+native openSUSE Tumbleweed and owns the USB bus directly, so the USB-recovery
+steps 1-2 work as they did on leap. Set REBOOT_ENABLED=1 (in escalator.env) to
+arm the reboot rung; when armed it is rate-limited to one reboot per
+REBOOT_COOLDOWN_S (default 6h).
 
 All actions append a JSON line to /var/log/rtl-recovery.log. State transitions
 (CB opened, CB cleared, unwedge attempt, reboot) emit ntfy alerts via rf-notify.
@@ -42,7 +42,7 @@ from pathlib import Path
 DEFAULTS = {
     "TARGET_USER": "dio_nysi",
     "TARGET_UID": "1000",
-    "SERIALS": "v4-01",
+    "SERIALS": "v4-01",              # two-dongle host: set "v4-01,v3-01" in escalator.env
     "WATCHDOG_STATE_DIR": "/run/user/1000",
     "XHCI_PCI": "0000:00:14.0",
     "RTL_USB_RESET": "/usr/local/sbin/rtl-usb-reset",
@@ -53,7 +53,7 @@ DEFAULTS = {
     "REBOOT_AFTER_UNWEDGES": "3",     # reboot if 3 unwedges/24h on one serial
     "REBOOT_BOTH_CB_S": "1800",       # reboot if both serials CB ≥30 min
     "REBOOT_COOLDOWN_S": "21600",     # 6h between reboots
-    "REBOOT_ENABLED": "0",            # WSL2: reboot bounces the VM, not the USB host — off by default
+    "REBOOT_ENABLED": "0",            # personal desktop: reboot is disruptive; arm via escalator.env on demand
 
     "STATE_FILE": "/var/lib/rtl-tcp-escalator/state.json",
     "ACTION_LOG": "/var/log/rtl-recovery.log",

@@ -92,7 +92,7 @@ def wait_for_clickhouse(max_retries: int = 30, delay: int = 2) -> bool:
 def ensure_migrations_table() -> None:
     ch_query(
         """
-        CREATE TABLE IF NOT EXISTS rds.schema_migrations (
+        CREATE TABLE IF NOT EXISTS ghost.schema_migrations (
             version     String,
             name        String,
             applied_at  DateTime64(3) DEFAULT now64(3),
@@ -106,7 +106,7 @@ def ensure_migrations_table() -> None:
 def get_applied_versions() -> set[str]:
     try:
         result = ch_query(
-            "SELECT version FROM rds.schema_migrations FORMAT TabSeparated"
+            "SELECT version FROM ghost.schema_migrations FORMAT TabSeparated"
         )
         if not result.strip():
             return set()
@@ -216,7 +216,7 @@ def apply_migration(version: str, name: str, path: Path) -> None:
     checksum = compute_checksum(path)
     payload = json.dumps({"version": version, "name": name, "checksum": checksum})
     ch_query(
-        "INSERT INTO rds.schema_migrations FORMAT JSONEachRow",
+        "INSERT INTO ghost.schema_migrations FORMAT JSONEachRow",
         data=payload,
     )
     log.info(f"Migration {version} applied successfully")

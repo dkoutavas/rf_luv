@@ -1,4 +1,10 @@
-# Dongle identity — how leap distinguishes V3 from V4
+# Dongle identity — how the host distinguishes V3 from V4
+
+> Port layout note (native Omen, two dongles): the FM-notched **V4** runs the
+> spectrum scanner on rtl_tcp **:1234**; the bare **V3** is the ghost-pipeline
+> dongle on rtl_tcp **:1235**. This is the reverse of leap's V3:1234/V4:1235
+> split (leap ran the scanner on the V3). The rest of this doc is the original
+> leap-era procedure; the serial scheme and the EEPROM VBUS gotcha are unchanged.
 
 ## Why this document exists
 
@@ -14,8 +20,8 @@ This is solved by writing a unique serial number into each dongle's EEPROM, lett
 | V4 dongle serial | `v4-01` |
 | udev symlink (V3) | `/dev/rtl_sdr_v3` |
 | udev symlink (V4) | `/dev/rtl_sdr_v4` |
-| rtl_tcp instance (V3) | `rtl-tcp@v3-01.service`, port 1234 |
-| rtl_tcp instance (V4) | `rtl-tcp@v4-01.service`, port 1235 |
+| rtl_tcp instance (V3) | `rtl-tcp@v3-01.service`, port 1235 (ghost dongle) |
+| rtl_tcp instance (V4) | `rtl-tcp@v4-01.service`, port 1234 (spectrum scanner) |
 | scanner instance (V3) | `rtl-scanner@v3-01.service` |
 | scanner instance (V4) | `rtl-scanner@v4-01.service` |
 | ClickHouse `dongle_id` (V3) | `'v3-01'` (LowCardinality(String)) |

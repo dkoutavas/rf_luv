@@ -11,9 +11,10 @@
 # Dongle: rotating decoders point at the V4 dongle on
 # host.docker.internal:1234. RDS lives in the 57 kHz MPX subcarrier of an
 # FM broadcast station, so this pipeline REQUIRES the V4 with the FM
-# broadcast notch REMOVED. The V3 :1234 is FM-bandstopped by design and
-# will never see RDS.
-#   On Windows: rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
+# broadcast notch REMOVED. On the two-dongle Omen the scanner's V4 keeps its
+# notch ON, so RDS-band work (this pipeline, and the ghost spirit box) runs on
+# the bare V3; point this overlay at the V3 by setting RTL_TCP_PORT=1235.
+#   Native Omen host: rtl_tcp runs as rtl-tcp@<serial>.service (V4 :1234, V3 :1235).
 #
 # Decodes PUBLIC broadcast metadata only: station name (PS), PI code,
 # RadioText, PTY, TP/TA, clock-time. Reference station: 99.6 MHz Kosmos FM.

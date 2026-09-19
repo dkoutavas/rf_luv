@@ -9,9 +9,9 @@
 #   open http://localhost:3000 for Grafana dashboards (shared)
 #
 # Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1234. The V3 :1234 belongs to the native
-# systemd spectrum scanner.
-#   On Windows: rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
+# host.docker.internal:1234 — the same V4 the native systemd spectrum
+# scanner owns; these rotating decoders time-share it via the coordinator.
+#   Native Omen host: rtl_tcp runs as rtl-tcp@v4-01.service on :1234.
 #
 # Decodes weather stations, tire sensors, doorbells, remotes, etc.
 # at 433.92 MHz. Dipole arms ~16.4 cm, vertical, at window.

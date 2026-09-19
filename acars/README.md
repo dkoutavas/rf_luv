@@ -3,7 +3,7 @@
 Decodes ACARS (Aircraft Communications Addressing and Reporting System) messages from Athens airport traffic and stores them in ClickHouse for cross-correlation with the existing ADS-B pipeline.
 
 ```
-RTL-SDR V4 (rtl_tcp on leap:1235)
+RTL-SDR V4 (rtl_tcp on the Omen :1234, time-shared with the scanner via the coordinator)
   └→ acarsdec (Docker, ghcr.io/sdr-enthusiasts/docker-acarsdec, @sha256-pinned)
        └→ JSON datagrams (UDP :5550) → acars-ingest → shared ClickHouse
 ClickHouse (acars database, shared server clickhouse:8123 / 127.0.0.1:8123)

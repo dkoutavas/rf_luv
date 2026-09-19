@@ -8,12 +8,14 @@
 #   ./pipeline.sh ps <pipe>        show the pipeline's container status
 #
 # Valid pipes: acars adsb ais ism rds spectrum.  (Plus:  ./pipeline.sh demo)
-#   - One local V4 = one rtl_tcp (host.docker.internal:1234), single-tenant per
-#     session: the box is EITHER sweeping OR running one decoder, never both. The
-#     five decoders (acars/adsb/ais/ism/rds) share that one dongle, so only one
-#     runs at a time; 'rotate' swaps them.
+#   - This script manages only the V4 (rtl_tcp host.docker.internal:1234). The V4
+#     runs the spectrum scanner AND time-shares with the five rotating decoders
+#     (acars/adsb/ais/ism/rds), so on the V4 the box is EITHER sweeping OR running
+#     one decoder, never both; 'rotate' swaps them.
 #     rds decodes the 57 kHz RDS subcarrier and needs the V4 with the FM notch
 #     REMOVED (with the notch on, the FM band is attenuated and RDS is invisible).
+#   - The V3 (rtl_tcp :1235) is a SEPARATE dongle for the ghost pipeline
+#     (ghost/spiritbox.py), run directly, not through this script.
 #   - spectrum's overlay is the profile-gated containerized scanner (a smoke-test);
 #     the steady scanner runs as native systemd on the local host (ops/rtl-scanner).
 #

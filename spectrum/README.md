@@ -76,7 +76,7 @@ Prerequisites:
   ```
   Verify: `rtl_test -t` reports `Realtek RTL2838, R820T/R860 tuner`.
 
-- Windows / WSL: swap the dongle driver with Zadig per [`../setup/install-windows.md`](../setup/install-windows.md).
+- Native Linux (Omen): install the udev rule per [`../ops/udev/99-rtl-sdr.rules`](../ops/udev/99-rtl-sdr.rules). Windows / WSL only: swap the dongle driver with Zadig per [`../setup/install-windows.md`](../setup/install-windows.md).
 
 Bring it up:
 
@@ -184,4 +184,4 @@ Both scripts connect to the shared ClickHouse at `localhost:8123` by default.
 
 **Connection refused to rtl_tcp** - either rtl_tcp isn't running, or it's bound to `127.0.0.1` instead of `0.0.0.0`. Containers need to reach it via the Docker bridge, so bind to `0.0.0.0`.
 
-**One consumer per dongle** - the RTL-SDR dongle is single-client. On the local host the native scanner owns the single V4 on :1234; a rotating decoder (`pipeline.sh up <pipe>`) time-shares it through the coordinator. Stop one V4 consumer before starting another, or let the coordinator's flock arbitrate.
+**One consumer per dongle** - the RTL-SDR dongle is single-client. On the two-dongle Omen the native scanner owns the V4 on :1234 and the ghost pipeline owns the V3 on :1235. On the V4, a rotating decoder (`pipeline.sh up <pipe>`) time-shares with the scanner through the coordinator. Stop one V4 consumer before starting another, or let the coordinator's flock arbitrate.

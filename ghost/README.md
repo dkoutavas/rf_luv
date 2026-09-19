@@ -71,6 +71,12 @@ python3 ghost/tests/test_forensics.py     # slapback delay, bandwidth, ffmpeg de
 python3 ghost/migrate.py --dry-run        # schema (needs the shared ClickHouse up)
 ```
 
+## Status
+
+Live-validated on hardware 2026-09-19 (two dongles concurrent, real Athens RDS,
+bandstop confirmed). Session findings and the manual bring-up commands are in
+[`docs/session-handoff-20260919.md`](docs/session-handoff-20260919.md).
+
 ## Scope
 
 Built now: the spirit box, RDS labels, and the full forensics suite (slapback delay,

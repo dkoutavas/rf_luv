@@ -2,17 +2,17 @@
 
 ## First Boot Checklist
 1. Plug in dongle
-2. Windows: Zadig → Bulk-In Interface 0 → WinUSB → Replace Driver
+2. Native Linux (Omen): install the udev rule (`ops/udev/99-rtl-sdr.rules`). Windows only: Zadig → Bulk-In Interface 0 → WinUSB → Replace Driver
 3. Open SDR++ → Source: RTL-SDR → Sample Rate: 2.048 MHz → Gain: 30 dB
 4. Tune to 99.6 MHz (Kosmos FM) or 105.8 MHz (Skai) → confirm audio
 5. If no signal: check gain, check Zadig targeted the right interface
 
-## rtl_tcp Bridge (Windows → WSL)
+## rtl_tcp on the host
 ```
-# Windows CMD/PowerShell:
-rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000
-
-# WSL tools connect to:
+# Native Omen (systemd runs it for you): rtl-tcp@v4-01 on :1234, rtl-tcp@v3-01 on :1235.
+# Manual / ad-hoc on Linux:
+rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000     # V4 (add a second on :1235 for the V3)
+# Windows alternative (rtl_tcp.exe), then tools connect to:
 rtl_fm -d tcp:127.0.0.1:1234 ...
 ```
 
@@ -121,5 +121,5 @@ UVB-76 (HF)       4.625 MHz        Number station (direct sampling)
 - **Ghost signals everywhere**: gain too high, reduce by 10 dB
 - **Signals drift**: normal for non-TCXO dongles, your V4 has a 1 PPM TCXO so drift should be <1 ppm
 - **USB drops / glitches**: try lower sample rate (1.024 MS/s), shorter USB cable
-- **rtl_tcp connection refused**: check Windows firewall, or use 127.0.0.1 not localhost
-- **WSL can't see USB**: need usbipd-win, or use rtl_tcp bridge instead
+- **rtl_tcp connection refused**: check the host firewall, or use 127.0.0.1 not localhost
+- **USB not seen**: native Linux sees the dongle directly via the udev rule; only WSL/Windows needs usbipd-win or the rtl_tcp bridge

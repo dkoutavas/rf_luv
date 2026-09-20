@@ -1,5 +1,12 @@
 # ACARS Deploy Runbook - V4 Takeover
 
+> **Historical (leap) runbook.** The steps below were written for leap
+> (ssh `192.168.2.10`, V4 on :1235). On the native Omen the live path is
+> local: the V4 is `v4-01` on rtl_tcp **:1234**, time-shared with the scanner
+> via the coordinator, and ACARS runs with `bash pipeline.sh up acars`
+> (`acars/env.v4-01.example` already points at `host.docker.internal:1234`).
+> Read the ssh/`:1235` steps below as leap history, not the current host.
+
 Deploy procedure for the ACARS pipeline (Tier 1 #1 from the decoding-roadmap), built and smoke-tested 2026-05-02. End-to-end test on leap passed; no live decoder run yet because that requires V4 takeover.
 
 This runbook is written for remote execution: every step has a verify-before-act check. Reverse a step at any point with the rollback section.
@@ -59,7 +66,7 @@ ss -tlnp | grep :1235                                # expect: rtl_tcp PID liste
 # Step 2 - deploy the decoder against the always-on infra
 cd ~/dev/rf_luv/acars
 cp env.v4-01.example .env
-# .env defaults: SOAPYSDR=driver=rtltcp,rtltcp=192.168.2.10:1235  (correct as-is)
+# .env defaults: SOAPYSDR=driver=rtltcp,rtltcp=host.docker.internal:1234  (Omen V4; leap used 192.168.2.10:1235)
 cd ~/dev/rf_luv && bash pipeline.sh up acars
 # Brings up 2 services on the shared rf_luv_net: acarsdec + acars-ingest
 # (ClickHouse + Grafana are already running from infra/up.sh)

@@ -2,7 +2,7 @@
 
 Personal RTL-SDR Blog V4 exploration project, based in Athens, Greece. The repo started as a general-purpose SDR playground with pipelines for aircraft (ADS-B), ships (AIS), and ISM devices; it has since converged on the **spectrum scanner** as the primary, continuously-tested workload, with **ACARS** (aircraft messaging) as a second decoder and **NOAA** weather-sat scheduling partially built. The ADS-B/AIS/ISM stacks are kept as companion experiments. Each pipeline is documented in its own directory.
 
-> **Status (2026-07):** the target is one **local openSUSE Tumbleweed PC (WSL2)** with a single **RTL-SDR Blog V4** (its FM notch is a removable inline SMA filter). The old headless host `leap` went down in June 2026 with a failed disk and is retired for the near term; its ClickHouse data had no backup and is gone. **Stage 0 (single-host reset)** is landing on branch `refactor/stage0-single-host-reset`: repoint to `python3`, reconcile the user, collapse the two-dongle defaults to the one V4, and drop the leap-only remote/USB-recovery machinery. Code, schema, dashboards, and systemd units rebuild from this repo onto the local host; [`ops/clickhouse-backup/`](ops/clickhouse-backup/) must run off-host before new data accumulates. The ordered local restore runbook is in [`RESTORE.md`](RESTORE.md), and the "Current Project State" section of [`CLAUDE.md`](CLAUDE.md) has the full picture.
+> **Status (2026-09):** the target is one **local openSUSE Tumbleweed PC, native (not WSL2)** — the HP Omen laptop — with **two RTL-SDR Blog dongles**: a **V4** on rtl_tcp :1234 (spectrum scanner, FM notch on) and a **V3** on rtl_tcp :1235 (the `ghost/` pipeline, notch off). The old headless host `leap` went down in June 2026 with a failed disk and is retired for the near term; its ClickHouse data had no backup and is gone. **Stage 0 (single-host reset)** has merged to `main`; native Linux owns the USB bus directly, so the udev / USB-reset paths work as they did on leap. Code, schema, dashboards, and systemd units rebuild from this repo onto the local host; [`ops/clickhouse-backup/`](ops/clickhouse-backup/) must run off-host (the Omen has a second NVMe at `/data`) before new data accumulates. The ordered local restore runbook is in [`RESTORE.md`](RESTORE.md), the two-dongle bring-up is in [`ghost/HOSTPREP.md`](ghost/HOSTPREP.md), and the "Current Project State" section of [`CLAUDE.md`](CLAUDE.md) has the full picture.
 
 ## Quick start
 
@@ -46,6 +46,8 @@ All pipelines share one ClickHouse (`127.0.0.1:8123` HTTP, `:9000` native) and o
 | `adsb/`    | companion | `adsb` | ADS-B | ADS-B aircraft tracking (readsb + tar1090 :8080). Historically ran on the Windows host, not leap |
 | `ais/`     | companion | `ais` | AIS | AIS ship tracking (AIS-catcher). Built, not deployed |
 | `ism/`     | companion | `ism` | ISM | ISM 433 MHz device decoding (rtl_433). Built, not deployed |
+| `rds/`     | built | `rds` | RDS | RDS station metadata (PS/PI/RadioText) decoder on the V4, notch off |
+| `ghost/`   | new, built (core) | `ghost` | Ghost | Spirit-box replica + video forensics on the **V3** (:1235). Debunks paranormal gear; see [`ghost/README.md`](ghost/README.md) |
 
 ClickHouse data for these databases is backed up off-host by [`ops/clickhouse-backup/`](ops/clickhouse-backup/) (daily logical snapshots). Deploy it and point `BACKUP_DIR` at off-host storage before collecting data you care about.
 

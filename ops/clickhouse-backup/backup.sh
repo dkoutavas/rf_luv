@@ -40,7 +40,7 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/rf-clickhouse}"
 # Which databases to dump. Post-consolidation all six live on one server;
 # spectrum/acars hold the irreplaceable data, adsb/ais/ism/noaa are companion
 # pipelines (often empty) but cheap to include.
-DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa}"
+DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa rds ghost}"
 
 # The single shared ClickHouse container (post-2026-06 consolidation). All
 # databases live in it; the per-db container names (clickhouse-<db>) are gone.

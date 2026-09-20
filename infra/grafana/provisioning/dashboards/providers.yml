@@ -91,3 +91,15 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards/json/rds
       foldersFromFilesStructure: false
+
+  - name: Ghost Dashboards
+    orgId: 1
+    type: file
+    folder: Ghost
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/ghost
+      foldersFromFilesStructure: false

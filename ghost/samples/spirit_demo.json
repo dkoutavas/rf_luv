@@ -1,0 +1,6 @@
+{
+  "sample_rate_hz": 240000,
+  "center_freq_hz": 99600000,
+  "format": "cs8",
+  "note": "synthetic two-tone WFM, demo only"
+}

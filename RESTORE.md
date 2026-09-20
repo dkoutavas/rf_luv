@@ -1,7 +1,10 @@
 # RESTORE: rebuild the rf_luv stack on the local host
 
-How to bring the rf_luv stack up on the local **openSUSE Tumbleweed PC (WSL2)**
-with one **RTL-SDR V4**, from a fresh clone. Written because the 2026-06 leap
+How to bring the rf_luv stack up on the local **openSUSE Tumbleweed PC**, native
+(not WSL2, the HP Omen), from a fresh clone. The Omen now runs **two dongles**: the
+**V4** (`v4-01`, rtl_tcp :1234) for the spectrum scanner and the **V3** (`v3-01`,
+rtl_tcp :1235) for the `ghost/` pipeline. This runbook covers the V4 scanner path;
+the two-dongle / ghost bring-up detail is in [`ghost/HOSTPREP.md`](ghost/HOSTPREP.md). Written because the 2026-06 leap
 disk failure had no runbook and the recovery knowledge was scattered across
 CLAUDE.md, `spectrum/docs/dongle_identity.md`, and each `install.sh` header.
 This is the single ordered path. leap itself is retired (see CLAUDE.md); this

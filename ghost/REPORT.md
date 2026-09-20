@@ -170,11 +170,84 @@ This section applies the forensic tools to specific recordings from the channel.
 It is phrased as observations about the recordings, not about people. All
 analysis runs on publicly available video; no field access or interaction.
 
-> **Placeholder.** Forensic analysis of specific episodes has not been run yet.
-> When it is, each entry will state the video identifier, the segment
-> timestamps, and the measured values (delay in ms, upper bandwidth in Hz, RT60
-> in seconds, fingerprint match score). The tools are built and tested; what
-> remains is selecting episodes and running them.
+Three videos from the same channel were analysed (2026-09-20). Video
+identifiers are YouTube IDs; no channel or person name is stated.
+
+### Bandwidth
+
+Every segment in all three videos has a hard upper-bandwidth shelf far below
+what a camera microphone produces:
+
+| Video | Segments | Bandwidth range | Normal camera audio |
+|-------|----------|-----------------|---------------------|
+| Ha--GzirhcI (40 min) | 7 | 633–973 Hz | 16 000–20 000 Hz |
+| LN4El-f8SY0 (30 min) | 6 | 352–4 723 Hz | 16 000–20 000 Hz |
+| Kbo0FwhQ7i8 (52 min) | 6 | 609–6 680 Hz | 16 000–20 000 Hz |
+
+Ha--GzirhcI is the most extreme: 80 windows scanned across 40 minutes, and
+**not a single one** exceeds 2 531 Hz. The typical shelf sits at 700–900 Hz.
+This is not Bluetooth SBC (which cuts at about 16 kHz) or AAC (about 15 kHz).
+It is a much harder roll-off — consistent with either a very low bitrate
+stream, a deliberate low-pass, or playback through a small speaker with no
+high-frequency response.
+
+The high-band energy ratio (energy above 6 kHz over total energy) is
+effectively zero across all segments: 0.0000 to 0.0021. Live room audio
+through a camera microphone has a high-band ratio of 0.05 to 0.15.
+
+### Delay
+
+Slapback delay measurements show a consistent short tap across segments within
+each video:
+
+| Video | Delay range (ms) | Feedback | Methods agree |
+|-------|-------------------|----------|---------------|
+| Ha--GzirhcI | 20.7–40.5 | 0.10–0.66 | 4 of 7 |
+| LN4El-f8SY0 | 20.4–44.1 | 0.03–0.18 | 0 of 6 |
+| Kbo0FwhQ7i8 | 22.2–135.8 | 0.04–0.13 | 0 of 6 |
+
+The delay is present but the autocorrelation and cepstrum methods do not
+consistently agree. This is expected: the shelf at 700–900 Hz removes most of
+the high-frequency transient content that makes a delay tap cleanly detectable.
+What remains is a low-frequency drone where the autocorrelation peak is broad
+and ambiguous. The delay measurement is weaker evidence than the bandwidth.
+
+### Fingerprint reuse
+
+Chromaprint acoustic fingerprints were compared between every pair of segments
+within each video. In a normal recording (conversation, ambient sound), segments
+30–60 seconds apart should score below 0.3 (unrelated audio).
+
+| Video | Segment pairs | Pairs > 0.5 (reuse) | Pairs > 0.3 |
+|-------|---------------|---------------------|-------------|
+| Ha--GzirhcI | 21 | **19** (90%) | 21 (100%) |
+| LN4El-f8SY0 | 15 | **15** (100%) | 15 (100%) |
+| Kbo0FwhQ7i8 | 15 | **14** (93%) | 15 (100%) |
+
+Every pair in every video scores above 0.3. The vast majority score above 0.5.
+Video Kbo0FwhQ7i8 segments "ramp" vs "peak" score 0.642 — the highest single
+match, indicating the same or very similar audio played in two different parts
+of the same video.
+
+This is the strongest finding: **the audio fingerprint is nearly identical
+across all segments in all three videos**. This is not what a live recording of
+a room sounds like. It is what a loop or a pre-recorded track sounds like.
+
+### Summary of findings
+
+1. The bandwidth of the "spirit" audio is 10 to 25 times narrower than normal
+   camera audio. It never exceeds a few kHz while the camera microphone in the
+   same video is capable of 16–20 kHz.
+2. The acoustic fingerprint is nearly uniform across 30–60 second segments
+   spanning the entire length of each video. In a live recording, segments
+   minutes apart do not share a fingerprint.
+3. The delay tap is present but not cleanly measurable, because the bandwidth is
+   too narrow to carry the transients that make a tap detectable.
+
+The simplest explanation that covers all three observations is a pre-recorded
+or looped audio source with very low bandwidth, played through a device in the
+room (or mixed into the audio in post). The bandwidth shelf rules out a live
+microphone feed; the fingerprint uniformity rules out varied room sound.
 
 ---
 

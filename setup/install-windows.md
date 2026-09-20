@@ -1,5 +1,10 @@
 # Windows-Side Setup
 
+> **Optional path.** This guide is for running `rtl_tcp.exe` on a Windows host
+> (with the pipelines in WSL or Docker). The default and validated path is
+> native Linux with `bash ops/install-host.sh ...`, see `RESTORE.md`.
+
+
 ## 1. USB Driver (Zadig) — DO THIS FIRST WHEN DONGLE ARRIVES
 
 1. Download Zadig: https://zadig.akeo.ie

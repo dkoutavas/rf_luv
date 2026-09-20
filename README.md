@@ -9,15 +9,13 @@ Personal RTL-SDR Blog V4 exploration project, based in Athens, Greece. The repo 
 The stack has two halves: `rtl_tcp` on the host that owns the USB dongle, and a Docker data layer (one shared ClickHouse + Grafana) plus the decoder you want, anywhere that can reach the dongle over TCP.
 
 1. **Clone + bootstrap** (one-time): `bash bootstrap.sh`: strips WSL metadata, marks scripts executable, inits git.
-2. **Host side: rtl_tcp**:
-   - Linux: `bash ops/rtl-tcp/install.sh`: installs systemd user unit + 30 s watchdog.
-   - Windows: follow [`setup/install-windows.md`](setup/install-windows.md) (Zadig, WinUSB, run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`).
-3. **Shared data layer** (once): `docker network create rf_luv_net` then `bash infra/up.sh`. This starts the single ClickHouse (8123/9000) and Grafana (3000), and the `ch-bootstrap` one-shot creates all six databases, users, and schema and loads the Athens known-frequencies seed automatically.
+2. **Shared data layer** (once): `docker network create rf_luv_net` then `bash infra/up.sh`. This starts the single ClickHouse (8123/9000) and Grafana (3000), and the `ch-bootstrap` one-shot creates all eight databases, users, and schema and loads the Athens known-frequencies seed automatically.
+3. **Host side (native Linux, one or two dongles)**: `bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups`. One command for the DVB blacklist, udev, the rtl_tcp units + watchdog, per-dongle env files, and daily backups; `--verify-only` prints a PASS/FAIL check. Full manual: [`RESTORE.md`](RESTORE.md). A Windows host running `rtl_tcp.exe` is an alternative, see [`setup/install-windows.md`](setup/install-windows.md).
 4. **Decoders**: the native systemd spectrum scanner on the V4 writes straight into the shared ClickHouse (no compose needed). Rotating decoders time-share the same V4 (via the coordinator) and are managed with `bash pipeline.sh up|down|rotate <pipe>` where `<pipe>` is `adsb`, `ais`, `ism`, or `acars`.
 5. **Dashboards**: <http://localhost:3000> (admin/admin); each pipeline has its own Grafana folder. First full spectrum sweep completes in ~4 minutes; airband sweeps every 60 s.
 6. **Antenna**: stock dipole, arms sized for the band of interest (see table below), vertical, outdoors if possible.
 
-If you're on WSL/openSUSE and want the local CLI toolchain (`rtl_433`, `multimon-ng`, `gpredict`, etc.): `bash setup/install-wsl.sh`. Not required for the Docker pipeline, only for ad-hoc CLI experiments.
+For the ad-hoc CLI toolchain (`rtl_433`, `multimon-ng`, `gpredict`, etc.) on openSUSE: `bash setup/install-wsl.sh` (despite the name it is a plain zypper installer). Not required for the pipelines.
 
 ## Architecture
 
@@ -106,6 +104,7 @@ spectrum/          # primary pipeline: scanner, ingest, intelligence, migrations
 acars/             # ACARS aircraft messaging (deployed on V4; see DEPLOY.md)
 noaa/              # NOAA/Meteor pass scheduling (recorder is a scaffold)
 adsb/ ais/ ism/    # companion pipelines (each a compose.overlay.yml decoder)
+ops/install-host.sh  # one-shot host onboarding (one or two dongles): DVB, udev, units, env, backups
 ops/rtl-tcp/       # host-side rtl_tcp reliability: systemd unit, watchdog, escalator, USB reset
 ops/rtl-coordinator/   # installs the flock dongle coordinator
 ops/spectrum-monitor/  # ClickHouse freshness + signal-quality probes
@@ -117,7 +116,7 @@ ops/notify/        # ntfy.sh push helper + daily heartbeat
 ops/remote-desktop/  # xrdp + tailscale remote-access setup
 ops/install-trip-hardening.sh  # idempotent installer for the unattended-ops layer
 scripts/           # one-shot CLI helpers (airband, ISM, AIS, satellite passes)
-setup/             # WSL installer and Windows setup guide
+setup/             # openSUSE CLI toolchain installer and the optional Windows-host guide
 notes/             # signal identification logs
 recordings/        # IQ captures, scan CSVs, decoded images
 CLAUDE.md          # full project context (hardware, RF environment, conventions, state)

@@ -109,7 +109,7 @@ The overlay uses `extra_hosts: host.docker.internal:host-gateway` so the scanner
 The default on the local host. Adds USB recovery, freshness monitoring, alerting:
 
 ```bash
-bash ../ops/rtl-tcp/install.sh           # systemd user units + watchdog
+bash ../ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickhouse-backups   # units, watchdog, udev, env, backups
 bash ../ops/install-trip-hardening.sh    # root escalator + freshness + ntfy
 ```
 

@@ -1,52 +1,50 @@
 # rf_luv — RTL-SDR Radio Lab
 
-What does a "ghost-hunting" spirit box actually receive? FM radio, 150 ms at a
-time. This repo has the receiver that proves it, the RDS labels that name every
-station fragment, and the forensic tools that measured a hard 800 Hz bandwidth
-shelf and near-identical acoustic fingerprints across 40 minutes of published
-"investigation" video.
+A home radio lab on two USB software-defined radio dongles, based in Athens,
+Greece. The station runs a 24/7 spectrum scanner across 88–470 MHz, decodes
+aircraft messages and ship positions, schedules weather satellite passes, and
+monitors IoT sensors — all writing to a shared ClickHouse database with Grafana
+dashboards on localhost.
 
-The rest of the repo is the radio lab that made it possible: a 24/7 spectrum
-scanner, aircraft messaging, ship tracking, weather satellites and ISM sensors,
-all on two 35-EUR USB radio dongles from a window in Athens.
+One of the pipelines (`ghost/`) rebuilds the equipment used in "paranormal
+investigation" content and measures what it actually does. That work is
+documented in its own [report](ghost/REPORT.md), but the project is the radio
+lab, not the debunk.
 
 ## What you can do with it
 
-- **Run a spectrum scanner** that sweeps 88–470 MHz every five minutes,
-  detects peaks, tracks transients, and writes everything to ClickHouse with
-  Grafana dashboards.
-- **Replicate a spirit box** and label every audio fragment with its source FM
-  station, then apply a delay effect and hear the "creepy voice" appear —
-  because that is all it is.
-- **Run forensic audio analysis** on public video: measure the bandwidth
-  shelf, detect reused clips with chromaprint fingerprints, compare reverb
-  tails, and correlate EMF-meter events with RF bursts.
-- **Decode aircraft messages** (ACARS), **track ships** (AIS), **read weather
-  satellites** (NOAA), and **monitor IoT sensors** (ISM 433 MHz) — each as
-  its own pipeline with its own ClickHouse database and Grafana folder.
+- **Scan the spectrum.** Sweep 88–470 MHz every five minutes, detect peaks,
+  track transients, build hourly baselines.
+- **Decode aircraft messages.** ACARS from Athens airport traffic, with flight
+  and tail tracking.
+- **Track ships.** AIS positions from the Saronic Gulf and Piraeus.
+- **Schedule weather satellites.** NOAA and Meteor M2 pass predictions with TLE
+  refresh (recorder still a scaffold).
+- **Monitor IoT sensors.** ISM 433 MHz devices: weather stations, tire sensors,
+  doorbells.
+- **Replicate a spirit box.** Sweep the FM band, label every fragment with its
+  source station via RDS, and run forensic audio analysis on published video.
 
 ## Where it runs
 
 One laptop in Athens (HP Omen, openSUSE Tumbleweed). Two RTL-SDR Blog USB
 dongles: a V4 with an FM bandstop filter for the scanner, and a V3 without one
-for the spirit-box work. Docker runs ClickHouse and Grafana on localhost. The
-radios run as systemd user services with a watchdog. Daily backups land on a
-second internal disk. Nothing is on the internet. GitHub hosts the code and
-sample captures only.
+for FM-band work. Docker runs ClickHouse and Grafana on localhost. The radios
+run as systemd user services with a watchdog. Daily backups land on a second
+internal disk. Nothing is on the internet. GitHub hosts the code and sample
+captures only.
 
 ## Hardware (~115 EUR)
 
 | Item | What it does | Cost |
 |------|--------------|------|
 | RTL-SDR Blog V4 | Spectrum scanner (500 kHz – 1.7 GHz, 8-bit, 2 MS/s) | ~45 EUR |
-| RTL-SDR Blog V3 | Spirit-box / FM / HF (same range + HF direct sampling) | ~35 EUR |
+| RTL-SDR Blog V3 | FM / ghost / HF (same range + HF direct sampling) | ~35 EUR |
 | FM bandstop filter | Inline SMA, rejects 88–108 MHz on the scanner dongle | ~15 EUR |
 | Dipole antenna kit | Telescoping elements, magnetic base, SMA pigtail | ~20 EUR |
-| K-II EMF meter | Reproduce the "paranormal" LED response (optional) | ~20 EUR |
 
 Software: Python 3.10+, numpy, Docker, ClickHouse, Grafana. Everything else is
-standard library. The one external binary is `fpcalc` (chromaprint) for the
-acoustic fingerprinter.
+standard library.
 
 ## Get running
 
@@ -68,36 +66,8 @@ Run `--verify-only` to check everything passes. Open Grafana at
 about four minutes.
 
 Full rebuild manual: [RESTORE.md](RESTORE.md). The installer runs on openSUSE,
-Debian/Ubuntu, Fedora and Arch (different package manager, same everything
-else). A Windows host running `rtl_tcp.exe` is an alternative path documented
-in [setup/install-windows.md](setup/install-windows.md).
-
-## The ghost debunk
-
-The `ghost/` pipeline rebuilds three pieces of "paranormal investigation"
-equipment from first principles and measures what they actually do.
-
-**Spirit box:** an FM radio that sweeps stations at 150 ms per step with no
-squelch. Every "word" is a broadcast fragment. An RDS pre-pass labels each
-fragment with its source station. Add a 90 ms slapback delay and the choppy
-radio becomes a "creepy voice" — one knob on a delay plugin.
-
-**EMF meter:** a K-II responds to phone GSM bursts, PMR446 handhelds, mains
-wiring, and the camera. Its momentary button flickers the LEDs with no field at
-all if your thumb pressure is uneven.
-
-**Forensic findings on published video** (three episodes, 19 segments):
-
-- Bandwidth shelf at 633–973 Hz across 40 minutes. Normal camera audio reaches
-  16–20 kHz.
-- Chromaprint acoustic fingerprint reuse above 0.5 in 90–100% of segment pairs.
-  Live room audio does not share fingerprints across segments minutes apart.
-- The simplest explanation: a pre-recorded or looped source with very low
-  bandwidth, played in the room or mixed in post.
-
-Full write-up (Greek and English): [ghost/REPORT.md](ghost/REPORT.md),
-[ghost/REPORT_GR.md](ghost/REPORT_GR.md). Perception blind test:
-[ghost/blindtest/](ghost/blindtest/).
+Debian/Ubuntu, Fedora and Arch. A Windows host running `rtl_tcp.exe` is an
+alternative documented in [setup/install-windows.md](setup/install-windows.md).
 
 ## Pipelines
 
@@ -107,13 +77,43 @@ has its own database, its own Grafana folder, and its own README.
 | Pipeline | Status | What it does |
 |----------|--------|-------------|
 | [spectrum/](spectrum/) | running | Wideband 88–470 MHz scanner, peak and transient detection, signal classifier, hourly baselines |
-| [ghost/](ghost/) | validated | Spirit-box replica, RDS labels, forensic audio tools (delay, bandwidth, fingerprint, spectrogram, reverb, EMF sync) |
 | [acars/](acars/) | built | ACARS aircraft messages from Athens airport traffic |
 | [rds/](rds/) | built | RDS station metadata decoder (PS, PI, RadioText) |
 | [noaa/](noaa/) | partial | NOAA / Meteor weather-sat pass scheduler (recorder is a scaffold) |
 | [adsb/](adsb/) | companion | ADS-B aircraft tracking with a live map |
 | [ais/](ais/) | companion | AIS ship tracking (Piraeus / Saronic Gulf) |
 | [ism/](ism/) | companion | ISM 433 MHz sensor and device decoding |
+| [ghost/](ghost/) | validated | Spirit-box replica, RDS labels, forensic audio tools |
+
+## ghost/ — the paranormal-equipment pipeline
+
+This started as a weekend curiosity after encountering a Greek YouTube channel
+that uses "paranormal investigation" equipment with guests who do not appear to
+be in a position to evaluate the claims being made around them. The engineering
+question was simple enough to be worth answering properly: can every output these
+devices produce be reproduced from first principles on a home SDR station? Yes.
+
+The pipeline replicates and analyses three types of equipment: spirit boxes, EMF
+detectors, and portable speakers. These are commercially sold devices whose
+outputs are routinely presented as evidence of anomalous phenomena, but whose
+operating principles are straightforward and reproducible.
+
+A spirit box is a modified FM/AM receiver that sweeps broadcast frequencies
+without locking, producing fragments of station audio that listeners interpret as
+meaningful speech via pareidolia. The pipeline builds a software replica on the
+SDR station, tagging every audio fragment with its source station via RDS decode.
+Add a 90 ms slapback delay and the choppy radio becomes a "creepy voice" — one
+knob on a delay plugin.
+
+Forensic analysis of three published episodes (19 segments) found a bandwidth
+shelf at 633–973 Hz (normal camera audio reaches 16–20 kHz) and chromaprint
+fingerprint reuse above 0.5 in 90–100% of segment pairs. The simplest
+explanation: a pre-recorded or looped source with very low bandwidth.
+
+Full write-up: [ghost/REPORT.md](ghost/REPORT.md) (English),
+[ghost/REPORT_GR.md](ghost/REPORT_GR.md) (Greek). Perception blind test:
+[ghost/blindtest/](ghost/blindtest/). Pipeline details:
+[ghost/README.md](ghost/README.md).
 
 ## How it fits together
 

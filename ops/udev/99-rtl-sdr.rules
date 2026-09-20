@@ -16,6 +16,12 @@
 # On the native Tumbleweed host these rules are always in effect (Linux owns the USB bus).
 
 # The V4 is the spectrum scanner dongle (FM notch on).
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v4-01", SYMLINK+="rtl_sdr_v4", MODE="0666", GROUP="users"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v4-01", SYMLINK+="rtl_sdr_v4", MODE="0666", GROUP="__GROUP__"
 # The V3 is the ghost-pipeline dongle (bare, no FM notch).
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v3-01", SYMLINK+="rtl_sdr_v3", MODE="0666", GROUP="users"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{serial}=="v3-01", SYMLINK+="rtl_sdr_v3", MODE="0666", GROUP="__GROUP__"
+# Any other 0bda:2838 dongle, any serial: /dev/rtl_sdr_<serial> (e.g.
+# /dev/rtl_sdr_v4-01). Lets ops/install-host.sh address a dongle by serial
+# without a per-serial line here. __GROUP__ is substituted at install time by
+# ops/rtl-tcp/install.sh with the first of plugdev/users/dialout that exists
+# on the host (openSUSE has no plugdev; a missing group voids the whole rule).
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", SYMLINK+="rtl_sdr_$attr{serial}", MODE="0666", GROUP="__GROUP__"

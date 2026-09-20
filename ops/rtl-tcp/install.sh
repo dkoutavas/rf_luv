@@ -79,14 +79,28 @@ info "$WRAPPER_BIN, $WATCHDOG_BIN (+ legacy .py symlink), $RESET_BIN"
 
 step "Install udev rules"
 if [ -f "$UDEV_RULES_SRC" ]; then
-    sudo install -m 0644 "$UDEV_RULES_SRC" "$UDEV_RULES_DEST"
+    # The rule must name a group that exists on this distro. openSUSE has no
+    # plugdev, and a rule naming a missing group is silently voided (no MODE,
+    # no symlink) — the 2026-09-19 bring-up hit exactly that.
+    UDEV_GROUP=""
+    for g in plugdev users dialout; do
+        if getent group "$g" >/dev/null; then UDEV_GROUP="$g"; break; fi
+    done
+    [ -n "$UDEV_GROUP" ] || UDEV_GROUP=root
+    TMPU=$(mktemp)
+    sed "s/__GROUP__/$UDEV_GROUP/g" "$UDEV_RULES_SRC" > "$TMPU"
+    sudo install -m 0644 "$TMPU" "$UDEV_RULES_DEST"
+    rm -f "$TMPU"
     sudo udevadm control --reload
     sudo udevadm trigger --subsystem-match=usb
-    info "$UDEV_RULES_DEST (reload + trigger done)"
-    if [ -e /dev/rtl_sdr_v3 ] || [ -e /dev/rtl_sdr_v4 ]; then
-        info "/dev/rtl_sdr_v3 or /dev/rtl_sdr_v4 present — serials appear to match"
+    # udevadm trigger can re-attach the DVB driver on a live host; detach it
+    # again so rtl_tcp can claim the dongle (the blacklist only covers boot).
+    sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null || true
+    info "$UDEV_RULES_DEST (group=$UDEV_GROUP, reload + trigger done)"
+    if ls /dev/rtl_sdr_* >/dev/null 2>&1; then
+        info "symlinks: $(ls /dev/rtl_sdr_* | xargs -n1 basename | tr '\n' ' ')"
     else
-        warn "no /dev/rtl_sdr_* symlinks — dongle serials may not yet match (v3-01 / v4-01)"
+        warn "no /dev/rtl_sdr_* symlinks — dongle serials may still be the factory 00000001"
         warn "run 'rtl_test 2>&1 | grep SN' to confirm, and rtl_eeprom -s if needed"
     fi
 else

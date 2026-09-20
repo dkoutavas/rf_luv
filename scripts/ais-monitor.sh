@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# NOTE: this script uses direct USB (rtl_fm / rtl_433 / rtl_ais), not rtl_tcp.
+# On the two-dongle Omen, rtl-tcp@v3-01 holds the V3. Stop it first:
+#   systemctl --user stop rtl-tcp@v3-01
+# Or use SDR++ on :1235 instead (see QUICKREF.md).
+
 # AIS Ship Tracking — Piraeus / Saronic Gulf
 #
 # Decodes AIS (Automatic Identification System) messages from ships.

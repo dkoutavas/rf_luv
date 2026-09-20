@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spirit Box Blind Test</title>
+<style>
+:root { --bg: #1a1a2e; --fg: #e0e0e0; --accent: #e94560; --card: #16213e; --muted: #888; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+.sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem; max-width: 36rem; text-align: center; }
+#card { background: var(--card); border-radius: 12px; padding: 2rem; max-width: 28rem; width: 100%; text-align: center; }
+#progress { color: var(--muted); font-size: 0.8rem; margin-bottom: 1rem; }
+#prime-label { font-size: 1.1rem; min-height: 2.4rem; margin-bottom: 1rem; }
+.prime-word { color: var(--accent); font-size: 1.6rem; font-weight: 700; letter-spacing: 0.05em; }
+.no-prime { color: var(--muted); font-style: italic; }
+button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; margin: 0.3rem; }
+button:disabled { opacity: 0.4; cursor: default; }
+button:hover:not(:disabled) { filter: brightness(1.15); }
+#play-btn { font-size: 1.2rem; padding: 0.8rem 2rem; margin: 1rem 0; }
+.response { margin-top: 1.2rem; }
+.response label { display: block; margin-bottom: 0.4rem; font-size: 0.85rem; color: var(--muted); }
+.response input { width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid #333; background: #0a0a1a; color: var(--fg); font-size: 1rem; }
+#results { margin-top: 2rem; max-width: 36rem; width: 100%; }
+#results h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+#results table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+#results th, #results td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #222; text-align: left; }
+#results th { color: var(--accent); }
+.tag-primed { color: var(--accent); } .tag-blind { color: #4ecdc4; }
+</style>
+</head>
+<body>
+<h1>Spirit Box Blind Test</h1>
+<p class="sub">Listen to each clip and type what you hear. Some clips show a suggested word first; some do not. Your responses measure the priming effect.</p>
+
+<div id="card">
+  <div id="progress"></div>
+  <div id="prime-label"></div>
+  <button id="play-btn" disabled>▶ Play</button>
+  <div class="response">
+    <label for="answer">What did you hear?</label>
+    <input id="answer" type="text" placeholder="type what you heard, or 'nothing'" autocomplete="off">
+  </div>
+  <div style="margin-top:1rem">
+    <button id="next-btn" disabled>Next →</button>
+  </div>
+</div>
+
+<div id="results" style="display:none">
+  <h2>Results</h2>
+  <p id="summary"></p>
+  <table><thead><tr><th>#</th><th>Condition</th><th>Suggested</th><th>You heard</th><th>Match</th></tr></thead><tbody id="res-body"></tbody></table>
+  <p style="margin-top:1rem;font-size:0.8rem;color:var(--muted)">If the primed group matches the suggestion more often than the blind group, that is the priming effect — apophenia plus expectation, measured.</p>
+</div>
+
+<script>
+let clips = [], idx = 0, responses = [], audio = null;
+async function init() {
+  const r = await fetch('clips.json');
+  const data = await r.json();
+  // Shuffle so primed/blind are interleaved, not first-10/last-10.
+  clips = data.clips.sort(() => Math.random() - 0.5);
+  showClip();
+}
+function showClip() {
+  if (idx >= clips.length) { showResults(); return; }
+  const c = clips[idx];
+  document.getElementById('progress').textContent = `Clip ${idx+1} of ${clips.length}`;
+  const pl = document.getElementById('prime-label');
+  if (c.primed) {
+    pl.innerHTML = `<span class="no-prime">The suggested word is:</span><br><span class="prime-word">${c.suggested}</span>`;
+  } else {
+    pl.innerHTML = `<span class="no-prime">No suggestion — just listen.</span>`;
+  }
+  document.getElementById('answer').value = '';
+  document.getElementById('play-btn').disabled = false;
+  document.getElementById('next-btn').disabled = true;
+  audio = new Audio('clips/' + c.file);
+}
+document.getElementById('play-btn').addEventListener('click', function() {
+  this.disabled = true;
+  audio.play();
+  audio.onended = () => { document.getElementById('next-btn').disabled = false; document.getElementById('answer').focus(); };
+});
+document.getElementById('next-btn').addEventListener('click', function() {
+  const c = clips[idx];
+  const ans = document.getElementById('answer').value.trim().toLowerCase();
+  responses.push({ id: c.id, primed: c.primed, suggested: c.suggested, heard: ans, freq: c.freq_mhz });
+  idx++;
+  showClip();
+});
+document.getElementById('answer').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('next-btn').disabled) document.getElementById('next-btn').click();
+});
+function showResults() {
+  document.getElementById('card').style.display = 'none';
+  const res = document.getElementById('results');
+  res.style.display = 'block';
+  const tbody = document.getElementById('res-body');
+  let pMatches = 0, pTotal = 0, bTotal = 0;
+  responses.forEach((r, i) => {
+    const match = r.primed && r.suggested && r.heard && r.heard.includes(r.suggested.toLowerCase());
+    if (r.primed) { pTotal++; if (match) pMatches++; } else { bTotal++; }
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td class="${r.primed?'tag-primed':'tag-blind'}">${r.primed?'primed':'blind'}</td><td>${r.suggested||'—'}</td><td>${r.heard||'—'}</td><td>${r.primed?(match?'✓':''):''}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('summary').textContent = `Primed: ${pMatches}/${pTotal} matched the suggestion. Blind: ${bTotal} clips, no suggestion to match.`;
+}
+init();
+</script>
+</body>
+</html>

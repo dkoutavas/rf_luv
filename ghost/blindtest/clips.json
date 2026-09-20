@@ -1,0 +1,186 @@
+{
+  "source_wav": "20260919-163423.wav",
+  "fs": 48000,
+  "clips": [
+    {
+      "id": 0,
+      "file": "clip_00.wav",
+      "freq_mhz": 87.5,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "ναι"
+    },
+    {
+      "id": 1,
+      "file": "clip_01.wav",
+      "freq_mhz": 88.5,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "βοήθεια"
+    },
+    {
+      "id": 2,
+      "file": "clip_02.wav",
+      "freq_mhz": 89.6,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "εδώ"
+    },
+    {
+      "id": 3,
+      "file": "clip_03.wav",
+      "freq_mhz": 90.7,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "φύγε"
+    },
+    {
+      "id": 4,
+      "file": "clip_04.wav",
+      "freq_mhz": 91.8,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "ακούω"
+    },
+    {
+      "id": 5,
+      "file": "clip_05.wav",
+      "freq_mhz": 92.8,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "yes"
+    },
+    {
+      "id": 6,
+      "file": "clip_06.wav",
+      "freq_mhz": 93.9,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "help"
+    },
+    {
+      "id": 7,
+      "file": "clip_07.wav",
+      "freq_mhz": 95.0,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "here"
+    },
+    {
+      "id": 8,
+      "file": "clip_08.wav",
+      "freq_mhz": 96.1,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "leave"
+    },
+    {
+      "id": 9,
+      "file": "clip_09.wav",
+      "freq_mhz": 97.2,
+      "station": "",
+      "duration_ms": 150,
+      "primed": true,
+      "suggested": "listen"
+    },
+    {
+      "id": 10,
+      "file": "clip_10.wav",
+      "freq_mhz": 98.2,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 11,
+      "file": "clip_11.wav",
+      "freq_mhz": 99.3,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 12,
+      "file": "clip_12.wav",
+      "freq_mhz": 100.4,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 13,
+      "file": "clip_13.wav",
+      "freq_mhz": 101.5,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 14,
+      "file": "clip_14.wav",
+      "freq_mhz": 102.6,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 15,
+      "file": "clip_15.wav",
+      "freq_mhz": 103.6,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 16,
+      "file": "clip_16.wav",
+      "freq_mhz": 104.7,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 17,
+      "file": "clip_17.wav",
+      "freq_mhz": 105.8,
+      "station": "TEL 8 FM",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 18,
+      "file": "clip_18.wav",
+      "freq_mhz": 106.9,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    },
+    {
+      "id": 19,
+      "file": "clip_19.wav",
+      "freq_mhz": 108.0,
+      "station": "",
+      "duration_ms": 150,
+      "primed": false,
+      "suggested": ""
+    }
+  ]
+}

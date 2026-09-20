@@ -4,28 +4,28 @@
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
     {
       "id": 1,
       "type": "stat",
-      "title": "Spins logged",
+      "title": "Sessions",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "P_GHOST_CLICKHOUSE"
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 0
       },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT count() AS spins FROM ghost.spins",
+          "rawSql": "SELECT uniq(session_id) FROM ghost.spins",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",
@@ -42,21 +42,21 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Stations identified",
+      "title": "Total spins",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "P_GHOST_CLICKHOUSE"
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 4,
+        "x": 4,
         "y": 0
       },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT count() AS stations FROM ghost.stations",
+          "rawSql": "SELECT count() FROM ghost.spins",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",
@@ -72,22 +72,22 @@
     },
     {
       "id": 3,
-      "type": "table",
-      "title": "RDS stations (freq -> name)",
+      "type": "stat",
+      "title": "Stations decoded",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "P_GHOST_CLICKHOUSE"
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 4
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
       },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT round(freq_hz/1e6,1) AS mhz, ps, radiotext, pi_code, round(rssi_dbfs,1) AS rssi FROM ghost.stations ORDER BY freq_hz",
+          "rawSql": "SELECT count() FROM ghost.stations",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",
@@ -103,22 +103,22 @@
     },
     {
       "id": 4,
-      "type": "table",
-      "title": "Recent spins",
+      "type": "stat",
+      "title": "Forensic segments",
       "datasource": {
         "type": "grafana-clickhouse-datasource",
         "uid": "P_GHOST_CLICKHOUSE"
       },
       "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 12
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
       },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT timestamp, round(freq_hz/1e6,1) AS mhz, station_name AS station, round(rssi_dbfs,1) AS rssi, sweep_mode FROM ghost.spins ORDER BY timestamp DESC LIMIT 200",
+          "rawSql": "SELECT count() FROM ghost.segments",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",
@@ -134,6 +134,223 @@
     },
     {
       "id": 5,
+      "type": "stat",
+      "title": "Videos analysed",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT uniq(video_id) FROM ghost.segments",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Clips with reuse",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT countIf(fingerprint != '') FROM ghost.segments",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Sweep RSSI by frequency",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT timestamp AS time, round(freq_hz/1e6,1) AS mhz, rssi_dbfs FROM ghost.spins WHERE $__timeFilter(timestamp) ORDER BY timestamp",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Sweep clip fraction",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT timestamp AS time, clip_fraction FROM ghost.spins WHERE $__timeFilter(timestamp) AND clip_fraction > 0 ORDER BY timestamp",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "RDS stations (freq \u2192 name)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT round(freq_hz/1e6,1) AS mhz, format('0x{}', hex(pi_code)) AS pi, ps, radiotext, round(rssi_dbfs,1) AS rssi, session_id FROM ghost.stations ORDER BY freq_hz",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "barchart",
+      "title": "Station RSSI",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ps || ' (' || toString(round(freq_hz/1e6,1)) || ')' AS station, round(rssi_dbfs,1) AS rssi FROM ghost.stations WHERE ps != '' ORDER BY rssi_dbfs DESC",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Recent spins (labelled)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "P_GHOST_CLICKHOUSE"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT toString(timestamp) AS time, round(freq_hz/1e6,1) AS mhz, station_name, sweep_mode, round(rssi_dbfs,1) AS rssi, dwell_ms FROM ghost.spins WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 200",
+          "format": 1,
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "P_GHOST_CLICKHOUSE"
+          }
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
       "type": "table",
       "title": "Forensic segments",
       "datasource": {
@@ -142,14 +359,14 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 12,
+        "w": 24,
         "x": 0,
-        "y": 21
+        "y": 29
       },
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT analyzed_at, video_id, kind, delay_ms, upper_bw_hz, rt60_s, notes FROM ghost.segments ORDER BY analyzed_at DESC LIMIT 200",
+          "rawSql": "SELECT toString(analyzed_at) AS analyzed, video_id, kind, delay_ms, feedback, upper_bw_hz, rt60_s, if(fingerprint != '', '\u2713', '') AS fp, notes FROM ghost.segments ORDER BY analyzed_at DESC LIMIT 200",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",
@@ -164,7 +381,7 @@
       }
     }
   ],
-  "refresh": "",
+  "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
     "ghost"

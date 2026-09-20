@@ -999,22 +999,22 @@
         "name": "dongle",
         "label": "Dongle",
         "type": "custom",
-        "query": "v3-01,v4-01",
+        "query": "v4-01,v3-01",
         "current": {
           "selected": true,
-          "text": "v3-01",
-          "value": "v3-01"
+          "text": "v4-01",
+          "value": "v4-01"
         },
         "options": [
           {
             "selected": true,
-            "text": "v3-01",
-            "value": "v3-01"
+            "text": "v4-01",
+            "value": "v4-01"
           },
           {
             "selected": false,
-            "text": "v4-01",
-            "value": "v4-01"
+            "text": "v3-01",
+            "value": "v3-01"
           }
         ],
         "includeAll": false,

@@ -31,6 +31,19 @@ fi
 SERIAL="$1"
 shift
 
+# ── Fast path: explicit device index from the env file ───────────────
+# On a two-dongle host, librtlsdr hides claimed devices from enumeration,
+# so the rtl_eeprom probe below cannot find the second dongle once the
+# first is running. Setting RTL_TCP_DEVICE_INDEX in the per-dongle env
+# file (/etc/rtl-scanner/<serial>.env) bypasses the probe entirely.
+# The index is volatile (can change on replug/reboot), but on a systemd-
+# managed host both units restart together, and the DVB blacklist +
+# udev rule keep the enumeration stable across reboots.
+if [ -n "${RTL_TCP_DEVICE_INDEX:-}" ]; then
+    echo "rtl-tcp-by-serial: $SERIAL → index $RTL_TCP_DEVICE_INDEX (from RTL_TCP_DEVICE_INDEX, probe skipped)" >&2
+    exec rtl_tcp -d "$RTL_TCP_DEVICE_INDEX" "$@"
+fi
+
 # Enumerate by probing rtl_eeprom on each candidate index. rtl_eeprom reads
 # the EEPROM and exits — unlike `rtl_test` (no args), which enters an
 # indefinite sample loop and won't exit on SIGPIPE if it's not currently
@@ -103,4 +116,4 @@ fi
 # already authoritative — drop the second probe.
 
 echo "rtl-tcp-by-serial: $SERIAL → index $INDEX" >&2
-exec /usr/local/bin/rtl_tcp -d "$INDEX" "$@"
+exec rtl_tcp -d "$INDEX" "$@"

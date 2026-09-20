@@ -7,6 +7,16 @@ Seen live on 2026-04-18 after ~13 hours of runtime — only physical replug
 recovered. Unbind/rebind via /sys/bus/usb/drivers/usb is the software
 equivalent of replug, so the watchdog escalates to that on repeated failure.
 
+Client-skip rule: rtl_tcp serves one client at a time. If ANY peer has an
+ESTABLISHED connection on the rtl_tcp port, that client IS the health signal.
+Probing would kick it off (2026-09-20: 14 restarts in one SDR++ session).
+A hung SDR++ is noticed by the human; a starved scanner disconnects within
+its own 10 s timeout, leaving idle windows for the probe.
+
+Recovery requires two consecutive failed probes before acting. A single
+failure is usually rtl_tcp's own RestartSec window after a crash (2026-09-20:
+7x Connection refused on V4 during 10 s restart windows).
+
 Supports per-instance invocation via --serial / --unit so two dongles can
 have independent watchdogs without cross-bouncing each other. The USB-reset
 helper takes the same serial and unbinds only the matching device path.
@@ -85,52 +95,46 @@ def save_state(path: str, state):
         json.dump(state, f)
 
 
-def _hex_ip_is_loopback(hex_ip: str) -> bool:
-    """True if a hex-encoded IP from /proc/net/tcp{,6} is a loopback address.
+def has_active_client(port: int, proc_lines=None) -> bool:
+    """True if rtl_tcp's port has ANY ESTABLISHED connection (loopback included).
 
-    /proc/net/tcp stores IPv4 in little-endian hex; tcp6 stores IPv6 (and
-    IPv4-mapped IPv6) as 32 hex chars. Loopback covers 127.0.0.0/8, ::1, and
-    ::ffff:127.0.0.0/8.
-    """
-    if len(hex_ip) == 8:  # IPv4 (little-endian)
-        return int(hex_ip[6:8], 16) == 127
-    if len(hex_ip) == 32:  # IPv6
-        if hex_ip.upper() == "00000000000000000000000001000000":
-            return True  # ::1
-        if hex_ip[:24].upper() == "00000000000000000000FFFF":
-            return _hex_ip_is_loopback(hex_ip[24:])  # IPv4-mapped
-    return False
-
-
-def has_external_client(port: int) -> bool:
-    """True if rtl_tcp's port has an ESTABLISHED connection from a non-loopback peer.
-
-    rtl_tcp accepts a single client at a time; an active probe would kick whoever
-    is currently streaming. The scanner and watchdog connect via 127.0.0.1, so
-    a non-loopback peer means a real human listener (SDR++, SDR Console, etc.)
-    is on the line. If they're getting samples, rtl_tcp is healthy by proxy and
-    we skip the active probe to avoid disconnecting them every 30s.
+    rtl_tcp serves one client at a time; an active probe kicks the current
+    client off. On this host every consumer (SDR++, scanner, spiritbox) connects
+    from 127.0.0.1, so loopback peers are real clients, not infrastructure noise.
+    An established peer IS the health signal. proc_lines is an optional iterable
+    of /proc/net/tcp-format lines (for tests); when None, read the real files.
     """
     target_local = f"{port:04X}"
-    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
-        try:
-            with open(path) as f:
+
+    if proc_lines is not None:
+        sources = [proc_lines]
+    else:
+        sources = []
+        for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                f = open(path)
                 next(f)  # header
-                for line in f:
-                    parts = line.split()
-                    if len(parts) < 4:
-                        continue
-                    local_addr, rem_addr, state = parts[1], parts[2], parts[3]
-                    if state != "01":  # TCP_ESTABLISHED
-                        continue
-                    local_port_hex = local_addr.rsplit(":", 1)[-1]
-                    if local_port_hex.upper() != target_local:
-                        continue
-                    rem_ip_hex = rem_addr.rsplit(":", 1)[0]
-                    if not _hex_ip_is_loopback(rem_ip_hex):
-                        return True
-        except FileNotFoundError:
-            continue
+                sources.append(f)
+            except FileNotFoundError:
+                continue
+
+    try:
+        for source in sources:
+            for line in source:
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                local_addr, state = parts[1], parts[3]
+                if state != "01":  # TCP_ESTABLISHED
+                    continue
+                local_port_hex = local_addr.rsplit(":", 1)[-1]
+                if local_port_hex.upper() == target_local:
+                    return True
+    finally:
+        if proc_lines is None:
+            for source in sources:
+                if hasattr(source, "close"):
+                    source.close()
     return False
 
 
@@ -142,11 +146,14 @@ def probe(host: str, port: int):
     try:
         s.settimeout(GREETING_TIMEOUT)
         header = b""
-        while len(header) < 12:
-            chunk = s.recv(12 - len(header))
-            if not chunk:
-                return False, f"greeting truncated at {len(header)}B"
-            header += chunk
+        try:
+            while len(header) < 12:
+                chunk = s.recv(12 - len(header))
+                if not chunk:
+                    return False, f"greeting truncated at {len(header)}B"
+                header += chunk
+        except (socket.timeout, OSError) as e:
+            return False, f"greeting timeout after {GREETING_TIMEOUT}s"
         if header[:4] != b"RTL0":
             return False, f"bad greeting: {header[:4]!r}"
 
@@ -156,7 +163,7 @@ def probe(host: str, port: int):
         while time.time() - t0 < SAMPLE_WINDOW_S:
             try:
                 chunk = s.recv(65536)
-            except socket.timeout:
+            except (socket.timeout, OSError):
                 break
             if not chunk:
                 return False, f"EOF after {total}B"
@@ -218,16 +225,21 @@ def main():
     path = state_path(serial)
     state = load_state(path)
 
-    # Don't fight an active human listener. rtl_tcp is single-client, so an
-    # active probe would kick SDR++ / SDR Console off every 30s. If a
-    # non-loopback peer is established on the rtl_tcp port, it's a real
-    # client streaming samples — treat that as healthy by proxy and skip.
-    if has_external_client(port):
+    # rtl_tcp is single-client: if ANY peer has an ESTABLISHED connection,
+    # that client IS the health signal. Probing would kick it off.
+    if has_active_client(port):
         if state["consecutive_failures"] > 0:
-            log("external client connected; clearing failure counter", serial)
+            log("client connected; clearing failure counter", serial)
         state["consecutive_failures"] = 0
+        skips = state.get("client_skip_count", 0) + 1
+        state["client_skip_count"] = skips
+        # rate-limit the "skipping probe" log to once per 10 ticks (~5 min)
+        if skips % 10 == 1:
+            log("client connected; skipping probe", serial)
         save_state(path, state)
         return
+
+    state["client_skip_count"] = 0
 
     ok, reason = probe(host, port)
     if ok:
@@ -239,16 +251,13 @@ def main():
         fails = state["consecutive_failures"]
         log(f"unhealthy: {reason}", serial)
         if fails > MAX_CONSECUTIVE_FAILURES:
-            # Circuit breaker open — stop hammering the USB subsystem. Keep
-            # probing (counter stays incremented, keeps being reported) so
-            # a lucky recovery is still noticed and clears the counter above.
-            # Emit on every tick so the journal stays actionable — this is
-            # the alert we watch for.
             log(
                 f"CIRCUIT_BREAKER_OPEN fail #{fails} > {MAX_CONSECUTIVE_FAILURES}; "
                 f"skipping recovery (human intervention needed)",
                 serial,
             )
+        elif fails == 1:
+            log(f"unhealthy #1 ({reason}); waiting for confirmation", serial)
         else:
             recover(fails, serial, unit, state)
     save_state(path, state)

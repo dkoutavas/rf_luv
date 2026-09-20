@@ -46,15 +46,33 @@ spectrum-classifier-health.timer (5 min, classifier_health.py)
 ### SDR++ listening path
 
 SDR++ v1.2.1 installed, `rtl_tcp_source.so` present. Connect to V3 on
-`127.0.0.1:1235` for live listening while the scanner runs on V4 :1234. The
-watchdog detects non-loopback TCP clients and backs off. QUICKREF.md updated
-with the SDR++ path as primary; the stale `rtl_fm -d tcp:` syntax removed
-(does not work on rtl-sdr v2.0.3).
+`127.0.0.1:1235` for live listening while the scanner runs on V4 :1234.
+
+**Watchdog fix (same session, later).** The original `has_external_client()`
+only skipped non-loopback peers. SDR++, the scanner, and the spirit box all
+connect from 127.0.0.1, so the watchdog treated them as invisible.
+Result on 2026-09-20:
+- V3: 14 soft restarts, 5 watchdog crashes (`TimeoutError` in `probe()`)
+- V4: 7 soft restarts, 1 crash, 28 scanner reconnect retries
+
+Root cause: the watchdog probed every 30 s, kicked the current client off,
+then restarted rtl_tcp on the first failure. Stopping the unit by hand did
+not help because the watchdog timer resurrected it.
+
+Fix (branch `fix/watchdog-client-detection`):
+1. `has_external_client` replaced with `has_active_client`: any ESTABLISHED
+   peer (loopback included) skips the probe.
+2. `probe()` greeting loop now catches `socket.timeout` (no more crashes).
+3. First failed probe logs and waits; recovery starts at fail 2.
+4. `ops/rf-mode` script: `rf-mode listen` stops timer then unit, `rf-mode
+   scan` starts unit then timer. For direct-USB tools only.
+
+QUICKREF.md and all four `scripts/*.sh` caveats updated to use `rf-mode`.
 
 ### Shell scripts
 
 `scripts/{airband,ais,ism,satellite}*.sh` use direct USB, not rtl_tcp. A
-caveat block added to each: stop `rtl-tcp@v3-01` first, or use SDR++ instead.
+caveat block in each says to run `rf-mode listen` first, `rf-mode scan` after.
 
 ### What was not done
 
@@ -62,3 +80,5 @@ caveat block added to each: stop `rtl-tcp@v3-01` first, or use SDR++ instead.
 - Logging form test entry not written (need the browser).
 - `ops/install-trip-hardening.sh` not run (escalator, probes, notify).
   These are the remaining ops-layer installers from RESTORE.md step 8.
+- Scanner reconnect-per-sweep churn (28 restarts, 1 SIGABRT). Needs its own
+  evidence cycle.

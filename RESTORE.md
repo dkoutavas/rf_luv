@@ -182,8 +182,12 @@ docker exec clickhouse clickhouse-client --user spectrum \
 
 ## Step 8: the rest of the ops layer
 
-`install-host.sh` covers the dongles, the scanner and the backups. The
-alerting, probes and intelligence timers are separate installers:
+`install-host.sh` covers the dongles, the scanner, `rf-mode` and the backups.
+If any client is connected (loopback included), the watchdog skips its probe.
+SDR++ over RTL-TCP needs no mode switch. Use `rf-mode listen` and `rf-mode
+scan` only for direct-USB tools (`rtl_fm`, `rtl_433`, `rtl_eeprom`).
+
+The alerting, probes and intelligence timers are separate installers:
 
 ```bash
 bash ops/install-trip-hardening.sh        # escalator, freshness + signal-quality probes, notify, heartbeat

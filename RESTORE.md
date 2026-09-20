@@ -1,21 +1,23 @@
-# RESTORE: rebuild the rf_luv stack on the local host
+# RESTORE: rebuild the rf_luv stack on a Linux host
 
-How to bring the rf_luv stack up on the local **openSUSE Tumbleweed PC**, native
-(not WSL2, the HP Omen), from a fresh clone. The Omen now runs **two dongles**: the
-**V4** (`v4-01`, rtl_tcp :1234) for the spectrum scanner and the **V3** (`v3-01`,
-rtl_tcp :1235) for the `ghost/` pipeline. This runbook covers the V4 scanner path;
-the two-dongle / ghost bring-up detail is in [`ghost/HOSTPREP.md`](ghost/HOSTPREP.md). Written because the 2026-06 leap
-disk failure had no runbook and the recovery knowledge was scattered across
-CLAUDE.md, `spectrum/docs/dongle_identity.md`, and each `install.sh` header.
-This is the single ordered path. leap itself is retired (see CLAUDE.md); this
-rebuilds onto the local host, not leap.
+How to bring the rf_luv stack up on a native Linux host with one or two
+RTL-SDR dongles, from a fresh clone. The reference host is the HP Omen
+(openSUSE Tumbleweed, user `dio_nysi`, repo at `~/dev/rf_luv`): the **V4**
+(`v4-01`) runs the spectrum scanner on rtl_tcp :1234 with its FM bandstop on,
+and the **V3** (`v3-01`) is the `ghost/` pipeline dongle on rtl_tcp :1235 with
+no filter. One dongle works too: it becomes the scanner.
+
+Written because the 2026-06 leap disk failure had no runbook. The first
+two-dongle bring-up (2026-09-19/20) then showed the mechanical steps were
+spread over five documents and two installers. They now live in one script,
+`ops/install-host.sh`. This file is the manual for that script plus the
+physical steps it cannot do.
 
 > **Applying edits:** the reliability stack runs its **installed** copies, not
-> the repo files. `ops/*/install.sh` copies scripts into `/usr/local/bin` and
-> `/usr/local/sbin` and unit files into `~/.config/systemd/user/`. Editing a repo
-> `ops/*.py` or `ops/*.service` changes **nothing** on the running host until you
-> re-run that pipeline's `install.sh` (and `systemctl --user daemon-reload` for
-> unit changes). Re-run the relevant installer after any Stage 0 edit.
+> the repo files. Editing `ops/*.py`, `ops/*.sh` or `ops/*.service` changes
+> nothing on the host until you re-run `bash ops/install-host.sh ...`, which
+> re-runs each component installer. Unit-file changes also need
+> `systemctl --user daemon-reload`.
 
 ## What the repo restores vs what it does not
 
@@ -23,76 +25,55 @@ rebuilds onto the local host, not leap.
 |------------------------|-------------------------------------|
 | All ClickHouse schema (migrations + `migrate.py`) | All ClickHouse row data (Docker volumes) |
 | All Grafana datasources + dashboards (provisioned) | Ad-hoc UI-only dashboard edits |
-| All systemd units + helper binaries (`install.sh`) | `/var/log/rtl-recovery.log` failure history |
-| udev rules, sudoers, xrdp/tailscale config | Tuned values in gitignored `.env` files |
+| All systemd units + helper binaries (via `install-host.sh`) | `/var/log/rtl-recovery.log` failure history |
+| udev rules, sudoers, DVB blacklist | Tuned values in the gitignored `/etc/rtl-scanner/*.env` files |
 | Dongle EEPROM serials (stored on the dongle, not the disk) | |
 
-The data gap is what `ops/clickhouse-backup/` exists to close. **Going forward,
-if backups are running, Step 6 restores the data.** For the 2026-06 leap
-incident there were no backups; leap's `spectrum.scans` and the FM-bandstop A/B
-baseline are gone, and the local host starts with an empty ClickHouse. Step 0
-below is the only thing that could ever have salvaged them, and it applies only
-if leap's failed disk is still around to read.
+The data gap is what `ops/clickhouse-backup/` closes. If backups were running,
+step 7 restores the data. For the 2026-06 leap incident there were no backups.
 
 ---
 
-## Step 0: rescue data from leap's old disk (history / only if that disk survives)
+## Step 0: rescue data from leap's old disk (history only)
 
-**Skip this for a normal local setup — start at Step 1.** This step only applies
-if leap's failed disk is still readable and you want to attempt a salvage; the
-local rebuild does not depend on it. After consolidation all six databases lived
-in a **single** ClickHouse Docker named volume, `rf_luv_infra_ch-data` (the
-`ch-data` volume of compose project `rf_luv_infra`). If the old disk still mounts
-at all, copy it off read-only before wiping it.
+Skip this for a normal setup. It applies only if leap's failed disk is still
+readable. After consolidation all databases lived in one Docker named volume,
+`rf_luv_infra_ch-data`. If the old disk mounts, copy that volume off
+read-only before wiping it:
 
 ```bash
-# One shared volume now holds all six databases.
-#   rf_luv_infra_ch-data  (was: per-pipeline spectrum_clickhouse-data, acars_..., etc.)
-# Mount the old disk read-only (or boot a live USB), then:
 tar czf /mnt/rescue/rf_luv_infra_ch-data.tgz \
     -C /var/lib/docker/volumes/rf_luv_infra_ch-data/_data .
 ```
 
-A 2026-06-era disk may instead carry the *old* per-pipeline volumes
-(`spectrum_clickhouse-data`, `acars_clickhouse-data`, ...). If so, tar each one
-you find; they are imported into the new shared server per database, not by
-dropping the directory in place.
-
-Prioritise the spectrum data (months of scans + the one-shot FM-bandstop A/B
-baseline, which cannot be re-measured). If the disk will not read, use
-`ddrescue` to image the partition first, then loop-mount the image. If nothing
+A 2026-06-era disk may instead carry the old per-pipeline volumes
+(`spectrum_clickhouse-data`, `acars_clickhouse-data`, ...). Tar each one you
+find. If the disk will not read, image it with `ddrescue` first. If nothing
 reads, accept the loss and continue.
-
-To re-import a rescued shared volume on the new disk: stop the stack, extract the
-tgz back into `/var/lib/docker/volumes/rf_luv_infra_ch-data/_data`, start the
-stack. Then verify row counts before trusting it. (A clean logical restore via
-Step 6 is preferred when a real backup exists.)
 
 ---
 
-## Step 1: base OS and packages
+## Step 1: OS packages
 
-The local host is openSUSE Tumbleweed (WSL2), user `dio_nysi`, repo at
-`~/dev/rf_luv`. Tumbleweed's default `python3` is 3.13, which is what the
-pipelines and ops scripts run on (no separate `python311` needed — that was
-leap, where the distro `python3` was 3.6).
+`python3` must be 3.10 or newer with numpy. Pick your distro:
 
 ```bash
-# Docker + compose plugin
-sudo zypper install docker docker-compose
+# openSUSE Tumbleweed (the reference host)
+sudo zypper install rtl-sdr docker docker-compose python3-numpy
+# Debian / Ubuntu
+sudo apt install rtl-sdr docker.io docker-compose-v2 python3-numpy
+# Fedora
+sudo dnf install rtl-sdr docker docker-compose python3-numpy
+# Arch
+sudo pacman -S rtl-sdr docker docker-compose python-numpy
+
 sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"      # log out/in for group to take effect
-
-# RTL-SDR userland (python3 3.13 is already the Tumbleweed default)
-sudo zypper install rtl-sdr
-# rtl_tcp, rtl_test, rtl_eeprom must be in PATH (rtl-sdr package)
-
-# Optional CLI toolchain for ad-hoc experiments (not needed for the pipelines):
-#   bash setup/install-wsl.sh   (adapts to the local package set)
-
-# NOAA scheduler dependency (only if running noaa/):
-pip install --user orbit-predictor
+sudo usermod -aG docker "$USER"      # log out and in again
+# NOAA scheduler only:  pip install --user orbit-predictor
 ```
+
+`install-host.sh` checks for `rtl_tcp`, `rtl_eeprom`, `rtl_test`, `docker`
+and numpy and prints the matching install line if any is missing.
 
 ## Step 2: clone the repo
 
@@ -102,94 +83,110 @@ git clone <your-remote> rf_luv
 cd rf_luv
 ```
 
-## Step 3: dongle identity (EEPROM serials)
+## Step 3: dongle serials (physical, one dongle at a time)
 
-The serial->instance scheme is what makes the templated units reproducible.
-Serials live on the dongle hardware, so they survive a disk failure. The local
-host has one dongle; verify it still reports serial `v4-01` (a second V3, if you
-add one, should be `v3-01`):
+Every dongle ships with the factory serial `00000001`. Two dongles with the
+same serial cannot be told apart. Write a serial to each dongle **with only
+that dongle plugged in**:
 
 ```bash
-rtl_test 2>&1 | grep -i 'SN\|serial'
+# Only the V4 plugged in:
+rtl_eeprom -d 0 -s v4-01
+# Unplug the V4, wait 3 s, plug it back in.
+
+# Only the V3 plugged in:
+rtl_eeprom -d 0 -s v3-01
+# Unplug the V3, wait 3 s, plug it back in.
 ```
 
-If the dongle shows a different serial, rewrite it per
-`spectrum/docs/dongle_identity.md`:
+The EEPROM serial is re-read only on a real VBUS power cycle. A sysfs unbind
+or `rtl-usb-reset` is not enough. Verify with `rtl_test 2>&1 | grep SN`.
+`install-host.sh` refuses to continue while any dongle still reads `00000001`.
+
+If the DVB kernel driver holds the dongle (`usb_claim_interface error -6`),
+run `sudo modprobe -r dvb_usb_rtl28xxu` first. The installer blacklists it
+permanently in step 5.
+
+## Step 4: shared data layer
+
+Bring up ClickHouse, Grafana and the schema before the installer, because the
+first backup and the scanner both write into ClickHouse:
 
 ```bash
-rtl_eeprom -d <index> -s v4-01     # v3-01 for an optional second dongle
+docker network create rf_luv_net          # idempotent
+bash infra/up.sh                           # ClickHouse 8123/9000, Grafana 3000, logging-form 8084
 ```
 
-Gotcha (documented in that file): an EEPROM serial change needs a real VBUS
-power-cycle. A sysfs unbind/bind (`rtl-usb-reset.sh`) is NOT enough; the kernel
-keeps showing the old serial until a physical replug or reboot. On the local
-host the V4 (`v4-01`) is the scanner dongle; its FM notch is a removable inline
-SMA filter (screw it in for wideband scanning, unscrew it for FM-band work).
+The `ch-bootstrap` one-shot creates all eight databases (adsb, ais, ism,
+spectrum, acars, noaa, rds, ghost), their users, the schema and the Athens
+known-frequencies seed.
 
-## Step 4: host-side rtl_tcp reliability stack
+## Step 5: run the host installer
 
-Order matters. The rtl-tcp installer lays the foundation; it does NOT start
-anything (start is explicit).
+One command does the DVB blacklist, the udev rule (with a group that exists
+on your distro), the rtl_tcp wrapper and watchdog, the per-dongle env files
+with the live USB index, the systemd units, and the backup timer:
 
 ```bash
-bash ops/rtl-tcp/install.sh        # units + wrapper + watchdog + USB reset + udev + sudoers + linger
-bash ops/rtl-scanner/install.sh    # rtl-scanner@ template + env.*.example references
+# Two dongles (the reference layout):
+bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 \
+     --backup-dir /data/rf-clickhouse-backups
+
+# One dongle:
+bash ops/install-host.sh --scanner v4-01 --backup-dir /data/rf-clickhouse-backups
 ```
 
-Create the real per-dongle env files (gitignored, so not in the clone):
+Flags:
+- `--scanner SERIAL` the dongle for the spectrum scanner (rtl_tcp :1234). Required.
+- `--ghost SERIAL` the second dongle for the ghost pipeline (rtl_tcp :1235).
+- `--gain N` `SCAN_GAIN` for new env files. Default 12. Gain 20 clips on Athens FM and airband.
+- `--backup-dir DIR` daily ClickHouse snapshots go here. Put it on a different physical disk. On the Omen that is the second NVMe at `/data`.
+- `--dry-run` print every command that would change the host, change nothing.
+- `--verify-only` skip install, run the PASS/FAIL checks only.
+
+The script needs sudo, so run it in a terminal. It is idempotent. On a re-run
+it keeps a tuned env file and only refreshes `RTL_TCP_DEVICE_INDEX`. If you
+replug a dongle, the USB index can change: stop the units
+(`systemctl --user stop 'rtl-tcp@*'`) and re-run so it re-probes.
+
+Then confirm:
 
 ```bash
-# V4 is the local scanner dongle:
-sudo install -m 0644 /etc/rtl-scanner/v4-01.env.example /etc/rtl-scanner/v4-01.env
-sudo $EDITOR /etc/rtl-scanner/v4-01.env     # recalibrate gain/antenna for the local RF environment
-# Optional second V3 dongle only:
-# sudo install -m 0644 /etc/rtl-scanner/v3-01.env.example /etc/rtl-scanner/v3-01.env
-# sudo $EDITOR /etc/rtl-scanner/v3-01.env
+bash ops/install-host.sh --verify-only --scanner v4-01 --ghost v3-01 \
+     --backup-dir /data/rf-clickhouse-backups
 ```
 
-Bring up the V4 chain and confirm the udev symlink resolved:
+Every line must read PASS: `rtl-tcp@` active and listening per dongle, the
+watchdog timers, the `/dev/rtl_sdr_*` symlinks, the scanner unit, the DVB
+driver unloaded, fresh `spectrum.scans` rows, and a backup snapshot.
+
+## Step 6: antennas and the bandstop
+
+Screw the FM bandstop filter inline on the **scanner** dongle. Leave the ghost
+dongle bare (the spirit box needs the FM band open). Dipole arm lengths from
+the formula `arm_cm = 7125 / freq_MHz`: about 57 cm per arm for the wideband
+scanner, about 73 cm for FM work. The antenna table in `CLAUDE.md` has the
+rest.
+
+## Step 7: restore ClickHouse data (only if a backup exists)
+
+If snapshots exist on the backup disk, restore after step 4 so the schema is
+already there:
 
 ```bash
-ls -la /dev/rtl_sdr_v4 2>/dev/null
-systemctl --user enable --now rtl-tcp@v4-01 rtl-scanner@v4-01
-journalctl --user -u rtl-tcp@v4-01 -n 20
+bash ops/clickhouse-backup/restore.sh --db spectrum --latest
+bash ops/clickhouse-backup/restore.sh --db ghost --latest
+docker exec clickhouse clickhouse-client --user spectrum \
+  --password spectrum_local --query "SELECT count(), min(timestamp), max(timestamp) FROM spectrum.scans"
 ```
 
-Then install the unattended-ops layer (freshness + signal-quality probes, local
-desktop / ntfy notify, daily heartbeat, escalator, reset-failed safety net):
+## Step 8: the rest of the ops layer
+
+`install-host.sh` covers the dongles, the scanner and the backups. The
+alerting, probes and intelligence timers are separate installers:
 
 ```bash
-bash ops/install-trip-hardening.sh        # idempotent, one sudo prompt
-systemctl --user enable --now rtl-reset-failed.timer
-```
-
-## Step 5: bring up the shared data layer + pipelines
-
-The schema and the Athens known-frequencies seed apply automatically when the
-infra `ch-bootstrap` one-shot runs, recreating all six databases, their users
-and grants, and the provisioned Grafana dashboards and folders.
-
-```bash
-docker network create rf_luv_net          # idempotent; up.sh also creates it
-cd ~/dev/rf_luv && bash infra/up.sh        # shared ClickHouse 8123/9000 + Grafana 3000 + logging-form 8084
-# Rotating V4 decoders only if wanted:
-# bash pipeline.sh up adsb   (note: adsb CH historically ran on the Windows host)
-# bash pipeline.sh up ais
-# bash pipeline.sh up ism
-```
-
-Note: the spectrum scanner runs natively under systemd (Step 4), not in a
-container. It writes to the shared ClickHouse on `127.0.0.1:8123` (formerly the
-per-pipeline `:8126`). `bash infra/up.sh` brings up the single ClickHouse,
-Grafana, the listening-log nginx form (`:8084`), and the `ch-bootstrap`
-one-shot. The classifier, feature extractor, and health monitor run as the
-systemd timers installed below, not as containers. Dashboards land in the single
-Grafana on `:3000`, one folder per pipeline (see the CLAUDE.md "Port Allocation"
-section).
-
-Install the spectrum intelligence + feedback timers and the coordinator:
-
-```bash
+bash ops/install-trip-hardening.sh        # escalator, freshness + signal-quality probes, notify, heartbeat
 bash ops/spectrum-features/install.sh
 bash ops/spectrum-classifier/install.sh
 bash ops/spectrum-classifier-health/install.sh
@@ -197,95 +194,62 @@ bash ops/spectrum-acars-feedback/install.sh
 bash ops/rtl-coordinator/install.sh
 ```
 
-## Step 6: restore ClickHouse data (only if a backup exists)
+## Step 9: gitignored config
 
-If `ops/clickhouse-backup/` was running before the failure and snapshots are on
-off-host storage, restore after the stack is up (so migrations have created the
-schema):
+Only `*.example` files are in git. `install-host.sh` creates the first four.
+Recreate the rest by hand:
 
-```bash
-# Make the off-host snapshot location available, point the env at it:
-sudo $EDITOR /etc/rtl-scanner/clickhouse-backup.env   # set BACKUP_DIR
-# restore.sh targets the shared container via CH_CONTAINER=clickhouse
-bash ops/clickhouse-backup/restore.sh --db spectrum --latest
-bash ops/clickhouse-backup/restore.sh --db acars --latest
-# Verify against the single shared server:
-docker exec clickhouse clickhouse-client --user spectrum \
-  --password '<pw>' --query "SELECT count(), min(timestamp), max(timestamp) FROM spectrum.scans"
-```
+| Live file | Source | Created by |
+|-----------|--------|------------|
+| `/etc/rtl-scanner/v4-01.env`, `v3-01.env` | `ops/rtl-scanner/env.*.example` | `install-host.sh` (gain, port, index filled in) |
+| `/etc/rtl-scanner/escalator.env` | `ops/rtl-tcp/escalator.env.example` | `install-host.sh` (`SERIALS` filled in) |
+| `/etc/rtl-scanner/clickhouse-backup.env` | `ops/clickhouse-backup/clickhouse-backup.env.example` | `install-host.sh` (`BACKUP_DIR` uncommented) |
+| `/etc/rtl-scanner/notify.env` | `ops/notify/notify.env.example` | you. **Generate a new random `NTFY_TOPIC`**; the old one leaked into a committed doc |
+| `/etc/rtl-scanner/noaa-scheduler.env` | none | you, optional: RX lat/lon/alt |
+| `spectrum/.env` | `spectrum/.env.example` | you |
+| `acars/.env` | `acars/env.v4-01.example` | you (step 10) |
 
-leap's data had no backup and is gone, so on a fresh local host there is nothing
-to restore here — skip to Step 7 and start collecting clean, with backups on.
-
-## Step 7: turn ON backups before collecting new data
-
-So the next disk failure is not another total loss. Do this even if Step 6 had
-nothing to restore.
+## Step 10: optional pipelines
 
 ```bash
-bash ops/clickhouse-backup/install.sh
-sudo $EDITOR /etc/rtl-scanner/clickhouse-backup.env   # BACKUP_DIR must be OFF-HOST
-```
+# ACARS on the V4 (stops the scanner while it runs; see acars/DEPLOY.md):
+systemctl --user stop rtl-scanner@v4-01
+cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars
 
-See `ops/clickhouse-backup/README.md`. Confirm the first snapshot wrote a
-`MANIFEST.tsv` with non-zero row counts.
-
-## Step 8: recreate the other gitignored config
-
-Only `*.example` files are in git. Recreate the live ones:
-
-| Live file | Source | Action |
-|-----------|--------|--------|
-| `/etc/rtl-scanner/v4-01.env` | `ops/rtl-scanner/env.v4-01.example` | scanner dongle: copy + recalibrate gain/antenna for the local RF environment |
-| `/etc/rtl-scanner/v3-01.env` | `ops/rtl-scanner/env.v3-01.example` | only for an optional second V3 dongle |
-| `/etc/rtl-scanner/notify.env` | `ops/notify/notify.env.example` | **generate a NEW random NTFY_TOPIC** (old one leaked, see below) |
-| `/etc/rtl-scanner/clickhouse-backup.env` | `ops/clickhouse-backup/clickhouse-backup.env.example` | set BACKUP_DIR off-host |
-| `/etc/rtl-scanner/noaa-scheduler.env` | none (no example) | optional: RX lat/lon/alt for Polygono |
-| `spectrum/.env` | `spectrum/.env.example` | CH password + per-dongle metadata |
-| `acars/.env` | `acars/env.v4-01.example` | `cp` (Step 9) |
-
-Security: rotate the ntfy topic. The old value leaked into a committed doc
-(`spectrum/docs/session-handoff-20260429.md`), so anyone who read the repo can
-read and spoof alerts on it. Pick a new random topic, set it in
-`/etc/rtl-scanner/notify.env`, and scrub the old value from that doc.
-
-## Step 9: redeploy ACARS fresh
-
-ACARS deploys clean on the local V4 (its soak restarts from zero). Follow
-`acars/DEPLOY.md` end to end. In short:
-
-```bash
-systemctl --user stop rtl-scanner@v4-01.service     # hand the V4 to ACARS
-systemctl --user disable rtl-scanner@v4-01.service
-cd ~/dev/rf_luv/acars && cp env.v4-01.example .env
-cd ~/dev/rf_luv && bash pipeline.sh up acars        # against the always-on infra
-```
-
-## Step 10: optional services
-
-```bash
-bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder still a scaffold)
+bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffold)
 bash ops/remote-desktop/enable-xrdp.sh    # xrdp + icewm
-bash ops/remote-desktop/trust-tailscale-iface.sh
 ```
 
 ---
 
+## Known transients
+
+- **`rtl_tcp` can SIGABRT under reconnect churn.** The scanner reconnects on
+  every sweep. On 2026-09-20 the V4's `rtl_tcp` core-dumped once after 13
+  minutes and systemd restarted it in 11 s. The unit allows 100 restarts per
+  10 minutes and `rtl-reset-failed.timer` clears failure state every 5
+  minutes, so this self-heals. If the restart counter climbs, look at
+  `coredumpctl info rtl_tcp` and `journalctl --user -u rtl-tcp@v4-01`.
+- **`udevadm trigger` re-attaches the DVB driver** on a live host. Both
+  installers now run `modprobe -r dvb_usb_rtl28xxu` after the trigger.
+- **A loose dongle vanishes from `lsusb`.** Before debugging software, check
+  `lsusb | grep 2838` shows every dongle.
+
 ## Verification checklist
 
-- [ ] `lsusb | grep -i RTL` shows the V4 (and a V3 if you added one)
-- [ ] `/dev/rtl_sdr_v4` symlink exists (+ v3 if used)
-- [ ] `systemctl --user is-active rtl-tcp@v4-01 rtl-scanner@v4-01` both `active`
-- [ ] Grafana at :3000 renders the Spectrum folder, scans flowing (freshness probe not alerting)
-- [ ] `clickhouse-backup.timer` enabled, first snapshot has non-zero rows, BACKUP_DIR is off-host
-- [ ] ntfy topic rotated (or unset for a desktop-only setup); 09:00 UTC heartbeat fires
-- [ ] ACARS (if deployed): messages climbing during daytime LGAV traffic
+- [ ] `bash ops/install-host.sh --verify-only ...` prints all PASS
+- [ ] `lsusb | grep 2838` shows every dongle
+- [ ] Grafana at :3000 renders the Spectrum folder with fresh scans
+- [ ] `ls <backup-dir>/spectrum/latest` exists and `MANIFEST.tsv` has non-zero rows
+- [ ] ntfy topic rotated (or unset for a desktop-only setup)
+- [ ] ghost (if `--ghost`): `python3 ghost/spiritbox.py --mode forward --dwell-ms 150` writes a labelled WAV
 
 ## Reference
 
-- Install-order detail: each `ops/*/install.sh` header
+- Host installer: `ops/install-host.sh --help`
+- Component installers: each `ops/*/install.sh` header
 - Dongle serials: `spectrum/docs/dongle_identity.md`
-- Dongle cutover (V3/V4 swap): `spectrum/docs/dongle_cutover_runbook.md`
+- Ghost specifics: `ghost/HOSTPREP.md`, `ghost/docs/session-handoff-20260919.md`
 - ACARS deploy: `acars/DEPLOY.md`
 - Backups: `ops/clickhouse-backup/README.md`
 - Ports, dongle policy, reliability stack: `CLAUDE.md`

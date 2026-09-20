@@ -1,139 +1,174 @@
-# rf_luv: RTL-SDR Radio Lab
+# rf_luv — RTL-SDR Radio Lab
 
-Personal RTL-SDR Blog V4 exploration project, based in Athens, Greece. The repo started as a general-purpose SDR playground with pipelines for aircraft (ADS-B), ships (AIS), and ISM devices; it has since converged on the **spectrum scanner** as the primary, continuously-tested workload, with **ACARS** (aircraft messaging) as a second decoder and **NOAA** weather-sat scheduling partially built. The ADS-B/AIS/ISM stacks are kept as companion experiments. Each pipeline is documented in its own directory.
+A home radio lab on two USB software-defined radio dongles, based in Athens,
+Greece. The station runs a 24/7 spectrum scanner across 88–470 MHz, decodes
+aircraft messages and ship positions, schedules weather satellite passes, and
+monitors IoT sensors — all writing to a shared ClickHouse database with Grafana
+dashboards on localhost.
 
-> **Status (2026-09):** the target is one **local openSUSE Tumbleweed PC, native (not WSL2)** — the HP Omen laptop — with **two RTL-SDR Blog dongles**: a **V4** on rtl_tcp :1234 (spectrum scanner, FM notch on) and a **V3** on rtl_tcp :1235 (the `ghost/` pipeline, notch off). The old headless host `leap` went down in June 2026 with a failed disk and is retired for the near term; its ClickHouse data had no backup and is gone. **Stage 0 (single-host reset)** has merged to `main`; native Linux owns the USB bus directly, so the udev / USB-reset paths work as they did on leap. Code, schema, dashboards, and systemd units rebuild from this repo onto the local host; [`ops/clickhouse-backup/`](ops/clickhouse-backup/) must run off-host (the Omen has a second NVMe at `/data`) before new data accumulates. The ordered local restore runbook is in [`RESTORE.md`](RESTORE.md), the two-dongle bring-up is in [`ghost/HOSTPREP.md`](ghost/HOSTPREP.md), and the "Current Project State" section of [`CLAUDE.md`](CLAUDE.md) has the full picture.
+One of the pipelines (`ghost/`) rebuilds the equipment used in "paranormal
+investigation" content and measures what it actually does. That work is
+documented in its own [report](ghost/REPORT.md), but the project is the radio
+lab, not the debunk.
 
-## Quick start
+## What you can do with it
 
-The stack has two halves: `rtl_tcp` on the host that owns the USB dongle, and a Docker data layer (one shared ClickHouse + Grafana) plus the decoder you want, anywhere that can reach the dongle over TCP.
+- **Scan the spectrum.** Sweep 88–470 MHz every five minutes, detect peaks,
+  track transients, build hourly baselines.
+- **Decode aircraft messages.** ACARS from Athens airport traffic, with flight
+  and tail tracking.
+- **Track ships.** AIS positions from the Saronic Gulf and Piraeus.
+- **Schedule weather satellites.** NOAA and Meteor M2 pass predictions with TLE
+  refresh (recorder still a scaffold).
+- **Monitor IoT sensors.** ISM 433 MHz devices: weather stations, tire sensors,
+  doorbells.
+- **Replicate a spirit box.** Sweep the FM band, label every fragment with its
+  source station via RDS, and run forensic audio analysis on published video.
 
-1. **Clone + bootstrap** (one-time): `bash bootstrap.sh`: strips WSL metadata, marks scripts executable, inits git.
-2. **Shared data layer** (once): `docker network create rf_luv_net` then `bash infra/up.sh`. This starts the single ClickHouse (8123/9000) and Grafana (3000), and the `ch-bootstrap` one-shot creates all eight databases, users, and schema and loads the Athens known-frequencies seed automatically.
-3. **Host side (native Linux, one or two dongles)**: `bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups`. One command for the DVB blacklist, udev, the rtl_tcp units + watchdog, per-dongle env files, and daily backups; `--verify-only` prints a PASS/FAIL check. Full manual: [`RESTORE.md`](RESTORE.md). A Windows host running `rtl_tcp.exe` is an alternative, see [`setup/install-windows.md`](setup/install-windows.md).
-4. **Decoders**: the native systemd spectrum scanner on the V4 writes straight into the shared ClickHouse (no compose needed). Rotating decoders time-share the same V4 (via the coordinator) and are managed with `bash pipeline.sh up|down|rotate <pipe>` where `<pipe>` is `adsb`, `ais`, `ism`, or `acars`.
-5. **Dashboards**: <http://localhost:3000> (admin/admin); each pipeline has its own Grafana folder. First full spectrum sweep completes in ~4 minutes; airband sweeps every 60 s.
-6. **Antenna**: stock dipole, arms sized for the band of interest (see table below), vertical, outdoors if possible.
+## Where it runs
 
-For the ad-hoc CLI toolchain (`rtl_433`, `multimon-ng`, `gpredict`, etc.) on openSUSE: `bash setup/install-wsl.sh` (despite the name it is a plain zypper installer). Not required for the pipelines.
+One laptop in Athens (HP Omen, openSUSE Tumbleweed). Two RTL-SDR Blog USB
+dongles: a V4 with an FM bandstop filter for the scanner, and a V3 without one
+for FM-band work. Docker runs ClickHouse and Grafana on localhost. The radios
+run as systemd user services with a watchdog. Daily backups land on a second
+internal disk. Nothing is on the internet. GitHub hosts the code and sample
+captures only.
 
-## Architecture
+## Hardware (~115 EUR)
 
+| Item | What it does | Cost |
+|------|--------------|------|
+| RTL-SDR Blog V4 | Spectrum scanner (500 kHz – 1.7 GHz, 8-bit, 2 MS/s) | ~45 EUR |
+| RTL-SDR Blog V3 | FM / ghost / HF (same range + HF direct sampling) | ~35 EUR |
+| FM bandstop filter | Inline SMA, rejects 88–108 MHz on the scanner dongle | ~15 EUR |
+| Dipole antenna kit | Telescoping elements, magnetic base, SMA pigtail | ~20 EUR |
+
+Software: Python 3.10+, numpy, Docker, ClickHouse, Grafana. Everything else is
+standard library.
+
+## Get running
+
+Write your dongle serials first (see [RESTORE.md](RESTORE.md) step 3 — one
+dongle on the bus at a time, physical replug after each write). Then:
+
+```bash
+git clone https://github.com/dkoutavas/rf_luv.git && cd rf_luv
+docker network create rf_luv_net && bash infra/up.sh
+bash ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickhouse-backups
+# Two dongles:
+# bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups
 ```
-┌─────────────┐   USB    ┌──────────────────┐   TCP   ┌──────────────────┐   pipe   ┌──────────────────┐   HTTP   ┌──────────────┐
-│ RTL-SDR V4  │ ───────▶ │ rtl_tcp (host)   │ ──────▶ │ scanner.py       │ ──────▶ │ scan_ingest.py    │ ───────▶ │ ClickHouse   │
-│ (dongle)    │          │ systemd+watchdog │  :1234  │ (FFT, detection) │   JSON  │ (batch inserter)  │          │              │
-└─────────────┘          └──────────────────┘         └──────────────────┘         └──────────────────┘          └──────┬───────┘
-                                                                                                                          │
-                                                                                                                   Grafana :3000
-```
 
-The RTL-SDR is a USB device, so `rtl_tcp` runs on the host that physically owns the dongle and streams IQ samples over TCP. ClickHouse and Grafana are a single shared data layer (compose project `rf_luv_infra`); the scanner, ingest, and any rotating decoder attach to the same `rf_luv_net` network and write into the one ClickHouse. On the local host there is one V4 on `host.docker.internal:1234`; the scanner and any decoder time-share it through the coordinator, and the dongle is single-client so only one consumer holds it at a time.
+`install-host.sh` handles the DVB kernel blacklist, the udev rule, the rtl_tcp
+units and watchdog, per-dongle config files, and daily backups in one command.
+Run `--verify-only` to check everything passes. Open Grafana at
+<http://localhost:3000> (admin/admin). The first spectrum sweep completes in
+about four minutes.
 
-Host: the local Tumbleweed PC (WSL2), where `rtl_tcp` is wrapped by a layered reliability stack (built and proven on leap, now retired). The user-level **watchdog** in `ops/rtl-tcp/` handles the per-process "RTL0 greeting but zero samples" failure mode (30 s probe, soft restart → USB unbind/rebind, circuit-breaker at fail #10). A root-level **escalator** in `ops/rtl-tcp/rtl-tcp-escalator.py` picks up after the circuit breaker with the per-device + xHCI bounce + restart sequence; its `systemctl reboot` rung is disabled by default on WSL2 (a reboot bounces the VM, not the USB-owning Windows host). Two ClickHouse-level probes in `ops/spectrum-monitor/` cover failure modes the per-process watchdog can't see: a **freshness probe** watches `spectrum.scans` to catch downstream stalls (Docker, ingest, ClickHouse itself), and a **signal-quality probe** watches `spectrum.sweep_health.max_power` to catch RF-path failures where data flows but the scanner has gone deaf (antenna disconnect, loose connector, broken filter). Alerts fire to a local desktop popup (`notify-send`), or to [ntfy.sh](https://ntfy.sh) if a topic is set, via the helper in `ops/notify/`; a daily heartbeat confirms the alert pipe is alive. Install with `bash ops/install-trip-hardening.sh`.
+Full rebuild manual: [RESTORE.md](RESTORE.md). The installer runs on openSUSE,
+Debian/Ubuntu, Fedora and Arch. A Windows host running `rtl_tcp.exe` is an
+alternative documented in [setup/install-windows.md](setup/install-windows.md).
 
 ## Pipelines
 
-All pipelines share one ClickHouse (`127.0.0.1:8123` HTTP, `:9000` native) and one Grafana (`:3000`). Each pipeline gets its own ClickHouse **database** and its own Grafana **folder** rather than its own server. The old per-pipeline ports (8124-8128, 9001-9005, 3001-3005) are retired.
+All pipelines share one ClickHouse and one Grafana on localhost. Each pipeline
+has its own database, its own Grafana folder, and its own README.
 
-| Pipeline   | Status | Database | Grafana folder | Description |
-|------------|--------|----------|----------------|-------------|
-| `spectrum/`| **active**, primary | `spectrum` | Spectrum (default DS) | Wideband 88-470 MHz scanner, signal classifier, anomaly detection, baseline |
-| `acars/`   | deployed, soak interrupted | `acars` | ACARS | ACARS aircraft messaging on V4. Soak started 2026-05-02, redeploys fresh (see [`acars/DEPLOY.md`](acars/DEPLOY.md)) |
-| `noaa/`    | partial | `noaa` | NOAA | NOAA/Meteor pass scheduling + schema. Recorder is a scaffold; capture not implemented yet |
-| `adsb/`    | companion | `adsb` | ADS-B | ADS-B aircraft tracking (readsb + tar1090 :8080). Historically ran on the Windows host, not leap |
-| `ais/`     | companion | `ais` | AIS | AIS ship tracking (AIS-catcher). Built, not deployed |
-| `ism/`     | companion | `ism` | ISM | ISM 433 MHz device decoding (rtl_433). Built, not deployed |
-| `rds/`     | built | `rds` | RDS | RDS station metadata (PS/PI/RadioText) decoder on the V4, notch off |
-| `ghost/`   | new, built (core) | `ghost` | Ghost | Spirit-box replica + video forensics on the **V3** (:1235). Debunks paranormal gear; see [`ghost/README.md`](ghost/README.md) |
+| Pipeline | Status | What it does |
+|----------|--------|-------------|
+| [spectrum/](spectrum/) | running | Wideband 88–470 MHz scanner, peak and transient detection, signal classifier, hourly baselines |
+| [acars/](acars/) | built | ACARS aircraft messages from Athens airport traffic |
+| [rds/](rds/) | built | RDS station metadata decoder (PS, PI, RadioText) |
+| [noaa/](noaa/) | partial | NOAA / Meteor weather-sat pass scheduler (recorder is a scaffold) |
+| [adsb/](adsb/) | companion | ADS-B aircraft tracking with a live map |
+| [ais/](ais/) | companion | AIS ship tracking (Piraeus / Saronic Gulf) |
+| [ism/](ism/) | companion | ISM 433 MHz sensor and device decoding |
+| [ghost/](ghost/) | validated | Spirit-box replica, RDS labels, forensic audio tools |
 
-ClickHouse data for these databases is backed up off-host by [`ops/clickhouse-backup/`](ops/clickhouse-backup/) (daily logical snapshots). Deploy it and point `BACKUP_DIR` at off-host storage before collecting data you care about.
+## ghost/ — the paranormal-equipment pipeline
 
-## Custom Python
+This started as a weekend curiosity after encountering a Greek YouTube channel
+that uses "paranormal investigation" equipment with guests who do not appear to
+be in a position to evaluate the claims being made around them. The engineering
+question was simple enough to be worth answering properly: can every output these
+devices produce be reproduced from first principles on a home SDR station? Yes.
 
-The spectrum stack is intentionally dependency-light, numpy for DSP, stdlib for everything else, so each file is small and readable.
+The pipeline replicates and analyses three types of equipment: spirit boxes, EMF
+detectors, and portable speakers. These are commercially sold devices whose
+outputs are routinely presented as evidence of anomalous phenomena, but whose
+operating principles are straightforward and reproducible.
 
-- **[`spectrum/scanner.py`](spectrum/scanner.py)**: custom `rtl_tcp` FFT client. `rtl_power`, the usual tool for this job, only speaks direct USB and was replaced. Implements: multi-preset scheduler (full 88–470 MHz every ~5 min, airband 118–137 MHz every 60 s, picked by "most overdue"); Hann-windowed FFT with linear-domain averaging (N=8) to avoid dB-averaging bias on bursty signals; peak detection (prominence vs. ±5 neighbor bins); transient detection (Δ≥15 dB vs. previous full sweep); adaptive gain with floor on ADC clipping; per-sweep health metadata (clipping, duration, worst-case bin).
-- **[`spectrum/scan_ingest.py`](spectrum/scan_ingest.py)**: stdlib-only ClickHouse batch inserter. Reads JSON lines from the scanner, routes by message type (`bin` / `peak` / `event` / `health` / `run_start` / `run_update` / `run_end`) into the matching table, flushes on size or interval.
-- **[`spectrum/migrate.py`](spectrum/migrate.py)**: numbered-SQL migration runner, applied at container start before the scanner pipe opens. Migrations live in `spectrum/clickhouse/migrations/`.
-- **[`ops/rtl-tcp/rtl-tcp-watchdog.py`](ops/rtl-tcp/rtl-tcp-watchdog.py)**: 30 s systemd-timer watchdog. Connects to `rtl_tcp`, verifies the RTL0 greeting *and* ≥512 KB of actual IQ samples within 2 s. Escalation: restart the user unit → unbind/rebind the USB device. Stops at fail #10 (circuit breaker) so a stuck dongle can't trigger a USB-reset storm.
-- **[`ops/rtl-tcp/rtl-tcp-escalator.py`](ops/rtl-tcp/rtl-tcp-escalator.py)**: root-level 5 min systemd timer that picks up where the watchdog stops. After CB-open ≥10 min on the serial it runs the proven manual recipe (per-device USB reset → xHCI controller bounce → restart user unit). It can escalate to `systemctl reboot` after 3 unsuccessful unwedges in 24 h, but that rung is disabled by default on WSL2 (`REBOOT_ENABLED=0` — a reboot bounces the VM, not the USB-owning Windows host).
-- **[`ops/spectrum-monitor/freshness-probe.py`](ops/spectrum-monitor/freshness-probe.py)**: 5 min ClickHouse-level liveness check. Catches scanner / Docker / ClickHouse / ingest failures the per-process watchdog can't see. WARN >10 min stale, CRITICAL >25 min stale, per `dongle_id`.
-- **[`ops/spectrum-monitor/signal-quality-probe.py`](ops/spectrum-monitor/signal-quality-probe.py)**: 5 min RF-level liveness check. Catches "deaf scanner" failures: data still flows but every sweep reports near-noise-floor power (antenna disconnect, loose F-connector, broken filter). WARN max_power < -35 dBFS, CRITICAL < -40 dBFS over 30 min, per `dongle_id`.
-- **[`ops/notify/notify.py`](ops/notify/notify.py)**: stdlib notifier. Used by the escalator, freshness probe, signal-quality probe, and a daily heartbeat. On the local desk it pops a desktop notification (`notify-send`); if `NTFY_TOPIC` is set in `/etc/rtl-scanner/notify.env` it also POSTs to [ntfy.sh](https://ntfy.sh).
+A spirit box is a modified FM/AM receiver that sweeps broadcast frequencies
+without locking, producing fragments of station audio that listeners interpret as
+meaningful speech via pareidolia. The pipeline builds a software replica on the
+SDR station, tagging every audio fragment with its source station via RDS decode.
+Add a 90 ms slapback delay and the choppy radio becomes a "creepy voice" — one
+knob on a delay plugin.
 
-## Running the spectrum pipeline
+Forensic analysis of three published episodes (19 segments) found a bandwidth
+shelf at 633–973 Hz (normal camera audio reaches 16–20 kHz) and chromaprint
+fingerprint reuse above 0.5 in 90–100% of segment pairs. The simplest
+explanation: a pre-recorded or looped source with very low bandwidth.
 
-1. Host-side rtl_tcp: install the reliability stack with `bash ops/rtl-tcp/install.sh` (Linux host) or, on Windows, run `rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000`.
-2. Data layer (once): `docker network create rf_luv_net` then `bash infra/up.sh` (shared ClickHouse + Grafana, schema + seed auto-applied).
-3. Scanner: the local host runs `scanner.py` natively under systemd against the shared ClickHouse on `127.0.0.1:8123`. To run it in a container instead, use the spectrum overlay (see [`spectrum/README.md`](spectrum/README.md)).
-4. Dashboards: <http://localhost:3000> (admin/admin), Spectrum folder.
+Full write-up: [ghost/REPORT.md](ghost/REPORT.md) (English),
+[ghost/REPORT_GR.md](ghost/REPORT_GR.md) (Greek). Perception blind test:
+[ghost/blindtest/](ghost/blindtest/). Pipeline details:
+[ghost/README.md](ghost/README.md).
 
-Full per-platform setup, environment variables, and troubleshooting live in [`spectrum/README.md`](spectrum/README.md). Windows driver swap (Zadig) and SDR++ first-boot are in [`setup/install-windows.md`](setup/install-windows.md).
-
-## Dashboards & operator tools
-
-Grafana at `:3000` (Spectrum folder) ships with auto-provisioned dashboards: current power spectrum, known-frequency traces, detected peaks, transient events, airband activity, anomaly detection vs. hourly baseline, and a **Listening Playbook** dashboard with an embedded HTML form (served by the shared `logging-form` nginx on `:8084`) that writes operator notes directly into `spectrum.listening_log`.
-
-Two helper scripts query ClickHouse over HTTP:
-- `spectrum/export-data.sh`: export scan data to CSV/markdown reports (see `spectrum/exports/`).
-- `spectrum/investigate-freqs.sh`: generate an investigation checklist from recently detected peaks.
-
-## Repo layout
+## How it fits together
 
 ```
-infra/             # shared data layer: one ClickHouse + Grafana + logging-form + ch-bootstrap
-  compose.yml        # compose project rf_luv_infra (8123/9000/3000/8084)
-  up.sh              # bring up the data layer (creates rf_luv_net if absent)
-  bootstrap.sh       # creates 6 dbs/users + grants, applies schema + Athens seed
-  grafana/           # 6 datasources + 6 folders, one per pipeline
-pipeline.sh        # bring rotating V4 decoders up/down/rotate: pipeline.sh <action> <pipe>
-spectrum/          # primary pipeline: scanner, ingest, intelligence, migrations
-  scanner.py         # rtl_tcp FFT client (custom, replaces rtl_power)
-  scan_ingest.py     # JSON to ClickHouse batch inserter
-  coordinator.py     # flock dongle lock (wired into scanner.py)
-  classifier.py      # signal classifier (systemd timer, every 5 min)
-  feature_extractor.py  # duty/burst/harmonic features feeding the classifier
-  classifier_health.py  # classifier regression sentinel
-  acars_feedback.py  # bridges acars.messages into spectrum.listening_log over HTTP
-  migrate.py         # numbered-SQL migration runner
-  clickhouse/        # init.sql + migrations/ + seeds/ (applied by infra ch-bootstrap)
-  compose.overlay.yml   # optional containerized scanner (native systemd is the norm)
-  logging/           # operator listening-log HTML form (served by infra logging-form :8084)
-  docs/              # session handoffs, briefings, analysis reports
-acars/             # ACARS aircraft messaging (deployed on V4; see DEPLOY.md)
-noaa/              # NOAA/Meteor pass scheduling (recorder is a scaffold)
-adsb/ ais/ ism/    # companion pipelines (each a compose.overlay.yml decoder)
-ops/install-host.sh  # one-shot host onboarding (one or two dongles): DVB, udev, units, env, backups
-ops/rtl-tcp/       # host-side rtl_tcp reliability: systemd unit, watchdog, escalator, USB reset
-ops/rtl-coordinator/   # installs the flock dongle coordinator
-ops/spectrum-monitor/  # ClickHouse freshness + signal-quality probes
-ops/spectrum-classifier/ ops/spectrum-features/ ops/spectrum-classifier-health/  # intelligence timers
-ops/spectrum-acars-feedback/  # hourly ACARS-to-classifier feedback timer
-ops/noaa-pass-scheduler/  # NOAA scheduler + TLE refresh timers
-ops/clickhouse-backup/    # daily off-host logical ClickHouse backups (deploy this)
-ops/notify/        # ntfy.sh push helper + daily heartbeat
-ops/remote-desktop/  # xrdp + tailscale remote-access setup
-ops/install-trip-hardening.sh  # idempotent installer for the unattended-ops layer
-scripts/           # one-shot CLI helpers (airband, ISM, AIS, satellite passes)
-setup/             # openSUSE CLI toolchain installer and the optional Windows-host guide
-notes/             # signal identification logs
-recordings/        # IQ captures, scan CSVs, decoded images
-CLAUDE.md          # full project context (hardware, RF environment, conventions, state)
-RESTORE.md         # bare-metal rebuild runbook (clone, install order, data restore)
-QUICKREF.md        # live-operation cheat sheet
+ USB dongles          rtl_tcp (systemd)         Python (numpy + stdlib)       Docker
+┌───────────┐        ┌────────────────┐        ┌─────────────────────┐      ┌────────────┐
+│ V4 dongle │──USB──▶│ :1234 (scanner)│──TCP──▶│ scanner.py → ingest │─HTTP─▶│ ClickHouse │
+│ (notch on)│        └────────────────┘        └─────────────────────┘      │ (8 dbs)    │
+│           │                                                                │            │
+│ V3 dongle │──USB──▶│ :1235 (ghost)  │──TCP──▶│ spiritbox.py → WAV  │─HTTP─▶│            │
+│ (no notch)│        └────────────────┘        └─────────────────────┘      └─────┬──────┘
+└───────────┘                                                                      │
+                                                                              Grafana :3000
 ```
+
+The scanner reconnects to rtl_tcp on every sweep to flush stale TCP buffers.
+Each dongle is single-client, so only one consumer holds it at a time. On the
+V4, rotating decoders (ACARS, ADS-B, AIS, ISM, RDS) time-share with the scanner
+through a flock-based coordinator. The V3 is held by the ghost pipeline for the
+length of a session.
+
+A layered reliability stack keeps the scanner running unattended: a 30-second
+watchdog, a root-level escalator past the circuit breaker (USB reset, xHCI
+bounce), ClickHouse freshness and signal-quality probes, and ntfy.sh phone
+alerts. Details: [CLAUDE.md](CLAUDE.md) → Reliability Stack.
 
 ## Antenna quick reference
 
-Arm length formula: **arm_cm = 7125 / freq_MHz** (quarter wavelength per dipole arm).
+Quarter-wave arm length: **arm (cm) = 7125 / frequency (MHz)**.
 
-| Target          | Frequency  | Dipole arm | Notes                         |
-|-----------------|------------|------------|-------------------------------|
-| FM Radio        | ~100 MHz   | 75 cm      | Indoor, vertical              |
-| NOAA Satellites | ~137 MHz   | 53 cm      | Patio, V-dipole 120°          |
-| AIS Ships       | ~162 MHz   | 45 cm      | Window toward Piraeus         |
-| ADS-B Planes    | 1090 MHz   | 6.5 cm     | Window/patio, vertical        |
-| HF / Shortwave  | 3–30 MHz   | long wire  | 10–20 m wire, direct sampling |
+| Band | Frequency | Arm length | Notes |
+|------|-----------|------------|-------|
+| FM broadcast | ~100 MHz | 75 cm | Indoor, vertical |
+| NOAA satellites | ~137 MHz | 53 cm | Patio, V-dipole at 120° |
+| AIS ships | ~162 MHz | 45 cm | Window toward Piraeus |
+| ADS-B aircraft | 1090 MHz | 6.5 cm | Window or patio, vertical |
+| HF / shortwave | 3–30 MHz | long wire | 10–20 m, direct sampling mode |
 
-Leap's reference deployment was a stock dipole on a rooftop tripod, 57 cm arms, gain floor 2 dB with adaptive reduction on clipping. On the local desk, put the dipole at the window (see the indoor/outdoor table in [`CLAUDE.md`](CLAUDE.md)); recalibrate gain for the local RF environment.
+Athens note: FM transmitters on Lycabettus and Hymettus are strong enough to
+overload the dongle above gain 12. Use the FM bandstop filter on the scanner
+dongle and start with low gain.
+
+## Reference
+
+| Document | What it covers |
+|----------|---------------|
+| [RESTORE.md](RESTORE.md) | Full rebuild from a fresh clone (packages, serials, installer, backups) |
+| [QUICKREF.md](QUICKREF.md) | Live-operation cheat sheet (frequencies, commands, troubleshooting) |
+| [CLAUDE.md](CLAUDE.md) | Hardware, RF environment, coding conventions, pipeline architecture, reliability stack |
+| [ghost/REPORT.md](ghost/REPORT.md) | Mechanism write-up: how the equipment works and what the forensics found |
+| [spectrum/README.md](spectrum/README.md) | Scanner setup, DSP pipeline, batch jobs, configuration |
+
+## Legal
+
+Listening to radio is legal in Greece and across the EU. This project does not
+decode encrypted content (TETRA and digital voice are excluded). RDS is public
+broadcast metadata. No transmission is made. Forensic analysis runs on publicly
+available video only.

@@ -1,6 +1,6 @@
 # infra: shared rf_luv data layer
 
-This directory is the consolidation of what used to be six separate
+This directory is the consolidation of what used to be eight separate
 ClickHouse + Grafana stacks (one per pipeline, on ports 8123-8128 / 9001-9005 /
 3000-3005) into **one** always-on data layer. The rotating decoder pipelines now
 attach to it instead of carrying their own database.
@@ -30,16 +30,16 @@ ClickHouse ports published now; the old per-pipeline ports are retired.
 | Service | Image | Host port | Role |
 |---|---|---|---|
 | clickhouse | `clickhouse/clickhouse-server:24.3-alpine` | 8123 (HTTP), 9000 (native) | the one database server |
-| grafana | `grafana/grafana:11.1.0` | 3000 | all six dashboards |
+| grafana | `grafana/grafana:11.1.0` | 3000 | all eight dashboards |
 | logging-form | `nginx:1.27-alpine` | 8084 | the spectrum logging form |
 | ch-bootstrap | built from `Dockerfile.bootstrap` | (none, one-shot) | creates identities + schema |
 
 ## Identities and the cross-grant
 
-One server hosts six databases. Each pipeline keeps its own database and its own
+One server hosts eight databases. Each pipeline keeps its own database and its own
 least-privilege user, created by `clickhouse/bootstrap.sql` (PHASE 1):
 
-- six databases + six users; **user name == db name**, **password ==
+- eight databases + eight users; **user name == db name**, **password ==
   `<db>_local`**, `GRANT ALL ON <db>.*`. This is the same credential convention
   every pipeline's config already defaults to, so nothing downstream changes.
 - one extra cross-grant: `GRANT SELECT ON acars.* TO spectrum`, so the
@@ -133,7 +133,7 @@ the two above.
 
 ## Backups: do this before collecting new data
 
-All six databases now share one `ch-data` volume on one disk. The 2026-06 leap
+All eight databases now share one `ch-data` volume on one disk. The 2026-06 leap
 disk failure is the cautionary tale: months of data, zero backups, total loss.
 This consolidation makes that single point of failure more concentrated, not
 less. **Strongly recommended** (not a hard gate): deploy `ops/clickhouse-backup`

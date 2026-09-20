@@ -21,8 +21,9 @@ SDR++ connects to the V3 over TCP while the scanner keeps running on the V4.
 4. Click **Start**
 5. Tune to 99.6 MHz (Kosmos FM), mode WFM → confirm audio
 
-The watchdog knows SDR++ is connected (it detects non-loopback TCP clients) and
-will not restart the V3's rtl_tcp while you are listening.
+The watchdog detects any established TCP client (loopback included) and skips
+its probe while you are listening. No mode switch is needed for SDR++ over
+RTL-TCP.
 
 Use `notes/listening-playbook.md` for what to expect at each frequency. Log
 findings via the form at http://localhost:8084 (writes to
@@ -48,38 +49,37 @@ journalctl --user -u rtl-scanner@v4-01 -f     # live log
 # Full 88–470 MHz sweep every ~5 min, airband every 60s
 ```
 
-### Quick one-shot spectrum scan (V3, stop rtl_tcp first)
+### Quick one-shot spectrum scan (V3, free the dongle first)
 ```bash
-systemctl --user stop rtl-tcp@v3-01           # free the V3
+rf-mode listen v3-01                          # free the V3
 rtl_power -f 80M:500M:10k -i 10 -g 12 -e 300 -d 0 scan.csv
-systemctl --user start rtl-tcp@v3-01          # give it back
+rf-mode scan v3-01                            # give it back
 ```
 
 ### Listen to FM (via SDR++, not rtl_fm)
 
 SDR++ is the right tool. `rtl_fm` cannot use `rtl_tcp` on rtl-sdr v2.0.3 (the
 `-d tcp:` syntax is a keenerd fork feature not present in mainline). Use SDR++
-on :1235 (V3) or stop rtl_tcp and use `rtl_fm` directly:
+on :1235 (V3) or free the dongle with `rf-mode` and use `rtl_fm` directly:
 
 ```bash
-# Only if rtl_tcp is stopped on the V3:
-systemctl --user stop rtl-tcp@v3-01
+rf-mode listen v3-01
 rtl_fm -M wfm -f 99.6M -s 200000 -r 48000 -d 0 - | aplay -r 48000 -f S16_LE
-systemctl --user start rtl-tcp@v3-01
+rf-mode scan v3-01
 ```
 
 ### Shell scripts (airband, AIS, ISM, satellite)
 
 The scripts in `scripts/` use direct USB via `rtl_fm` / `rtl_433` / `rtl_ais`.
-They need the V3's rtl_tcp stopped first:
+Free the dongle with `rf-mode` first:
 
 ```bash
-systemctl --user stop rtl-tcp@v3-01
+rf-mode listen v3-01
 bash scripts/airband-listen.sh approach       # Athens Approach 118.575 AM
 bash scripts/ais-monitor.sh                   # AIS ships 161.975/162.025
 bash scripts/ism-monitor.sh                   # ISM 433 MHz sensors
 bash scripts/satellite-pass.sh noaa19         # NOAA 19 APT (patio, V-dipole)
-systemctl --user start rtl-tcp@v3-01          # give it back when done
+rf-mode scan v3-01                            # give it back when done
 ```
 
 ### Decode pagers (POCSAG, stop rtl_tcp first)
@@ -94,22 +94,30 @@ rtl_sdr -f 137.1M -s 2048000 -g 12 -d 0 -n 20480000 noaa_iq.raw   # ~10 sec
 
 ## SDR++ direct sampling (HF / shortwave)
 
-1. Source → RTL-SDR (not RTL-TCP, needs direct USB — stop rtl_tcp first)
-2. Direct Sampling → Q-branch
-3. Sample rate: 2.048 MHz (view window 0–1 MHz)
-4. Tune to target:
+1. Source: RTL-SDR (not RTL-TCP, needs direct USB, run `rf-mode listen` first)
+2. Direct Sampling, select Q-branch
+3. Sample rate: 2.048 MHz (view window 0 to 1 MHz)
+4. Tune to a frequency:
    - UVB-76 "The Buzzer": 4.625 MHz
    - BBC World Service: 9.410 MHz
    - Voice of Greece: 9.420 / 9.935 MHz
    - WWV time signal: 10.000 MHz
 5. Demod: USB for SSB voice, AM for broadcast
-6. Best after sunset (20:00–04:00 local), needs a long wire antenna (10–20 m)
+6. Best after sunset (20:00 to 04:00 local), needs a long wire antenna (10 to 20 m)
 
 ## Gain
 
-Validated at Polygono: **gain 12** on both dongles. Gain 20 clips on strong
+Tested at Polygono: **gain 12** on both dongles. Gain 20 clips on strong
 Athens FM and airband. Start low, raise by 5 dB. Ghost copies of strong signals
 at odd frequencies = gain too high (intermodulation from the 8-bit ADC).
+
+Direct-USB SDR++ on V3: the saved profile has gain 0 (`rtl_sdr_config.json`).
+Set gain to 12 or higher, otherwise the waterfall is empty.
+
+## Waterfall display
+
+A solid-color waterfall does not mean no signal. Drag the **Min/Max** sliders
+on the waterfall color bar to match the noise floor and peak levels.
 
 ## Antenna arm lengths (dipole, per arm)
 
@@ -151,5 +159,5 @@ UVB-76 (HF)       4.625 MHz        Number station (direct sampling)
 - **`usb_claim_interface error -6`**: DVB driver or another rtl_tcp holds the dongle
 - **rtl_tcp connection refused**: `systemctl --user is-active rtl-tcp@v4-01` and `ss -tlnp | grep 1234`
 - **Dongle visible in `lsusb` but not `rtl_test`**: another process holds it (librtlsdr hides claimed devices)
-- **Shell scripts fail**: stop `rtl-tcp@v3-01` first — the scripts use direct USB
-- **SDR++ cannot connect**: check port (V3 = 1235, V4 = 1234) and that rtl_tcp is running
+- **Shell scripts fail**: run `rf-mode listen` first because the scripts use direct USB
+- **SDR++ cannot connect**: make sure that the port is correct (V3 = 1235, V4 = 1234) and that rtl_tcp is running

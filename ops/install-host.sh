@@ -150,6 +150,8 @@ component_installers() {
     run bash "$REPO/ops/rtl-tcp/install.sh"
     step "ops/rtl-scanner/install.sh (scanner template unit)"
     run bash "$REPO/ops/rtl-scanner/install.sh"
+    step "rf-mode (dongle mode switcher)"
+    run sudo install -m 0755 "$REPO/ops/rf-mode" /usr/local/bin/rf-mode
 }
 
 # ── 4. per-dongle env files ──────────────────────────────────────────────────

@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# rf-mode — switch dongles between scan mode (systemd-managed) and listen mode
+# (direct USB access for rtl_fm, SDR++ direct-USB, rtl_433, etc.).
+#
+# Usage:
+#   rf-mode status                  show per-serial state (read-only)
+#   rf-mode listen [SERIAL]         free a dongle for direct USB access
+#   rf-mode scan [SERIAL|all]       return a dongle to systemd management
+#
+# The scanner serial is auto-detected: whichever serial has rtl-scanner@
+# enabled. rf-mode listen refuses the scanner serial unless --force is given.
+#
+# Rule learned 2026-09-20: stop the watchdog timer BEFORE the unit, start
+# the unit BEFORE the timer. Otherwise the watchdog resurrects what you stopped.
+set -euo pipefail
+
+ENV_DIR="/etc/rtl-scanner"
+
+die()  { echo "rf-mode: $*" >&2; exit 1; }
+info() { echo "rf-mode: $*"; }
+
+# Discover serials from env files (v3-01.env, v4-01.env, etc.)
+discover_serials() {
+    local serials=()
+    for f in "$ENV_DIR"/*.env; do
+        [ -f "$f" ] || continue
+        local base
+        base="$(basename "$f" .env)"
+        # skip non-serial env files
+        case "$base" in
+            clickhouse-backup|escalator|notify|*scheduler*) continue ;;
+        esac
+        serials+=("$base")
+    done
+    echo "${serials[@]}"
+}
+
+# Check if a serial is the scanner (rtl-scanner@ enabled)
+is_scanner() {
+    systemctl --user is-enabled "rtl-scanner@${1}.service" &>/dev/null
+}
+
+# Read port from env file
+get_port() {
+    local serial="$1"
+    local envfile="$ENV_DIR/${serial}.env"
+    [ -f "$envfile" ] || die "no env file: $envfile"
+    grep -E '^RTL_TCP_PORT=' "$envfile" | cut -d= -f2 | tr -d ' '
+}
+
+# Read device index from env file
+get_index() {
+    local serial="$1"
+    local envfile="$ENV_DIR/${serial}.env"
+    grep -E '^RTL_TCP_DEVICE_INDEX=' "$envfile" 2>/dev/null | cut -d= -f2 | tr -d ' '
+}
+
+unit_active()  { systemctl --user is-active  "rtl-tcp@${1}.service" &>/dev/null; }
+timer_active() { systemctl --user is-active  "rtl-tcp-watchdog@${1}.timer" &>/dev/null; }
+
+cmd_status() {
+    local serials
+    read -ra serials <<< "$(discover_serials)"
+    [ ${#serials[@]} -gt 0 ] || die "no serials found in $ENV_DIR"
+
+    for serial in "${serials[@]}"; do
+        local port role unit_state timer_state clients
+        port="$(get_port "$serial")"
+        if is_scanner "$serial"; then role="scanner"; else role="free"; fi
+        if unit_active "$serial"; then unit_state="active"; else unit_state="inactive"; fi
+        if timer_active "$serial"; then timer_state="active"; else timer_state="inactive"; fi
+        clients="$(ss -tn state established "( sport = :${port} )" 2>/dev/null | tail -n +2 | wc -l)"
+        echo "$serial  port=$port  role=$role  unit=$unit_state  watchdog=$timer_state  clients=$clients"
+    done
+
+    # scanner and spectrum timers
+    echo ""
+    for serial in "${serials[@]}"; do
+        if is_scanner "$serial"; then
+            local scanner_state
+            if systemctl --user is-active "rtl-scanner@${serial}.service" &>/dev/null; then
+                scanner_state="active"
+            else
+                scanner_state="inactive"
+            fi
+            echo "rtl-scanner@${serial}: $scanner_state"
+        fi
+    done
+    for timer in spectrum-features spectrum-classifier spectrum-classifier-health; do
+        local ts
+        if systemctl --user is-active "${timer}.timer" &>/dev/null; then
+            ts="active"
+        else
+            ts="inactive"
+        fi
+        echo "${timer}.timer: $ts"
+    done
+}
+
+cmd_listen() {
+    local serial="$1"
+    local force="${2:-}"
+
+    if is_scanner "$serial" && [ "$force" != "--force" ]; then
+        die "$serial is the scanner serial. Use --force to override."
+    fi
+
+    info "stopping watchdog timer for $serial"
+    systemctl --user stop "rtl-tcp-watchdog@${serial}.timer" 2>/dev/null || true
+    info "  systemctl --user stop rtl-tcp-watchdog@${serial}.timer"
+
+    info "stopping rtl-tcp unit for $serial"
+    systemctl --user stop "rtl-tcp@${serial}.service" 2>/dev/null || true
+    info "  systemctl --user stop rtl-tcp@${serial}.service"
+
+    local idx
+    idx="$(get_index "$serial")"
+    echo ""
+    info "$serial is free for direct USB access."
+    if [ -n "$idx" ]; then
+        info "device index: $idx (use rtl_fm -d $idx, rtl_test -d $idx, etc.)"
+    fi
+    info "run 'rf-mode scan $serial' when done."
+}
+
+cmd_scan() {
+    local target="$1"
+
+    local serials
+    if [ "$target" = "all" ]; then
+        read -ra serials <<< "$(discover_serials)"
+    else
+        serials=("$target")
+    fi
+
+    for serial in "${serials[@]}"; do
+        info "starting rtl-tcp unit for $serial"
+        systemctl --user start "rtl-tcp@${serial}.service"
+        info "  systemctl --user start rtl-tcp@${serial}.service"
+
+        info "starting watchdog timer for $serial"
+        systemctl --user start "rtl-tcp-watchdog@${serial}.timer"
+        info "  systemctl --user start rtl-tcp-watchdog@${serial}.timer"
+
+        if is_scanner "$serial"; then
+            if ! systemctl --user is-active "rtl-scanner@${serial}.service" &>/dev/null; then
+                info "starting scanner for $serial"
+                systemctl --user start "rtl-scanner@${serial}.service"
+                info "  systemctl --user start rtl-scanner@${serial}.service"
+            fi
+        fi
+    done
+
+    echo ""
+    cmd_status
+}
+
+usage() {
+    echo "usage: rf-mode status | listen [SERIAL] [--force] | scan [SERIAL|all]" >&2
+    exit 2
+}
+
+main() {
+    [ $# -ge 1 ] || usage
+    local action="$1"; shift
+
+    case "$action" in
+        status)
+            cmd_status
+            ;;
+        listen)
+            local serial="${1:-}"
+            local force="${2:-}"
+            if [ -z "$serial" ]; then
+                # default: first non-scanner serial
+                local all_serials
+                read -ra all_serials <<< "$(discover_serials)"
+                for s in "${all_serials[@]}"; do
+                    if ! is_scanner "$s"; then
+                        serial="$s"
+                        break
+                    fi
+                done
+                [ -n "$serial" ] || die "no non-scanner serial found"
+            fi
+            cmd_listen "$serial" "$force"
+            ;;
+        scan)
+            local target="${1:-all}"
+            cmd_scan "$target"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
+
+main "$@"

@@ -145,9 +145,9 @@ Flags:
 - `--verify-only` skip install, run the PASS/FAIL checks only.
 
 The script needs sudo, so run it in a terminal. It is idempotent. On a re-run
-it keeps a tuned env file and only refreshes `RTL_TCP_DEVICE_INDEX`. If you
-replug a dongle, the USB index can change: stop the units
-(`systemctl --user stop 'rtl-tcp@*'`) and re-run so it re-probes.
+it keeps a tuned env file. Dongles are addressed by serial, so you can unplug
+and replug them at any time: udev starts `rtl-tcp@<serial>` on plug and
+systemd stops it on unplug.
 
 Then confirm:
 

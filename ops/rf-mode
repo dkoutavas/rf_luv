@@ -48,13 +48,6 @@ get_port() {
     grep -E '^RTL_TCP_PORT=' "$envfile" | cut -d= -f2 | tr -d ' '
 }
 
-# Read device index from env file
-get_index() {
-    local serial="$1"
-    local envfile="$ENV_DIR/${serial}.env"
-    grep -E '^RTL_TCP_DEVICE_INDEX=' "$envfile" 2>/dev/null | cut -d= -f2 | tr -d ' '
-}
-
 unit_active()  { systemctl --user is-active  "rtl-tcp@${1}.service" &>/dev/null; }
 timer_active() { systemctl --user is-active  "rtl-tcp-watchdog@${1}.timer" &>/dev/null; }
 
@@ -113,13 +106,11 @@ cmd_listen() {
     systemctl --user stop "rtl-tcp@${serial}.service" 2>/dev/null || true
     info "  systemctl --user stop rtl-tcp@${serial}.service"
 
-    local idx
-    idx="$(get_index "$serial")"
     echo ""
     info "$serial is free for direct USB access."
-    if [ -n "$idx" ]; then
-        info "device index: $idx (use rtl_fm -d $idx, rtl_test -d $idx, etc.)"
-    fi
+    # librtlsdr tools accept a serial for -d (rtl_fm, rtl_433, rtl_test ...).
+    info "address it by serial: rtl_fm -d $serial ..., rtl_test -d $serial"
+    info "note: replugging the dongle restarts rtl-tcp@$serial (udev); run rf-mode listen again."
     info "run 'rf-mode scan $serial' when done."
 }
 

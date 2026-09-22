@@ -1,7 +1,8 @@
 [Unit]
 Description=RTL-SDR TCP streaming server (instance %i)
-# %i is the dongle serial (e.g. v3-01). The wrapper resolves serial → USB
-# index on each start so enumeration order cannot cross the streams.
+# %i is the dongle serial (e.g. v3-01); rtl_tcp starts with -d <serial>.
+# ops/install-host.sh adds a per-instance drop-in (BindsTo= the udev device
+# unit) so the unit stops on unplug; udev starts it again on plug.
 After=network.target
 # Rate limit: allow up to 100 starts per 10 min before systemd gives up with
 # "Start request repeated too quickly". 100 × 10s RestartSec = ~17 min of
@@ -22,9 +23,8 @@ Restart=always
 # RestartSec=10 (was 3) — gives USB a fair re-enumeration window before
 # we re-try, and keeps the rate-limit budget meaningful.
 RestartSec=10
-# Timeouts cap how long the wrapper's rtl_eeprom probe loop can hold the
-# service in "activating" before systemd kills it. 8 probes × ~2s each = 16s
-# upper bound for enumeration; 30s is comfortable headroom.
+# Timeouts cap how long rtl_tcp can sit in "activating"/"deactivating"
+# before systemd kills it (a dead USB handle can stall the SIGTERM path).
 TimeoutStartSec=30
 TimeoutStopSec=15
 

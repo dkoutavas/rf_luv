@@ -24,6 +24,19 @@ wd = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wd)
 
 
+# ── dongle_present ───────────────────────────────────────────────────────────
+
+def test_dongle_present():
+    """Symlink present -> True; missing -> False; empty serial -> True."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        assert not wd.dongle_present("v3-01", dev_dir=d), "missing symlink must be False"
+        open(os.path.join(d, "rtl_sdr_v3-01"), "w").close()
+        assert wd.dongle_present("v3-01", dev_dir=d), "present symlink must be True"
+        assert wd.dongle_present("", dev_dir=d), "empty serial must assume present"
+    print("PASS dongle_present: missing False, present True, empty serial True")
+
+
 # ── has_active_client ────────────────────────────────────────────────────────
 
 def test_has_active_client_loopback_established():

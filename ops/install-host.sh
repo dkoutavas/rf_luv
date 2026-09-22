@@ -86,49 +86,21 @@ preflight() {
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx clickhouse; then info "ClickHouse container up"; else warn "ClickHouse not running — run 'bash infra/up.sh' first (backups + scanner writes need it)"; fi
 }
 
-# ── 1. enumerate dongles ─────────────────────────────────────────────────────
-# librtlsdr hides a claimed device from enumeration, so a running rtl-tcp@ unit
-# would make its own dongle invisible here. Stop the units we are about to
-# reconfigure, probe, and let the enable step bring them back.
-declare -A INDEX_OF=()
-enumerate() {
-    step "Enumerate dongles"
-    # Fast path: a previous run recorded RTL_TCP_DEVICE_INDEX in each env file.
-    # Use it and leave running units alone (re-running the installer must not
-    # bounce a healthy scanner). After a replug the index can change; then stop
-    # the units (systemctl --user stop 'rtl-tcp@*') and re-run to re-probe.
-    local need_probe=0 s
-    for s in $SCANNER $GHOST; do
-        local f="$ENV_DIR/$s.env" idx=""
-        [ -f "$f" ] && idx="$(grep -E '^RTL_TCP_DEVICE_INDEX=' "$f" | tail -1 | cut -d= -f2)"
-        if [ -n "$idx" ]; then INDEX_OF["$s"]="$idx"; info "serial '$s' → index $idx (recorded in $f)"; else need_probe=1; fi
-    done
-    if [ "$need_probe" -eq 0 ]; then
-        warn "using recorded indices; if you replugged a dongle, stop the units and re-run to re-probe"
-        return
-    fi
-    for s in $SCANNER $GHOST; do
-        if systemctl --user is-active --quiet "rtl-tcp@$s" 2>/dev/null; then
-            warn "rtl-tcp@$s is running; stopping it to read serials (re-enabled below)"
-            run systemctl --user stop "rtl-tcp@$s" "rtl-scanner@$s" 2>/dev/null || true
-        fi
-    done
-    local i serial found=0 dup=0
-    for i in $(seq 0 7); do
-        local out; out="$(rtl_eeprom -d "$i" 2>&1 || true)"
-        echo "$out" | grep -qE 'No matching devices|Failed to open' && break
-        serial="$(echo "$out" | awk '/Serial number:/ {print $NF; exit}')"
-        [ -n "$serial" ] || continue
-        INDEX_OF["$serial"]="$i"; found=$((found+1))
-        info "index $i = serial '$serial'"
-        [ "$serial" = "00000001" ] && dup=1
-    done
-    [ "$found" -gt 0 ] || die "no RTL-SDR found. Plugged in? DVB driver holding it? (sudo modprobe -r dvb_usb_rtl28xxu)"
-    if [ "$dup" -eq 1 ]; then
+# ── 1. dongles present ───────────────────────────────────────────────────────
+# Identity is the EEPROM serial: the udev rule makes /dev/rtl_sdr_<serial> and
+# rtl_tcp starts with -d <serial>. No USB index is recorded anywhere.
+check_dongles() {
+    step "Dongles on the bus"
+    if [ -e /dev/rtl_sdr_00000001 ]; then
         die "a dongle still has the factory serial 00000001. Write one with ONLY that dongle plugged in:  rtl_eeprom -d 0 -s $SCANNER   then physically replug (see RESTORE.md step 3)"
     fi
+    local s
     for s in $SCANNER $GHOST; do
-        [ -n "${INDEX_OF[$s]:-}" ] || die "serial '$s' not on the bus (found: ${!INDEX_OF[*]})"
+        if [ -e "/dev/rtl_sdr_$s" ]; then
+            info "serial '$s' present (/dev/rtl_sdr_$s)"
+        else
+            warn "serial '$s' not on the bus now; udev starts rtl-tcp@$s on plug. If it IS plugged in: DVB driver? (sudo modprobe -r dvb_usb_rtl28xxu), udev rule? (ops/rtl-tcp/install.sh)"
+        fi
     done
 }
 
@@ -163,24 +135,19 @@ set_kv() {
 
 write_env() {   # write_env SERIAL PORT ROLE
     local serial="$1" port="$2" role="$3"
-    local dst="$ENV_DIR/$serial.env" idx="${INDEX_OF[$serial]}"
+    local dst="$ENV_DIR/$serial.env"
+    if [ -f "$dst" ]; then info "$dst exists — kept"; return; fi
     local tmp; tmp="$(mktemp)"
-    if [ -f "$dst" ]; then
-        # Keep a tuned file; only refresh the volatile device index.
-        cp "$dst" "$tmp"
-        set_kv "$tmp" RTL_TCP_DEVICE_INDEX "$idx"
-        info "$dst exists — kept (RTL_TCP_DEVICE_INDEX refreshed to $idx)"
-    else
+    {
         local src="$REPO/ops/rtl-scanner/env.$serial.example"
         [ -f "$src" ] || src="$REPO/ops/rtl-scanner/env.v4-01.example"   # generic base
         cp "$src" "$tmp"
         set_kv "$tmp" SCAN_DONGLE_ID "$serial"
         set_kv "$tmp" RTL_TCP_HOST 127.0.0.1
         set_kv "$tmp" RTL_TCP_PORT "$port"
-        set_kv "$tmp" RTL_TCP_DEVICE_INDEX "$idx"
         set_kv "$tmp" SCAN_GAIN "$GAIN"
-        info "$dst created ($role, port $port, index $idx, gain $GAIN)"
-    fi
+        info "$dst created ($role, port $port, gain $GAIN)"
+    }
     run sudo install -m 0644 "$tmp" "$dst"
     rm -f "$tmp"
 }
@@ -198,20 +165,48 @@ env_files() {
     info "$ENV_DIR/escalator.env SERIALS=$SCANNER${GHOST:+,$GHOST}"
 }
 
-# ── 5. enable + start ────────────────────────────────────────────────────────
+# ── 5. per-instance device drop-ins ──────────────────────────────────────────
+# The rtl-tcp@ template cannot name its own udev device unit: %i is "v4-01"
+# but the device unit escapes the dash (dev-rtl_sdr_v4\x2d01.device). So one
+# drop-in per serial. BindsTo+After stops rtl_tcp on unplug and keeps it from
+# restart-looping while the dongle is absent; udev's SYSTEMD_USER_WANTS
+# (ops/udev/99-rtl-sdr.rules) starts it again on plug. rtl-scanner@ has
+# Requires=rtl-tcp@, so it follows the scanner dongle down; the Wants= drop-in
+# brings it back up with the dongle.
+device_dropins() {
+    step "Per-instance device drop-ins"
+    local s dev d
+    for s in $SCANNER $GHOST; do
+        dev="$(systemd-escape -p --suffix=device "/dev/rtl_sdr_$s")"
+        d="$HOME/.config/systemd/user/rtl-tcp@$s.service.d"
+        run mkdir -p "$d"
+        run bash -c "printf '[Unit]\nBindsTo=%s\nAfter=%s\n' '$dev' '$dev' > '$d/10-device.conf'"
+        info "$d/10-device.conf (BindsTo the udev device unit)"
+    done
+    d="$HOME/.config/systemd/user/rtl-tcp@$SCANNER.service.d"
+    run bash -c "printf '[Unit]\nWants=rtl-scanner@%s.service\n' '$SCANNER' > '$d/20-scanner.conf'"
+    info "$d/20-scanner.conf Wants=rtl-scanner@$SCANNER.service"
+    run systemctl --user daemon-reload
+}
+
+# ── 6. enable + start ────────────────────────────────────────────────────────
 enable_units() {
     step "Enable + start units"
+    # An absent dongle makes --now fail (BindsTo= an inactive device unit);
+    # the unit stays enabled and udev starts it on plug.
     for s in $SCANNER $GHOST; do
-        run systemctl --user enable --now "rtl-tcp@$s" "rtl-tcp-watchdog@$s.timer"
+        run systemctl --user enable "rtl-tcp@$s" "rtl-tcp-watchdog@$s.timer"
+        run systemctl --user start "rtl-tcp@$s" "rtl-tcp-watchdog@$s.timer" || warn "rtl-tcp@$s not started (dongle absent?)"
         info "rtl-tcp@$s + watchdog timer"
     done
-    run systemctl --user enable --now "rtl-scanner@$SCANNER"
+    run systemctl --user enable "rtl-scanner@$SCANNER"
+    run systemctl --user start "rtl-scanner@$SCANNER" || warn "rtl-scanner@$SCANNER not started (dongle absent?)"
     info "rtl-scanner@$SCANNER"
     run systemctl --user enable --now rtl-reset-failed.timer
     info "rtl-reset-failed.timer (StartLimitBurst safety net)"
 }
 
-# ── 6. backups ───────────────────────────────────────────────────────────────
+# ── 7. backups ───────────────────────────────────────────────────────────────
 backups() {
     [ -n "$BACKUP_DIR" ] || { step "Backups"; warn "no --backup-dir given; skipping (do this before collecting data you care about)"; return; }
     step "ClickHouse backups → $BACKUP_DIR"
@@ -226,19 +221,30 @@ backups() {
     run bash "$REPO/ops/clickhouse-backup/install.sh"
 }
 
-# ── 7. verify ────────────────────────────────────────────────────────────────
+# ── 8. verify ────────────────────────────────────────────────────────────────
 FAILS=0
 check() { if eval "$2" >/dev/null 2>&1; then info "PASS $1"; else err "FAIL $1"; FAILS=$((FAILS+1)); fi; }
 verify() {
     step "Verify"
     for s in $SCANNER $GHOST; do
         local port; [ "$s" = "$SCANNER" ] && port=$SCANNER_PORT || port=$GHOST_PORT
+        check "BindsTo drop-in for $s"        "grep -q BindsTo $HOME/.config/systemd/user/rtl-tcp@$s.service.d/10-device.conf"
+        if [ ! -e "/dev/rtl_sdr_$s" ]; then
+            # Plug and play: an absent dongle must leave its unit stopped, not looping.
+            check "$s absent: rtl-tcp@$s inactive" "! systemctl --user is-active --quiet rtl-tcp@$s"
+            continue
+        fi
         check "rtl-tcp@$s active"            "systemctl --user is-active --quiet rtl-tcp@$s"
         check "rtl_tcp listening on :$port"  "ss -tln | grep -q ':$port '"
         check "watchdog timer @$s active"     "systemctl --user is-active --quiet rtl-tcp-watchdog@$s.timer"
-        check "/dev/rtl_sdr_$s symlink"       "test -e /dev/rtl_sdr_$s || test -e /dev/rtl_sdr_${s%%-*}"
+        check "/dev/rtl_sdr_$s symlink"       "test -e /dev/rtl_sdr_$s"
+        check "device unit for $s active"     "systemctl --user is-active --quiet \"\$(systemd-escape -p --suffix=device /dev/rtl_sdr_$s)\""
     done
-    check "rtl-scanner@$SCANNER active" "systemctl --user is-active --quiet rtl-scanner@$SCANNER"
+    if [ -e "/dev/rtl_sdr_$SCANNER" ]; then
+        check "rtl-scanner@$SCANNER active" "systemctl --user is-active --quiet rtl-scanner@$SCANNER"
+    else
+        check "$SCANNER absent: rtl-scanner@$SCANNER inactive" "! systemctl --user is-active --quiet rtl-scanner@$SCANNER"
+    fi
     check "DVB driver not loaded"       "! lsmod | grep -q dvb_usb_rtl28xxu"
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx clickhouse; then
         check "spectrum.scans rows from $SCANNER in last 10 min" \
@@ -259,10 +265,11 @@ verify() {
 # ── main ─────────────────────────────────────────────────────────────────────
 if [ "$VERIFY_ONLY" -eq 1 ]; then verify; exit 0; fi
 preflight
-enumerate
 dvb_blacklist
 component_installers
+check_dongles
 env_files
+device_dropins
 enable_units
 backups
 if [ "$DRY_RUN" -eq 1 ]; then

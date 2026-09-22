@@ -17,6 +17,9 @@ Recovery requires two consecutive failed probes before acting. A single
 failure is usually rtl_tcp's own RestartSec window after a crash (2026-09-20:
 7x Connection refused on V4 during 10 s restart windows).
 
+When /dev/rtl_sdr_<serial> is missing the dongle is unplugged; the tick
+logs once per ~5 min and does nothing. udev starts rtl-tcp@ again on plug.
+
 Supports per-instance invocation via --serial / --unit so two dongles can
 have independent watchdogs without cross-bouncing each other. The USB-reset
 helper takes the same serial and unbinds only the matching device path.
@@ -93,6 +96,16 @@ def load_state(path: str):
 def save_state(path: str, state):
     with open(path, "w") as f:
         json.dump(state, f)
+
+
+def dongle_present(serial: str, dev_dir: str = "/dev") -> bool:
+    """True if udev's /dev/rtl_sdr_<serial> symlink exists (dongle on the bus).
+
+    Empty serial (legacy single-instance mode) means "assume present".
+    """
+    if not serial:
+        return True
+    return os.path.exists(os.path.join(dev_dir, f"rtl_sdr_{serial}"))
 
 
 def has_active_client(port: int, proc_lines=None) -> bool:
@@ -224,6 +237,19 @@ def main():
 
     path = state_path(serial)
     state = load_state(path)
+
+    # Unplugged dongle: nothing to probe, nothing to recover. The udev rule
+    # starts rtl-tcp@ again on plug (ops/udev/99-rtl-sdr.rules); counting
+    # failures here would only restart the unit against an absent device.
+    if not dongle_present(serial):
+        state["consecutive_failures"] = 0
+        skips = state.get("absent_skip_count", 0) + 1
+        state["absent_skip_count"] = skips
+        if skips % 10 == 1:
+            log("dongle not on bus; skipping probe", serial)
+        save_state(path, state)
+        return
+    state["absent_skip_count"] = 0
 
     # rtl_tcp is single-client: if ANY peer has an ESTABLISHED connection,
     # that client IS the health signal. Probing would kick it off.

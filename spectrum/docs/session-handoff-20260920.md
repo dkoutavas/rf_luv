@@ -82,3 +82,17 @@ caveat block in each says to run `rf-mode listen` first, `rf-mode scan` after.
   These are the remaining ops-layer installers from RESTORE.md step 8.
 - Scanner reconnect-per-sweep churn (28 restarts, 1 SIGABRT). Needs its own
   evidence cycle.
+
+## 2026-09-22: plug and play (branch `fix/plug-and-play-dongles`)
+
+Reboot with the V3 unplugged: `rtl-tcp@v3-01` (`RTL_TCP_DEVICE_INDEX=0`)
+opened the V4, `rtl-tcp@v4-01` (index 1) restart-looped on
+`usb_claim_interface error -6`, scanner restarted with it and wrote 116 empty
+`scan_runs` rows in 2 h. A V4 replug later left rtl_tcp alive with a dead
+handle (`Failed to submit transfer 0`); the watchdog caught it as starvation
+and restarted after 2 ticks.
+
+Fix: identity by serial (`rtl_tcp -d <serial>`), udev `SYSTEMD_USER_WANTS`
+starts the unit on plug, per-serial `BindsTo=` drop-in stops it on unplug,
+watchdog skips while `/dev/rtl_sdr_<serial>` is missing. See
+`spectrum/docs/dongle_identity.md`, section "Plug and play".

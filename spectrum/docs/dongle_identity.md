@@ -158,22 +158,53 @@ Found 2 device(s):
   1:  Realtek, RTL2838UHIDIR, SN: v4-01
 ```
 
-The order of indices (0/1) is still non-deterministic across reboots. That's expected — the wrapper script resolves serial→index on each start.
+The order of indices (0/1) is still non-deterministic across reboots. That is expected. rtl_tcp starts with `-d <serial>`, so the index is never used.
 
 ---
 
 ## Why rtl_tcp needs a wrapper
 
-`rtl_tcp` takes `-d <device_index>` only. Depending on librtlsdr version it might accept `-d :<serial>` prefix syntax, but that's unreliable (various distribution builds strip it, Debian packaging handled it differently for years). We use a thin wrapper script that:
+It barely does. `rtl_tcp -d` accepts a serial string: librtlsdr's
+`verbose_device_search` tries an index first, then an exact serial match, then
+a serial suffix match. It reads the USB string descriptors without claiming
+the interface, so the lookup works while the other dongle is held by its own
+`rtl_tcp`. Tested on rtl-sdr 2.0.3 on 2026-09-22:
 
-1. Runs `rtl_test 2>&1` to list devices with their serials and indices.
-2. Picks the index matching the serial we asked for, or exits 1 with a clear "Serial X not found" message.
-3. Calls `rtl_eeprom -d <index>` to verify the device behind that index actually has the serial we expect (guards against mid-lifecycle USB rebinds that reshuffle indices).
-4. `exec`s `/usr/local/bin/rtl_tcp -d <index> <args>`.
+```
+$ rtl_tcp -d v4-01 -p 1299      # while another rtl_tcp holds the V4
+Found 1 device(s):
+  0:  RTLSDRBlog, Blog V4, SN: v4-01
+Using device 0: Generic RTL2832U OEM
+usb_claim_interface error -6    # expected: the sibling holds it
+$ rtl_tcp -d nope-99
+No matching devices found.
+```
 
-If the dongle's USB connection flaps after wrapper exit, `systemctl Restart=always` will restart the unit, which re-runs the wrapper, which re-resolves serial→index cleanly. Stale index binding cannot persist.
+`ops/rtl-tcp/rtl-tcp-by-serial.sh` is therefore one line: `exec rtl_tcp -d "$SERIAL" "$@"`.
+It stays as a wrapper only so the systemd template has one ExecStart and one
+log prefix.
 
-Script lives at `ops/rtl-tcp/rtl-tcp-by-serial.sh`, installed to `/usr/local/bin/rtl-tcp-by-serial` on leap.
+History: until 2026-09-22 the wrapper probed each index with `rtl_eeprom`,
+which claims the interface and therefore cannot read the serial of a dongle
+another process holds. That was misread as "librtlsdr hides claimed devices",
+and the workaround was a fixed `RTL_TCP_DEVICE_INDEX` per env file. On
+2026-09-22 the host rebooted with the V3 unplugged; `rtl-tcp@v3-01` (index 0)
+opened the V4 and `rtl-tcp@v4-01` (index 1) restart-looped for 40 minutes,
+writing 116 empty `scan_runs` rows. The index path is gone.
+
+## Plug and play
+
+- `ops/udev/99-rtl-sdr.rules` tags the dongle `systemd` and sets
+  `SYSTEMD_USER_WANTS=rtl-tcp@<serial>.service`, so a plug starts the unit.
+- `ops/install-host.sh` writes `~/.config/systemd/user/rtl-tcp@<serial>.service.d/10-device.conf`
+  with `BindsTo=` and `After=` the device unit (for example
+  `dev-rtl_sdr_v4\x2d01.device`), so an unplug stops the unit and it does not
+  restart until the dongle returns. The template cannot express this itself:
+  `%i` keeps the dash, the device unit name escapes it.
+- The scanner dongle also gets `20-scanner.conf` with `Wants=rtl-scanner@<serial>.service`.
+  The scanner has `Requires=rtl-tcp@`, so it follows the dongle down and up.
+  One `scan_runs` row per plug cycle.
+- `rtl-tcp-watchdog.py` skips its tick while `/dev/rtl_sdr_<serial>` is missing.
 
 ---
 

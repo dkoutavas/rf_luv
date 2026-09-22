@@ -2,9 +2,9 @@
 #
 # Matches USB vendor 0bda and product 2838 (RTL2838UHIDIR — shared by
 # RTL-SDR Blog V3 and V4), creating a /dev symlink keyed on the serial
-# written via rtl_eeprom. Downstream tools (rtl-tcp-by-serial wrapper,
-# rtl-usb-reset) resolve the current USB index via these symlinks so
-# enumeration order cannot cross the streams.
+# written via rtl_eeprom. rtl-usb-reset and the watchdog find the dongle
+# through these symlinks; rtl_tcp itself starts with -d <serial>, so USB
+# enumeration order never matters.
 #
 # Install on the local host with:
 #   sudo cp ops/udev/99-rtl-sdr.rules /etc/udev/rules.d/
@@ -24,4 +24,8 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", ATTRS{seria
 # without a per-serial line here. __GROUP__ is substituted at install time by
 # ops/rtl-tcp/install.sh with the first of plugdev/users/dialout that exists
 # on the host (openSUSE has no plugdev; a missing group voids the whole rule).
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", SYMLINK+="rtl_sdr_$attr{serial}", MODE="0666", GROUP="__GROUP__"
+# TAG+="systemd" makes the device visible to the user systemd manager as
+# dev-rtl_sdr_<serial>.device (dash escaped: dev-rtl_sdr_v4\x2d01.device).
+# SYSTEMD_USER_WANTS starts the matching rtl-tcp@<serial> unit on every plug;
+# the per-instance BindsTo= drop-in (ops/install-host.sh) stops it on unplug.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", SYMLINK+="rtl_sdr_$attr{serial}", MODE="0666", GROUP="__GROUP__", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="rtl-tcp@$attr{serial}.service"

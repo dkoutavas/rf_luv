@@ -29,8 +29,8 @@ services:
           - clickhouse
     ports:
       # Only the single shared instance is exposed to the host now.
-      - "8123:8123"   # HTTP (migrators, host-side probes via CH_URL)
-      - "9000:9000"   # native (clickhouse-client, Grafana datasource)
+      - "127.0.0.1:8123:8123"   # HTTP (migrators, host-side probes via CH_URL)
+      - "127.0.0.1:9000:9000"   # native (clickhouse-client, Grafana datasource)
     environment:
       # default = admin / bootstrap identity only; per-db users are created by
       # ch-bootstrap. No CLICKHOUSE_DB / CLICKHOUSE_USER here: meaningless on a
@@ -85,7 +85,7 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
       # Dashboards embed raw HTML panels (status tables); keep them un-sanitized.
@@ -105,6 +105,6 @@ services:
     networks:
       - rf_luv_net
     ports:
-      - "8084:80"
+      - "127.0.0.1:8084:80"
     volumes:
       - ../spectrum/logging/index.html:/usr/share/nginx/html/index.html:ro,z

@@ -34,6 +34,12 @@ ClickHouse ports published now; the old per-pipeline ports are retired.
 | logging-form | `nginx:1.27-alpine` | 8084 | the spectrum logging form |
 | ch-bootstrap | built from `Dockerfile.bootstrap` | (none, one-shot) | creates identities + schema |
 
+All host ports bind to `127.0.0.1`. Docker writes its own nftables rules, so a
+`0.0.0.0` publish bypasses firewalld and exposes the port to the whole LAN. The
+per-db passwords below are predictable, so ClickHouse must stay off the LAN.
+From another machine, use an SSH tunnel:
+`ssh -L 3000:localhost:3000 -L 8123:localhost:8123 omen-lan`.
+
 ## Identities and the cross-grant
 
 One server hosts eight databases. Each pipeline keeps its own database and its own

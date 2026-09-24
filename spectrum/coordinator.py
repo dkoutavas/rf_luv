@@ -22,9 +22,10 @@ The lock is released automatically on context exit. fcntl(2) flock
 (LOCK_EX | LOCK_NB / LOCK_EX) is what we use under the hood — same
 kernel state as the bash flock(1) helper, so they interoperate.
 
-WIRED INTO scanner.py: it imports dongle_lock and wraps each per-sweep
-RTLTCPClient connect in `with dongle_lock(DONGLE_ID, mode="nonblock")`,
-skipping the sweep when another consumer holds the lock. What is NOT yet
+WIRED INTO scanner.py: it keeps one RTLTCPClient open across sweeps and
+checks `with dongle_lock(DONGLE_ID, mode="nonblock")` on every 1 s loop tick.
+When another consumer holds the lock, the scanner closes its rtl_tcp socket
+(rtl_tcp serves one client at a time) and skips sweeps until the lock frees. What is NOT yet
 exercised is contention: the only intended second consumer is the NOAA
 recorder (noaa/recorder.py), which is still a scaffold, so no two
 consumers have ever actually contended for a dongle on a live host.

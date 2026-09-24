@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6).
 """ClickHouse-level freshness probe for the spectrum pipeline.
 
 The user-level rtl_tcp watchdog is TCP-aware: it knows IQ samples flow out of
@@ -14,6 +13,7 @@ and notifies on state transitions:
     healthy → WARN at >FRESHNESS_WARN_S stale
     healthy → CRITICAL at >FRESHNESS_CRITICAL_S stale
     any → recovered when stale drops below FRESHNESS_WARN_S
+    unplugged dongle → ABSENT, no alert (collection is session-based)
 
 State persisted at /var/lib/spectrum-monitor/freshness.json so transitions
 are detected across runs.
@@ -40,6 +40,7 @@ DEFAULTS = {
     "ACTION_LOG": "/var/log/rtl-recovery.log",
     "NOTIFY_BIN": "/usr/local/bin/rf-notify",
     "EXPECTED_DONGLES": "v4-01",
+    "DEV_DIR": "/dev",
 }
 
 
@@ -163,12 +164,30 @@ def main():
     # Walk expected dongles even if missing from query (no rows in 6h = stale).
     new_dongles = {}
     for d in expected:
+        prev_level = prev.get(d, {}).get("level", "OK")
+
+        # Collection is session-based: the dongles are unplugged between
+        # sessions. udev's /dev/rtl_sdr_<serial> symlink exists only while the
+        # dongle is on the bus (the watchdog uses the same test). An unplugged
+        # dongle is not a fault, so it gets no alert.
+        dev_link = os.path.join(cfg["DEV_DIR"], f"rtl_sdr_{d}")
+        try:
+            plugged_for = int(now - os.lstat(dev_link).st_mtime)
+        except FileNotFoundError:
+            new_dongles[d] = {"stale_sec": fresh.get(d), "level": "ABSENT"}
+            if prev_level != "ABSENT":
+                log_action(cfg, "dongle_absent", dongle=d)
+            continue
+
         stale = fresh.get(d)
         if stale is None:
             # No rows in last 6h. Treat as critical.
             stale = 6 * 3600
+        # udev creates the symlink at plug-in, so its mtime is the plug time.
+        # Data cannot be expected from before the plug, so staleness is
+        # capped at the time since then; a new session starts at OK.
+        stale = min(stale, plugged_for)
         level = classify(stale, warn_s, crit_s)
-        prev_level = prev.get(d, {}).get("level", "OK")
         new_dongles[d] = {"stale_sec": stale, "level": level}
 
         # State transition?

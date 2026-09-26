@@ -49,6 +49,16 @@ FFT_SIZE = int(os.environ.get("SCAN_FFT_SIZE", "1024"))
 SAMPLE_RATE = int(os.environ.get("SCAN_SAMPLE_RATE", "2048000"))
 NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
 
+# Bytes to throw away after every retune before measuring. The dongle hands
+# samples over in 256 KiB USB blocks (64 ms at 2.048 MS/s), and rtl_tcp queues
+# a few more, so samples from the OLD frequency keep arriving after
+# set_frequency. Measured on the V3 (2026-09-26): 80-136 ms, 320-544 KiB.
+# The old 32 KiB (8 ms) read each hop's samples from a frequency many hops
+# earlier: loud FM was smeared 20-30 MHz up into airband and VHF.
+# 786432 B = 192 ms covers the worst case with margin. Cost: a full
+# 88-470 MHz sweep takes ~38 s instead of ~2.3 s.
+SETTLE_BYTES = int(os.environ.get("SCAN_SETTLE_BYTES", "786432"))
+
 # Sweep intervals
 FULL_INTERVAL = int(os.environ.get("SCAN_INTERVAL_SECONDS", "280"))
 AIRBAND_INTERVAL = int(os.environ.get("SCAN_AIRBAND_INTERVAL", "60"))
@@ -288,8 +298,9 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> tuple[list[di
 
     while center < freq_end + SAMPLE_RATE // 2:
         client.set_frequency(center)
-        time.sleep(0.005)
-        client.discard(32768)
+        # Wait for samples from the new frequency (see SETTLE_BYTES). Reading
+        # them also covers the PLL settle time, so no separate sleep.
+        client.discard(SETTLE_BYTES)
 
         power_sum = np.zeros(FFT_SIZE)
         for _ in range(NUM_AVERAGES):
@@ -520,14 +531,9 @@ def main():
                 client = RTLTCPClient(RTL_HOST, RTL_PORT)
                 client.set_sample_rate(SAMPLE_RATE)
                 client.set_gain(effective_gain)
-            # Warmup: tune to sweep start frequency and discard enough for the
-            # PLL to settle and for samples from the old frequency to leave
-            # the pipe. 524288 bytes = two 256 KiB USB buffers = 128 ms at
-            # 4.096 MB/s: the partly filled USB buffer plus one buffer that may
-            # already sit in the kernel socket queue.
-            client.set_frequency(preset["start"] + SAMPLE_RATE // 2)
-            time.sleep(0.010)
-            client.discard(524288)
+            # No separate warmup: sweep() retunes to the first hop and
+            # discards SETTLE_BYTES, which also flushes samples from before
+            # the sweep.
 
             sweep_ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             sweep_id = f"{preset['name']}:{sweep_ts}"

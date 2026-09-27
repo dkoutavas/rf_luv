@@ -207,10 +207,10 @@ def unwedge(cfg: dict, serial: str, dry_run: bool) -> dict:
 
 def reboot(cfg: dict, reason: str, dry_run: bool) -> None:
     if cfg.get("REBOOT_ENABLED", "0") != "1":
-        # Disabled by default. On WSL2 `systemctl reboot` bounces the VM, not the
-        # Windows host that owns the USB dongle, so it loses state without fixing
-        # anything. Log + alert so the operator knows a bare-metal host would have
-        # rebooted here, but do not execute.
+        # Disabled by default. The host is a daily-use laptop, and rebooting it
+        # to recover a dongle is disruptive and rarely the right fix. Log + alert
+        # so the operator knows a dedicated host would have rebooted here, but
+        # do not execute.
         log_action(cfg, "reboot_suppressed", reason=reason)
         notify(cfg, "CRITICAL", "rf_luv: reboot suppressed (REBOOT_ENABLED=0)",
                message=f"would reboot: {reason}", force=True)

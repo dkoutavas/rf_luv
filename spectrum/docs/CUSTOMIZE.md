@@ -15,7 +15,7 @@ rtl_eeprom -d 0           # add -d 1, -d 2 etc. for additional dongles
 # look for "Serial number:"
 ```
 
-Set it via env (or `spectrum/.env`):
+Set it in the dongle's env file, `/etc/rtl-scanner/<serial>.env`:
 
 ```ini
 SCAN_DONGLE_ID=v3-01      # match exactly the EEPROM string
@@ -109,11 +109,10 @@ for more.
 
 ## 4. Connect to a remote rtl_tcp
 
-The scanner connects via TCP to wherever rtl_tcp is running. Three layouts:
+The scanner connects via TCP to wherever rtl_tcp is running. Two layouts:
 
 | Layout | rtl_tcp host | `RTL_TCP_HOST` |
 |---|---|---|
-| Same machine, Docker scanner | `host.docker.internal` (default) | `host.docker.internal` |
 | Same machine, native systemd scanner | `127.0.0.1` | `127.0.0.1` |
 | Remote (rtl_tcp on a different box) | the box's IP/hostname | e.g. `192.168.1.50` |
 
@@ -131,7 +130,7 @@ case to work, and the host's firewall must allow inbound TCP on port 1234.
 
 ## What we did *not* parameterize
 
-Some knobs aren't in `.env.example` because they're tied to dongle hardware
+Some knobs aren't in the env file because they're tied to dongle hardware
 (sample rate, FFT size) or detection tuning that affects the schema (peak
 threshold, transient threshold). Edit `scanner.py` directly if you need to
 move those.

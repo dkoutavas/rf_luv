@@ -21,7 +21,7 @@ set -euo pipefail
 #     alone — cutover runbook does that step explicitly)
 #   - Enable the template instances (explicit during cutover)
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/rtl-tcp/install.sh
 #
 # Requires: rtl_tcp + rtl_test + rtl_eeprom in PATH, sudo access.

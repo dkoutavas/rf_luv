@@ -148,7 +148,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["rds", "fm", "broadcast", "rtl-sdr"],
+  "tags": ["rds", "fm", "broadcast", "rtl-sdr", "rf_luv"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},

@@ -8,7 +8,7 @@ feature row (bandwidth, duty cycles at 1 h/24 h/7 d, burst statistics, diurnal
 upsert it into spectrum.peak_features.
 
 Idempotent — uses ReplacingMergeTree(computed_at) to collapse repeat runs.
-Designed to run on leap as a user-systemd timer at ~5 min cadence.
+Runs on the host as a user-systemd timer at ~5 min cadence.
 stdlib only; matches scan_ingest.py dependency posture.
 
 DSP/audio analogy for reviewers: this is an envelope follower + spectrogram

@@ -287,7 +287,8 @@
   "tags": [
     "spectrum",
     "comparison",
-    "rtl-sdr"
+    "rtl-sdr",
+    "rf_luv"
   ],
   "templating": {
     "list": [

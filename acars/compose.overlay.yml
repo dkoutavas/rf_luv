@@ -5,7 +5,7 @@
 # (shared ClickHouse + Grafana) lives in infra/compose.yml as the
 # rf_luv_infra project. Bring infra up first, then this overlay:
 #   docker compose -f infra/compose.yml up -d
-#   cp env.v4-01.example .env   # leap deployment
+#   cp env.v4-01.example .env   # optional overrides
 #   docker compose -f acars/compose.overlay.yml up -d
 #   open http://localhost:3000 for Grafana dashboards (shared)
 #

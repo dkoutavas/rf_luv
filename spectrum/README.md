@@ -34,104 +34,55 @@ The scanner only ever stores FFT *power* - it can locate a signal in frequency b
 
 ## Setup
 
-The shared data layer (one ClickHouse + Grafana, compose project `rf_luv_infra`)
-must be up first in both paths: `docker network create rf_luv_net` then
-`bash ../infra/up.sh`. The infra `ch-bootstrap` one-shot creates the `spectrum`
-database, applies the schema, and loads the Athens known-frequencies seed
-automatically. Then pick how the scanner itself runs:
+The scanner runs natively under systemd, one `rtl-tcp@<serial>` plus one
+`rtl-scanner@<serial>` user unit per dongle, writing into the shared ClickHouse
+on `127.0.0.1:8123`. There is no containerized scanner.
 
-| Path | Best for | Quick start (after `infra/up.sh`) |
-|---|---|---|
-| **Containerized scanner** | Trying it out, single host, no production reliability | `docker compose -f compose.overlay.yml up -d` |
-| **systemd watchdog stack** | Unattended production, multi-dongle, USB recovery, ntfy alerts | `bash ../ops/rtl-tcp/install.sh` |
+1. Bring up the shared data layer (once). The infra `ch-bootstrap` one-shot
+   creates the `spectrum` database, applies the schema, and loads the Athens
+   known-frequencies seed.
+   ```bash
+   docker network create rf_luv_net
+   bash ../infra/up.sh
+   ```
+2. Install the host side: DVB blacklist, udev rule, units, env files, backups.
+   ```bash
+   bash ../ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickhouse-backups
+   ```
+   Replace `v4-01` with the serial of the dongle that should scan. `--verify-only`
+   prints a PASS/FAIL check.
+3. Install the reliability layer: escalator, freshness and signal-quality
+   probes, desktop or ntfy alerts.
+   ```bash
+   bash ../ops/install-trip-hardening.sh
+   ```
+4. Open Grafana at <http://localhost:3000> (admin/admin), Spectrum folder. The
+   first full sweep lands within a minute.
 
-The containerized path runs `scanner.py` + `scan_ingest.py` in a container on the
-`rf_luv_net` network, writing into the shared ClickHouse. The systemd path runs
-the same Python on bare metal under `rtl-tcp@<serial>` + `rtl-scanner@<serial>`
-user units, with a 30s watchdog (`../ops/rtl-tcp/`), root-level escalator past
-circuit breaker (`../ops/rtl-tcp/rtl-tcp-escalator.py`), ClickHouse-freshness
-probe (`../ops/spectrum-monitor/`), and ntfy.sh alerts (`../ops/notify/`). It
-writes to the shared ClickHouse on `127.0.0.1:8123`. ClickHouse and Grafana come
-from the shared infra in both paths.
-
-### Option A: Docker quick start (Linux / WSL / macOS)
-
-Prerequisites:
-- Docker Engine 20.10+ and Docker Compose v2
-- rtl-sdr tools: `rtl_tcp`, `rtl_test`
-  - openSUSE: `sudo zypper install rtl-sdr`
-  - Debian/Ubuntu: `sudo apt install rtl-sdr`
-- Linux only - DVB blacklist + udev rule (one-time):
-  ```bash
-  sudo tee /etc/modprobe.d/blacklist-rtlsdr.conf << 'EOF'
-  blacklist dvb_usb_rtl28xxu
-  blacklist rtl2832
-  blacklist rtl2830
-  EOF
-  sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null  # or reboot
-  sudo tee /etc/udev/rules.d/20-rtlsdr.rules << 'EOF'
-  SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0666"
-  EOF
-  sudo udevadm control --reload-rules && sudo udevadm trigger
-  ```
-  Verify: `rtl_test -t` reports `Realtek RTL2838, R820T/R860 tuner`.
-
-- Native Linux (Omen): install the udev rule per [`../ops/udev/99-rtl-sdr.rules`](../ops/udev/99-rtl-sdr.rules). Windows / WSL only: swap the dongle driver with Zadig per [`../setup/install-windows.md`](../setup/install-windows.md).
-
-Bring it up:
-
-```bash
-# 1. Start rtl_tcp on the host (Linux)
-rtl_tcp -a 0.0.0.0 -p 1234 -s 2048000 &
-#    or on Windows
-# rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000
-
-# 2. Bring up the shared data layer (once)
-docker network create rf_luv_net
-bash ../infra/up.sh        # shared ClickHouse 8123/9000 + Grafana 3000, schema + Athens seed auto-applied
-
-# 3. Optional but recommended: copy the env template and tune for your location
-cp .env.example .env  # then edit .env (see docs/CUSTOMIZE.md)
-
-# 4. Start the containerized scanner against the shared infra
-docker compose -f compose.overlay.yml up -d
-
-# 5. Open Grafana at http://localhost:3000 (admin/admin), Spectrum folder
-```
-
-The containerized scanner is optional: on the local host the scanner runs
-natively under systemd, so you only need `infra/up.sh` for the data layer.
-
-The overlay uses `extra_hosts: host.docker.internal:host-gateway` so the scanner reaches a host-side `rtl_tcp`. This works on Linux Docker 20.10+, WSL2 Docker, and Docker Desktop without further config.
-
-### Option B: systemd watchdog stack (unattended)
-
-The default on the local host. Adds USB recovery, freshness monitoring, alerting:
-
-```bash
-bash ../ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickhouse-backups   # units, watchdog, udev, env, backups
-bash ../ops/install-trip-hardening.sh    # root escalator + freshness + ntfy
-```
-
-ClickHouse and Grafana come from the shared `bash ../infra/up.sh` data layer; the native scanner writes into it on `127.0.0.1:8123`. See `../ops/rtl-tcp/install.sh` and the `Reliability Stack` section in the top-level `../CLAUDE.md` for details.
+`../RESTORE.md` has the full ordered runbook, and the `Reliability Stack`
+section of the top-level `CLAUDE.md` explains the layers.
 
 ## Configuration
 
-All knobs are env vars; copy `.env.example` to `.env` and edit. Compose auto-reads `.env` for `${VAR}` substitution. Full guide: [`docs/CUSTOMIZE.md`](docs/CUSTOMIZE.md) walks through dongle serial, antenna metadata, location-specific known_frequencies, sweep band, and remote rtl_tcp.
+Each dongle's scanner reads `/etc/rtl-scanner/<serial>.env`, created by
+`install-host.sh` from [`../ops/rtl-scanner/env.v4-01.example`](../ops/rtl-scanner/env.v4-01.example).
+Edit it, then `systemctl --user restart rtl-scanner@<serial>`; each restart opens
+a new run in `scan_runs` stamped with the antenna fields. Full guide:
+[`docs/CUSTOMIZE.md`](docs/CUSTOMIZE.md).
 
-The most commonly-overridden vars:
+The most commonly changed variables:
 
-| Variable | Default | When to change |
+| Variable | Example | When to change |
 |---|---|---|
-| `SCAN_DONGLE_ID` | `v4-01` | Match your EEPROM serial (`rtl_eeprom -d 0`) |
-| `SCAN_GAIN` | `12` | Adapt to your RF environment (auto-reduces on clipping) |
+| `SCAN_DONGLE_ID` | `v3-01` | Match the dongle's EEPROM serial |
+| `SCAN_GAIN` | `12` | Lower if sweeps clip; the scanner also steps it down itself on clipping. 12 needs an FM bandstop on an outdoor antenna; without one, 7.7 or less |
 | `SCAN_FREQ_START`/`SCAN_FREQ_END` | `88000000`/`470000000` | Different band of interest |
-| `RTL_TCP_HOST` | `host.docker.internal` | rtl_tcp on a different machine |
+| `SCAN_SETTLE_BYTES` | `786432` | Bytes dropped after each retune (192 ms); raise it if a slower dongle smears |
+| `SCAN_ANTENNA_*` | patio position, 67 cm arms | Whenever the antenna moves, so runs can be told apart |
 | `SCAN_DVBT_EXCLUDE_*` | `174..230 MHz` | DVB-T not in Band III at your location |
-| `CLICKHOUSE_PASSWORD` | `spectrum_local` | Before exposing the shared ClickHouse (8123/9000) publicly |
-| `GF_SECURITY_ADMIN_PASSWORD` | `admin` | Before exposing Grafana publicly |
 
-The full list of overrideable vars is in `.env.example`. Internal pipeline knobs (FFT size, batch size, etc.) are all env-overridable too but live alongside the production-tuned defaults - see `spectrum/config.py` for shared defaults consumed by the batch jobs.
+Internal pipeline knobs (FFT size, batch size) are env-overridable too; see
+`spectrum/config.py` for the shared defaults the batch jobs use.
 
 ## Ports
 
@@ -180,8 +131,8 @@ Both scripts connect to the shared ClickHouse at `localhost:8123` by default.
 
 **`usb_open error -3`** - udev rule missing or permissions wrong. Check `/etc/udev/rules.d/20-rtlsdr.rules` and reload.
 
-**No data in Grafana** - check scanner logs: `docker compose -f compose.overlay.yml logs -f` (containerized) or `journalctl --user -u rtl-scanner@v4-01` (systemd). Common causes: rtl_tcp not running, wrong host/port, firewall blocking 1234.
+**No data in Grafana** - check scanner logs: `journalctl --user -u rtl-scanner@<serial>`. Common causes: rtl_tcp not running, wrong host/port, firewall blocking 1234.
 
 **Connection refused to rtl_tcp** - either rtl_tcp isn't running, or it's bound to `127.0.0.1` instead of `0.0.0.0`. Containers need to reach it via the Docker bridge, so bind to `0.0.0.0`.
 
-**One consumer per dongle** - the RTL-SDR dongle is single-client. On the two-dongle Omen the native scanner owns the V4 on :1234 and the ghost pipeline owns the V3 on :1235. On the V4, a rotating decoder (`pipeline.sh up <pipe>`) time-shares with the scanner through the coordinator. Stop one V4 consumer before starting another, or let the coordinator's flock arbitrate.
+**One consumer per dongle** - `rtl_tcp` serves one client, and the scanner holds its connection for the whole run. To lend a dongle to SDR++, `ops/rf-mode pause <serial>`, then `ops/rf-mode scan <serial>` afterwards. `pipeline.sh up <pipe> <serial>` and `down` do the same for Docker decoders.

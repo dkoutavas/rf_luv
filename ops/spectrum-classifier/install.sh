@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # spectrum-classifier installer — user-systemd timer that runs the
-# rule-based classifier 30 s after every feature extractor pass on leap.
+# rule-based classifier 30 s after every feature extractor pass.
 #
 # Idempotent. Mirrors ops/spectrum-features/install.sh layout.
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/spectrum-classifier/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

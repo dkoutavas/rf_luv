@@ -61,9 +61,9 @@ with dongle_lock("v4-01", mode="nonblock") as ok:
 `spectrum/scanner.py` is the canonical "I want the dongle for ~30 seconds" consumer, and it is already lock-aware:
 
 1. It imports the helper: `from coordinator import dongle_lock, CoordinatorMissing` (scanner.py).
-2. It wraps the per-sweep `RTLTCPClient(...)` connect in `dongle_lock(DONGLE_ID, mode="nonblock")` and skips the sweep on a miss. If the lock dir is absent it catches `CoordinatorMissing`, warns once, and proceeds unlocked.
+2. It keeps one `RTLTCPClient` open for the whole run and checks `dongle_lock(DONGLE_ID, mode="nonblock")` on every 1 s loop tick. When another consumer holds the lock, the scanner closes its rtl_tcp socket (rtl_tcp serves one client at a time) and skips sweeps until the lock frees. If the lock dir is absent it warns once and proceeds unlocked.
 
-What is NOT yet exercised is contention: the scanner is the only live consumer taking the lock. The intended second consumer is the NOAA recorder (`noaa/recorder.py`), which is still a scaffold, so no real handoff has been tested end-to-end on leap. When the recorder gains real rtl-tcp orchestration it should take the lock in a non-blocking or timeout mode (see the note in `noaa/recorder.py:acquire_dongle_lock`) — a satellite pass is time-critical, so blocking forever on a stuck holder would silently miss the pass window.
+The second consumer is `spectrum/iq_capture.py`, which takes the lock with `mode="timeout"` (60 s, long enough to outlast one full sweep). Real flock contention is covered by `spectrum/tests/test_iq_capture.py::test_coordinator_contention_real_flock`; a live hand-off on the host has not been exercised yet. Docker decoders do not take the lock: `pipeline.sh` pauses the scanner for them instead.
 
 ## Lock semantics
 
@@ -87,4 +87,4 @@ Every lock event is appended to `/var/log/rtl-recovery.log` (the same log the wa
 
 - `ops/rtl-tcp/` — the per-dongle rtl_tcp service + watchdog stack
 - `ops/rtl-tcp-escalator/` — escalator that resets USB on prolonged failure
-- `acars/DEPLOY.md` — example of a decoder that owns a dongle outright (no coordinator needed)
+- `acars/README.md` — example of a decoder that owns a dongle outright (no coordinator needed)

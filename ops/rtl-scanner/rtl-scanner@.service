@@ -9,14 +9,14 @@ Requires=rtl-tcp@%i.service
 Type=simple
 # Per-instance env file provides SCAN_DONGLE_ID, RTL_TCP_*, SCAN_* and
 # CLICKHOUSE_* variables. See ops/rtl-scanner/env.v3-01.example for the
-# full list. Installed at /etc/rtl-scanner/%i.env on leap.
+# full list. Installed at /etc/rtl-scanner/%i.env.
 EnvironmentFile=/etc/rtl-scanner/%i.env
 # scanner.py emits JSON lines on stdout; scan_ingest.py reads them on stdin
 # and writes to ClickHouse. bash -c is needed because systemd ExecStart does
 # not support shell pipes natively. exec replaces the bash with the pipeline
 # so systemd tracks the real PID (well — tracks the shell, but the shell's
 # `exec` replaces itself with scanner.py, and scan_ingest.py runs as a child).
-# %h is the user's home directory (= /home/<user> on leap), matching the
+# %h is the user's home directory (= /home/<user>), matching the
 # pattern used by spectrum-features/classifier units.
 ExecStart=/bin/bash -c 'exec /usr/bin/python3 %h/dev/rf_luv/spectrum/scanner.py | /usr/bin/python3 %h/dev/rf_luv/spectrum/scan_ingest.py'
 Restart=on-failure

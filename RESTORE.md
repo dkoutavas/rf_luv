@@ -205,35 +205,34 @@ Recreate the rest by hand:
 
 | Live file | Source | Created by |
 |-----------|--------|------------|
-| `/etc/rtl-scanner/v4-01.env`, `v3-01.env` | `ops/rtl-scanner/env.*.example` | `install-host.sh` (gain, port, index filled in) |
+| `/etc/rtl-scanner/v4-01.env`, `v3-01.env` | `ops/rtl-scanner/env.*.example` | `install-host.sh` (gain and port filled in) |
 | `/etc/rtl-scanner/escalator.env` | `ops/rtl-tcp/escalator.env.example` | `install-host.sh` (`SERIALS` filled in) |
 | `/etc/rtl-scanner/clickhouse-backup.env` | `ops/clickhouse-backup/clickhouse-backup.env.example` | `install-host.sh` (`BACKUP_DIR` uncommented) |
-| `/etc/rtl-scanner/notify.env` | `ops/notify/notify.env.example` | you. **Generate a new random `NTFY_TOPIC`**; the old one leaked into a committed doc |
+| `/etc/rtl-scanner/notify.env` | `ops/notify/notify.env.example` | `install-trip-hardening.sh`. Empty `NTFY_TOPIC` means desktop popups; for phone alerts **generate a new random topic**, the old one leaked into a committed doc |
+| `/etc/rtl-scanner/freshness-probe.env`, `signal-quality-probe.env` | `ops/spectrum-monitor/*.env.example` | `install-trip-hardening.sh`. Set `EXPECTED_DONGLES` to the scanner serial(s) |
 | `/etc/rtl-scanner/noaa-scheduler.env` | none | you, optional: RX lat/lon/alt |
-| `spectrum/.env` | `spectrum/.env.example` | you |
 | `acars/.env` | `acars/env.v4-01.example` | you (step 10) |
 
 ## Step 10: optional pipelines
 
 ```bash
-# ACARS on the V4 (stops the scanner while it runs; see acars/DEPLOY.md):
-systemctl --user stop rtl-scanner@v4-01
-cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars
+# A decoder on a dongle: pipeline.sh pauses that dongle's scanner and resumes
+# it on 'down'. RDS needs the notch-free dongle (the V3 since 2026-09-26):
+bash pipeline.sh up rds v3-01        # BEST 92.6 by default; 'down rds v3-01' to stop
+cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars v4-01
 
 bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffold)
-bash ops/remote-desktop/enable-xrdp.sh    # xrdp + icewm
 ```
 
 ---
 
 ## Known transients
 
-- **`rtl_tcp` can SIGABRT under reconnect churn.** The scanner reconnects on
-  every sweep. On 2026-09-20 the V4's `rtl_tcp` core-dumped once after 13
-  minutes and systemd restarted it in 11 s. The unit allows 100 restarts per
-  10 minutes and `rtl-reset-failed.timer` clears failure state every 5
-  minutes, so this self-heals. If the restart counter climbs, look at
-  `coredumpctl info rtl_tcp` and `journalctl --user -u rtl-tcp@v4-01`.
+- **Handing a dongle back to the scanner takes up to ~100 s.** After SDR++ or a
+  decoder disconnects, `rtl_tcp` finishes closing that session before it
+  accepts the scanner; the scanner retries every 10 s. (The per-sweep
+  reconnect churn that crashed `rtl_tcp` with SIGABRT is gone since the
+  scanner keeps one connection per run.)
 - **`udevadm trigger` re-attaches the DVB driver** on a live host. Both
   installers now run `modprobe -r dvb_usb_rtl28xxu` after the trigger.
 - **A loose dongle vanishes from `lsusb`.** Before debugging software, check
@@ -254,6 +253,6 @@ bash ops/remote-desktop/enable-xrdp.sh    # xrdp + icewm
 - Component installers: each `ops/*/install.sh` header
 - Dongle serials: `spectrum/docs/dongle_identity.md`
 - Ghost specifics: `ghost/HOSTPREP.md`, `ghost/docs/session-handoff-20260919.md`
-- ACARS deploy: `acars/DEPLOY.md`
+- ACARS: `acars/README.md` (quick start with `pipeline.sh`)
 - Backups: `ops/clickhouse-backup/README.md`
 - Ports, dongle policy, reliability stack: `CLAUDE.md`

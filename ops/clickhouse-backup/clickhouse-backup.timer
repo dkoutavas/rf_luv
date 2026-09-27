@@ -5,7 +5,7 @@ Description=Daily: snapshot rf_luv ClickHouse databases
 # 04:17 UTC daily. Off-peak, and deliberately not on a round minute to avoid
 # colliding with the spectrum classifier (*:0/5:30) and the 09:00 heartbeat.
 OnCalendar=*-*-* 04:17:00 UTC
-# Persistent=true: if leap was off at 04:17 (it sleeps / travels), run the
+# Persistent=true: if the host was off at 04:17 (the laptop sleeps between sessions), run the
 # missed backup on next boot rather than skipping a day.
 Persistent=true
 

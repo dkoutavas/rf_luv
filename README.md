@@ -62,8 +62,8 @@ bash ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickho
 `install-host.sh` handles the DVB kernel blacklist, the udev rule, the rtl_tcp
 units and watchdog, per-dongle config files, and daily backups in one command.
 Run `--verify-only` to check everything passes. Open Grafana at
-<http://localhost:3000> (admin/admin). The first spectrum sweep completes in
-about four minutes.
+<http://localhost:3000> (admin/admin). The first spectrum sweep lands within a
+minute.
 
 Full rebuild manual: [RESTORE.md](RESTORE.md). The installer runs on openSUSE,
 Debian/Ubuntu, Fedora and Arch. A Windows host running `rtl_tcp.exe` is an
@@ -153,8 +153,9 @@ Quarter-wave arm length: **arm (cm) = 7125 / frequency (MHz)**.
 | HF / shortwave | 3–30 MHz | long wire | 10–20 m, direct sampling mode |
 
 Athens note: FM transmitters on Lycabettus and Hymettus are strong enough to
-overload the dongle above gain 12. Use the FM bandstop filter on the scanner
-dongle and start with low gain.
+overload the dongle above gain 12 indoors, and above about 3.7 on an outdoor
+antenna. Use the FM bandstop filter on the scanner dongle and start with low
+gain; the scanner also steps its gain down by itself when a sweep clips.
 
 ## Reference
 

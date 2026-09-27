@@ -384,7 +384,8 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
-    "ghost"
+    "ghost",
+    "rf_luv"
   ],
   "templating": {
     "list": []

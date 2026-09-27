@@ -28,13 +28,13 @@ ADS-B already gives you aircraft *positions*. ACARS gives the *content* layer: f
 ## Architecture decisions
 
 - **Decoder image**: the airframesio acarsdec fork via the sdr-enthusiasts image, which is actively maintained and has SoapySDR + Soapy-rtltcp built-in. Building from TLeconte upstream was rejected because it doesn't speak rtl_tcp natively. The overlay `@sha256`-pins the image per the project's "never use latest" rule; the SoapySDR build the soak ran on was `4.1.6Build1494` (built 2026-04-16). If the live digest could not be resolved at consolidation time it is left as a clearly-marked TODO placeholder to resolve on the next deploy.
-- **rtl_tcp via SoapySDR**: `SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>` preserves the existing leap rtl_tcp watchdog/escalator stack. acarsdec is a TCP client to rtl_tcp, identical to how the spectrum scanner connects.
+- **rtl_tcp via SoapySDR**: `SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>` keeps the host's rtl_tcp watchdog/escalator stack in charge of the dongle. acarsdec is a TCP client to rtl_tcp, identical to how the spectrum scanner connects.
 - **Decoder ↔ ingest via UDP**: mirrors the AIS pipeline (AIS-catcher → ais_ingest.py). Decoder image emits JSON via `OUTPUT_SERVER_MODE=udp` to `acars-ingest:5550`. No code in the decoder image; just configuration.
 - **Numbered migrations**: schema lives under `clickhouse/migrations/NNN_*.sql`, applied by `migrate.py` at ingest container startup. ISM uses a single `init.sql`; the roadmap calls for numbered migrations in new pipelines from day 1.
-- **Dongle assignment**: V4 hosts ACARS, V3 stays on scanning. See `acars/env.v4-01.example` for the per-dongle env shape mirroring `ops/rtl-scanner/env.v4-01.example`.
-- **Classifier feedback**: `acars.freq_activity` is the hook. Once spectrum-classifier is taught to read it (via ClickHouse `remote()`), confirmed ACARS frequencies bump confidence in `spectrum.known_frequencies` automatically.
+- **Dongle assignment**: any dongle, picked per session with `pipeline.sh up acars <serial>`, which pauses that dongle's scanner. The overlay builds `SOAPYSDR` from the chosen dongle's `RTL_TCP_PORT`.
+- **Classifier feedback**: `spectrum/acars_feedback.py` (hourly timer, `ops/spectrum-acars-feedback/`) reads `acars.messages` over plain HTTP and writes confirmed ACARS frequencies into `spectrum.listening_log`, which the classifier uses as a soft prior. `acars.freq_activity` was the original hook but its materialized view undercounts, so nothing reads it.
 
-## Quick start (leap, production)
+## Quick start
 
 Assumes the shared data layer is already up (`docker network create rf_luv_net`
 then `bash infra/up.sh`). The infra `ch-bootstrap` one-shot has already created
@@ -42,28 +42,25 @@ the `acars` database, user, and schema, so there is no per-pipeline migration
 step here.
 
 ```bash
-# 1. Stop the V4 scanner (V4 becomes ACARS-dedicated)
-ssh dio_nysis@192.168.2.10 \
-  'systemctl --user stop rtl-scanner@v4-01.service && \
-   systemctl --user disable rtl-scanner@v4-01.service'
-# rtl-tcp@v4-01.service stays running; acarsdec needs it.
+# 1. Optional overrides (frequencies, gain)
+cp acars/env.v4-01.example acars/.env
 
-# 2. Deploy the decoder against the always-on infra
-ssh dio_nysis@192.168.2.10
-cd ~/dev/rf_luv/acars
-cp env.v4-01.example .env       # then edit if needed
-cd ~/dev/rf_luv && bash pipeline.sh up acars
+# 2. Start the decoder on a dongle. pipeline.sh pauses that dongle's scanner;
+#    rtl-tcp@<serial> keeps running and acarsdec connects to it.
+bash pipeline.sh up acars v4-01
 
 # 3. Watch
-bash pipeline.sh logs acars     # or: docker logs -f the acarsdec / acars-ingest containers
+bash pipeline.sh logs acars
 # acarsdec should print "Decoded N messages" every minute or two
 # acars-ingest should print "Flushed N rows" every BATCH_SIZE messages or FLUSH_INTERVAL_SECONDS
 
-# 4. Open Grafana
-# http://192.168.2.10:3000 (admin / admin), ACARS folder
+# 4. Grafana at http://localhost:3000 (admin / admin), ACARS folder
+
+# 5. Stop, and resume the scanner
+bash pipeline.sh down acars v4-01
 ```
 
-## Local smoke test (no radio, no leap)
+## Local smoke test (no radio)
 
 Bring up the shared data layer first, then start just the ingest worker. UDP
 :5550 is internal to the `rf_luv_net` network (no host port), so the simplest
@@ -103,10 +100,10 @@ Per the decoding-roadmap verification checklist:
 2. **Error rate**: `SELECT avg(err_count) FROM acars.messages WHERE timestamp > now() - INTERVAL 1 HOUR`. If consistently > 0.3, drop `ACARS_GAIN` by 5 dB.
 3. **rtl_tcp recovery**: trigger the V4 escalator manually:
    ```
-   ssh dio_nysis@192.168.2.10 sudo systemctl restart rtl-tcp@v4-01.service
+   systemctl --user restart rtl-tcp@v4-01.service
    ```
    acarsdec should reconnect within ~30 s. If it doesn't, the SoapyRTLTCP plugin's reconnect logic is the suspect; check `bash pipeline.sh logs acars`.
-4. **Cross-correlation with ADS-B**: random-sample 5 messages, check the `tail` against `adsb.aircraft_latest` for the same time window. If acars `tail` is consistently absent from ADS-B (broader-area receivers seeing planes leap doesn't), the V4 antenna or gain may be over-reaching.
+4. **Cross-correlation with ADS-B**: random-sample 5 messages, check the `tail` against `adsb.aircraft_latest` for the same time window. If acars `tail` is consistently absent from ADS-B (broader-area receivers seeing planes this receiver doesn't), the V4 antenna or gain may be over-reaching.
 5. **Frequency activity**: the `freq_activity` table should populate with rows for 131.525, 131.725, 131.825 within the first hour. Empty rows = decoder isn't tuning correctly; check `SOAPYSDR` env var.
 
 ## Schema migrations
@@ -142,7 +139,7 @@ acarsdec to acars-ingest UDP traffic stays on the `rf_luv_net` network (no host 
 - `entrypoint.sh` - runs the ingest worker (schema is applied by ch-bootstrap)
 - `Dockerfile.ingest` - minimal python:3.12-slim
 - `compose.overlay.yml` - acarsdec (@sha256-pinned) + acars-ingest on the shared rf_luv_net
-- `env.v4-01.example` - leap V4 deployment template
+- `env.v4-01.example` - optional overrides (frequencies, gain) for `acars/.env`
 
 Grafana provisioning for ACARS lives under `infra/grafana/provisioning/` (ACARS
 datasource + folder), not in this directory.

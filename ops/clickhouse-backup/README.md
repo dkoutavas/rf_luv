@@ -91,7 +91,8 @@ A failed run fires a CRITICAL ntfy alert via `rf-notify` (if installed).
 
 - Logical (per-table) backup, not physical. Fine for this scale (<5 GB);
   restore time is an insert, not a file copy.
-- The adsb ClickHouse instance has historically run on the Windows host, not
-  leap. Add `adsb` to `DATABASES` only on the host that actually runs it.
+- All eight databases live in the one shared ClickHouse (`infra/`), so the
+  default `DATABASES` list covers every pipeline, including ones with no data
+  yet.
 - This is disaster recovery, not point-in-time: granularity is one snapshot per
   day (per `OnCalendar`).

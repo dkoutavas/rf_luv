@@ -7,7 +7,7 @@
 #   ./pipeline.sh logs <pipe>             tail the pipeline's container logs (no follow)
 #   ./pipeline.sh ps <pipe>               show the pipeline's container status
 #
-# Valid pipes: acars adsb ais ism rds spectrum.  (Plus:  ./pipeline.sh demo)
+# Valid pipes: acars adsb ais ism rds.  (Plus:  ./pipeline.sh demo)
 #   - [serial] picks the dongle (default v4-01). Its rtl_tcp port comes from
 #     /etc/rtl-scanner/<serial>.env and reaches the overlay as RTL_TCP_PORT.
 #   - rtl_tcp serves one client at a time and the scanner holds its connection,
@@ -18,8 +18,8 @@
 #   - adsb is refused for now: readsb has no rtl_tcp input (it reads a USB
 #     dongle or already-decoded network messages), so its overlay cannot work
 #     against rtl_tcp.
-#   - spectrum's overlay is the profile-gated containerized scanner (a smoke-test);
-#     the steady scanner runs as native systemd on the local host (ops/rtl-scanner).
+#   - The spectrum scanner is not a pipe: it runs natively under systemd
+#     (rtl-scanner@<serial>, ops/rtl-scanner).
 #
 # Guardrail: 'infra' is refused and project rf_luv_infra is never targeted, so
 # this script can never tear down the always-on data layer.
@@ -28,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NET=rf_luv_net
 CH_PING_URL="http://127.0.0.1:8123/ping"
-VALID_PIPES="acars adsb ais ism rds spectrum"
+VALID_PIPES="acars adsb ais ism rds"
 
 DEFAULT_SERIAL=v4-01
 RF_MODE="$SCRIPT_DIR/ops/rf-mode"

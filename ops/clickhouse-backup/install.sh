@@ -15,7 +15,7 @@ set -euo pipefail
 #   - `rf-notify` installed (ops/install-trip-hardening.sh) for failure alerts
 #     [optional: backup still runs without it]
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/clickhouse-backup/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

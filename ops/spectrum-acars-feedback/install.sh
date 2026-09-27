@@ -12,7 +12,7 @@ set -euo pipefail
 #   - spectrum/ migration 022 applied (`bash ops/spectrum-classifier/install.sh`
 #     re-runs migrations as a side effect, or run migrate.py directly)
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/spectrum-acars-feedback/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

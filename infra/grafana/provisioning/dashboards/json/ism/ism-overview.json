@@ -169,7 +169,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["ism", "iot", "433mhz", "rtl-sdr"],
+  "tags": ["ism", "iot", "433mhz", "rtl-sdr", "rf_luv"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6).
 """Signal-quality probe — catches "deaf scanner" failure mode.
 
 The freshness probe is sibling: it asks "are rows landing in spectrum.scans?"

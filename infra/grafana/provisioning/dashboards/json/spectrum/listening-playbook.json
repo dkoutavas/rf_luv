@@ -643,7 +643,8 @@
   "tags": [
     "spectrum",
     "listening",
-    "rtl-sdr"
+    "rtl-sdr",
+    "rf_luv"
   ],
   "templating": {
     "list": [

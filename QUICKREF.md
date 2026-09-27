@@ -107,8 +107,10 @@ rtl_sdr -f 137.1M -s 2048000 -g 12 -d 0 -n 20480000 noaa_iq.raw   # ~10 sec
 
 ## Gain
 
-Tested at Polygono: **gain 12** on both dongles. Gain 20 clips on strong
-Athens FM and airband. Start low, raise by 5 dB. Ghost copies of strong signals
+Measured at Polygono (2026-09): **gain 12** indoors or with an FM bandstop
+fitted. Outdoors on the patio with no bandstop, FM saturates the bare V3: the
+scanner steps itself down to 2 dB, and SDR++ wants about 7.7 dB (step 5).
+Gain 20 clips on strong Athens FM and airband. Start low, raise by 5 dB. Ghost copies of strong signals
 at odd frequencies = gain too high (intermodulation from the 8-bit ADC).
 
 Direct-USB SDR++ on V3: the saved profile has gain 0 (`rtl_sdr_config.json`).

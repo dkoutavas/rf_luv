@@ -21,7 +21,7 @@ Everything here is reception or self-generated audio in the flat. No transmit,
 no message-payload decode; RDS is public broadcast metadata only.
 
 Usage:
-    python3 spiritbox.py --mode forward --dwell-ms 150 --duration 60
+    python3 spiritbox.py --mode forward --dwell-ms 150
     python3 spiritbox.py --mode random --steps 200 --fx
     python3 spiritbox.py --file capture.cs8 --dry-run    # offline, no hardware
 """
@@ -186,8 +186,12 @@ def _label_for(freq_hz: int, stations: dict, tol_hz: int = 100000):
 
 # ── the sweep ─────────────────────────────────────────────────────────────────
 def run_sweep(client, session_id: str, mode: str, dwell_ms: int, step_hz: int,
-              n_steps: int, stations: dict, seed=None):
-    """Sweep the FM band; return (audio float array @48k, list of step dicts)."""
+              n_steps: int, stations: dict, seed=None, noise_ms: int = 0):
+    """Sweep the FM band; return (audio float array @48k, list of step dicts).
+
+    noise_ms > 0 puts that much synthetic noise between steps, as the SB7
+    does. Step t_start/t_end in the sidecar account for the gaps.
+    """
     from rds_decoder import Decimator  # local, numpy-only
 
     client.set_sample_rate(FS_SWEEP)
@@ -197,11 +201,15 @@ def run_sweep(client, session_id: str, mode: str, dwell_ms: int, step_hz: int,
         plan = (plan * ((n_steps // len(plan)) + 1))[:n_steps]
     cap_n = int(FS_SWEEP * dwell_ms / 1000.0)
 
-    audio_parts, steps = [], []
+    noise_n = int(dsp.FS_AUDIO * noise_ms / 1000.0)
+
+    segs, steps = [], []
     t_cursor = 0.0
     for idx, (f, raw) in enumerate(_captures(client, plan, cap_n, FS_SWEEP)):
+        if idx:
+            t_cursor += noise_n / dsp.FS_AUDIO
         iq = Decimator(fs_in=FS_SWEEP, fs_out=dsp.FS_CAPTURE).process(dsp.cu8_to_complex(raw))
-        seg = dsp.wfm_demod(iq)
+        seg = dsp.wfm_demod(iq, normalize=False)
         dur = seg.size / dsp.FS_AUDIO
         ps, pi, rt = _label_for(f, stations)
         steps.append({
@@ -211,9 +219,20 @@ def run_sweep(client, session_id: str, mode: str, dwell_ms: int, step_hz: int,
             "clip_fraction": round(dsp.clip_fraction_u8(raw), 4),
             "rds_pi": int(pi), "rds_ps": ps, "rds_rt": rt,
         })
-        audio_parts.append(seg)
+        segs.append(seg)
         t_cursor += dur
-    audio = np.concatenate(audio_parts) if audio_parts else np.zeros(0)
+
+    # Noise at the median step loudness sits at radio level: most FM grid
+    # points here are static, so it matches the hiss of an empty channel.
+    parts = []
+    if segs:
+        rms = float(np.median([np.sqrt(np.mean(x ** 2)) for x in segs if x.size]))
+        rng = np.random.default_rng(seed)
+        for i, seg in enumerate(segs):
+            if i and noise_n:
+                parts.append(dsp.hiss(noise_n, rms, rng))
+            parts.append(seg)
+    audio = dsp.fixed_gain(np.concatenate(parts)) if parts else np.zeros(0)
     return audio, steps
 
 
@@ -227,10 +246,12 @@ def write_wav(path: str, audio: np.ndarray, fs: int = dsp.FS_AUDIO):
         w.writeframes(dsp.to_int16(audio).tobytes())
 
 
-def write_sidecar(path: str, session_id: str, mode: str, steps: list, fx: dict):
+def write_sidecar(path: str, session_id: str, mode: str, steps: list, fx: dict,
+                  noise_ms: int = 0):
     payload = {
         "session_id": session_id, "sweep_mode": mode, "sample_rate_hz": dsp.FS_AUDIO,
-        "fx": fx, "steps": steps,
+        # synthetic noise between steps (generated, not received)
+        "noise_ms": noise_ms, "fx": fx, "steps": steps,
     }
     with open(path, "w") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -265,15 +286,17 @@ def run_live(args, client_factory=None):
         if not args.no_rds:
             log.info("RDS pre-pass: ranking + decoding up to %d FM carriers", RDS_TOP_N)
             stations, station_rows = build_station_table(client, session_id, step_hz)
+        noise_ms = 0 if args.no_noise else args.noise_ms
         audio, steps = run_sweep(client, session_id, args.mode, args.dwell_ms,
-                                 step_hz, args.steps, stations, seed=args.seed)
+                                 step_hz, args.steps, stations, seed=args.seed,
+                                 noise_ms=noise_ms)
         fx = {}
         if args.fx:
             fx = {"slapback_ms": 90.0, "feedback": 0.25, "reverb_decay": 0.3}
             audio = dsp.slapback(audio, dsp.FS_AUDIO, fx["slapback_ms"], fx["feedback"])
             audio = dsp.reverb(audio, dsp.FS_AUDIO, fx["reverb_decay"])
         write_wav(wav_path, audio)
-        write_sidecar(json_path, session_id, args.mode, steps, fx)
+        write_sidecar(json_path, session_id, args.mode, steps, fx, noise_ms)
         log.info("wrote %s (%d steps, %.1fs audio) + sidecar", wav_path, len(steps),
                  audio.size / dsp.FS_AUDIO)
         if not args.dry_run:
@@ -329,6 +352,9 @@ def build_parser():
     p.add_argument("--step-khz", type=int, default=100, help="channel grid spacing")
     p.add_argument("--steps", type=int, default=0, help="fixed step count (0 = one pass)")
     p.add_argument("--seed", type=int, default=None, help="random-sweep seed")
+    p.add_argument("--noise-ms", type=int, default=50,
+                   help="synthetic noise between steps, as the SB7 does")
+    p.add_argument("--no-noise", action="store_true", help="no noise between steps")
     p.add_argument("--fx", action="store_true", help="apply slapback+reverb post-fx")
     p.add_argument("--no-rds", action="store_true", help="skip the RDS station pre-pass")
     p.add_argument("--no-lock", action="store_true", help="skip the coordinator dongle lock")

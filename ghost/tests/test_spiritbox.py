@@ -159,7 +159,8 @@ def test_wav_roundtrip():
         assert np.allclose(back, dsp.to_int16(audio))
 
 
-def test_run_live_end_to_end(monkeypatch=None):
+def _run_e2e(extra_args=()):
+    """run_live over a 5-step band with a fake client; returns (int16 audio, sidecar, client)."""
     buffers = {spiritbox.FS_SWEEP: make_wfm_tone_cu8(fs=spiritbox.FS_SWEEP, dur=0.2)}
     client = FakeClient(buffers)
     # Narrow the band so the sweep is a handful of steps, and skip RDS/lock/CH.
@@ -169,25 +170,52 @@ def test_run_live_end_to_end(monkeypatch=None):
         spiritbox.WAV_DIR = d
         args = spiritbox.build_parser().parse_args(
             ["--mode", "forward", "--dwell-ms", "150", "--no-rds",
-             "--no-lock", "--dry-run"])
+             "--no-lock", "--dry-run", *extra_args])
         try:
             wav_path = spiritbox.run_live(args, client_factory=lambda: client)
-            assert os.path.exists(wav_path)
-            side = os.path.splitext(wav_path)[0] + ".json"
-            meta = json.load(open(side))
-            assert meta["sweep_mode"] == "forward"
-            assert len(meta["steps"]) == 5          # 100.0..100.4 MHz @ 100 kHz
-            s0 = meta["steps"][0]
-            for k in ("step_idx", "t_start", "t_end", "freq_hz", "dwell_ms",
-                      "rssi_db", "rds_ps", "rds_rt"):
-                assert k in s0, f"sidecar step missing {k}"
-            assert client.closed, "client must be closed after the session"
+            meta = json.load(open(os.path.splitext(wav_path)[0] + ".json"))
             with wave.open(wav_path, "rb") as w:
                 audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-            peak = _peak_freq(audio.astype(np.float64))
-            assert abs(peak - 1000.0) < 60.0, f"sweep audio peak {peak:.0f} Hz, expected ~1000"
         finally:
             spiritbox.FM_START, spiritbox.FM_END, spiritbox.WAV_DIR = orig
+    return audio, meta, client
+
+
+def test_run_live_end_to_end():
+    audio, meta, client = _run_e2e()
+    assert meta["sweep_mode"] == "forward"
+    assert len(meta["steps"]) == 5          # 100.0..100.4 MHz @ 100 kHz
+    s0 = meta["steps"][0]
+    for k in ("step_idx", "t_start", "t_end", "freq_hz", "dwell_ms",
+              "rssi_db", "rds_ps", "rds_rt"):
+        assert k in s0, f"sidecar step missing {k}"
+    assert client.closed, "client must be closed after the session"
+    peak = _peak_freq(audio.astype(np.float64))
+    assert abs(peak - 1000.0) < 60.0, f"sweep audio peak {peak:.0f} Hz, expected ~1000"
+
+
+def test_noise_gaps_between_steps():
+    seg, gap = 7200, 2400                   # 150 ms and 50 ms at 48 kHz
+    audio, meta, _ = _run_e2e()
+    assert meta["noise_ms"] == 50
+    assert audio.size == 5 * seg + 4 * gap, audio.size
+    assert meta["steps"][1]["t_start"] == 0.2
+    audio, meta, _ = _run_e2e(["--no-noise"])
+    assert meta["noise_ms"] == 0
+    assert audio.size == 5 * seg, audio.size
+    assert meta["steps"][1]["t_start"] == 0.15
+
+
+def test_fixed_gain_keeps_station_levels():
+    # Per-step normalisation made every step equally loud; one gain for the
+    # whole sweep keeps a 75 kHz-deviation station 5x louder than a 15 kHz one.
+    def demod(dev):
+        return dsp.wfm_demod(dsp.cu8_to_complex(make_wfm_tone_cu8(dev=dev)), normalize=False)
+    loud, quiet = demod(75000.0), demod(15000.0)
+    out = dsp.fixed_gain(np.concatenate([loud, quiet]))
+    rms = lambda x: float(np.sqrt(np.mean(x ** 2)))
+    ratio = rms(out[:loud.size]) / rms(out[loud.size:])
+    assert 4.0 < ratio < 6.0, f"level ratio {ratio:.2f}, expected ~5"
 
 
 def test_sweep_labels_survive_retune_latency():

@@ -37,14 +37,17 @@ logging.basicConfig(
 log = logging.getLogger("scan-ingest")
 
 # ─── Graceful shutdown ───────────────────────────────────
-
-running = True
+#
+# systemd sends SIGTERM to both ends of the `scanner.py | scan_ingest.py`
+# pipe at once (and Ctrl-C sends SIGINT to both). The scanner then finishes
+# its sweep, prints run_end and exits. If the ingest stopped reading on the
+# signal, run_end and the last rows would arrive after nobody reads them,
+# and scan_runs.ended_at would never be set. So the ingest keeps reading and
+# exits at end of input, which is exactly when the scanner closes the pipe.
 
 
 def handle_signal(signum, frame):
-    global running
-    log.info(f"Received signal {signum}, shutting down...")
-    running = False
+    log.info(f"Received signal {signum}, draining until the scanner closes the pipe...")
 
 
 signal.signal(signal.SIGTERM, handle_signal)
@@ -101,8 +104,6 @@ def wait_for_clickhouse(max_retries: int = 30, delay: int = 2):
 
 
 def main():
-    global running
-
     wait_for_clickhouse()
 
     total_inserted = 0
@@ -116,9 +117,6 @@ def main():
     log.info("Reading JSON lines from stdin (scanner pipe)")
 
     for line in sys.stdin:
-        if not running:
-            break
-
         line = line.strip()
         if not line:
             continue

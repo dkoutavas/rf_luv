@@ -142,7 +142,7 @@ cmd_up() {
     preflight
     claim_dongle "$pipe" "$serial"
     echo "[pipeline] up rf_luv_${pipe}"
-    compose_pipe "$pipe" up -d
+    compose_pipe "$pipe" up -d --build   # rebuild local images so code changes reach the container
 }
 
 cmd_down() {
@@ -183,7 +183,7 @@ cmd_rotate() {
     else
         echo "[pipeline] nothing currently up; bringing $target up"
     fi
-    compose_pipe "$target" up -d
+    compose_pipe "$target" up -d --build
 }
 
 cmd_logs() {

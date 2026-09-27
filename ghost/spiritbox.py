@@ -72,7 +72,9 @@ log = logging.getLogger("spiritbox")
 RTL_TCP_HOST = os.environ.get("RTL_TCP_HOST", "127.0.0.1")
 RTL_TCP_PORT = int(os.environ.get("RTL_TCP_PORT", "1235"))   # V3, the ghost dongle
 DONGLE_ID = os.environ.get("GHOST_DONGLE_ID", "v3-01")
-GAIN_DB = float(os.environ.get("GHOST_GAIN", "12"))   # 12 validated for Athens FM (gain 20 clips); override per site
+# 3.7 keeps the bare V3 out of clipping on the patio antenna with a wide capture
+# (the RDS pipeline's value there); 12 was the window antenna at 240 kS/s.
+GAIN_DB = float(os.environ.get("GHOST_GAIN", "3.7"))
 FM_START = int(os.environ.get("GHOST_FM_START", "87500000"))
 FM_END = int(os.environ.get("GHOST_FM_END", "108000000"))
 WAV_DIR = os.environ.get("GHOST_WAV_DIR", "/data/rf_luv/ghost/recordings")

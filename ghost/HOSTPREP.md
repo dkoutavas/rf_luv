@@ -42,15 +42,18 @@ bash ops/install-host.sh --verify-only --scanner v4-01 --ghost v3-01 \
 ## 4. First live ghost run
 
 ```bash
-GHOST_GAIN=12 GHOST_RDS_DWELL_S=4 GHOST_RDS_TOP_N=20 \
+GHOST_RDS_DWELL_S=4 GHOST_RDS_TOP_N=20 \
   python3 ghost/spiritbox.py --mode forward --dwell-ms 150
 docker exec clickhouse clickhouse-client --user ghost --password ghost_local \
   --query "SELECT round(freq_hz/1e6,1) mhz, ps, radiotext FROM ghost.stations ORDER BY freq_hz"
 ```
 
 The WAV and its JSON sidecar land in `/data/rf_luv/ghost/recordings/`
-(`GHOST_WAV_DIR`). Gain 12 is the validated value: gain 20 clipped 8 % on
-Athens FM. A 4 s RDS dwell recovers PS and RadioText; 2 s recovers PI only.
+(`GHOST_WAV_DIR`). The default gain, 3.7, is validated on the patio antenna:
+at most 0.1 % clipping on 2026-09-27. Gain 12 was the value for the window
+antenna with the old 240 kS/s capture (gain 20 clipped 8 % there). The default
+2 s RDS dwell recovered PI and PS for four stations on 2026-09-27; a 4 s dwell
+recovers RadioText more often.
 The coordinator lock is on by default; add `--no-lock` if
 `/var/lib/rtl-coordinator` is not installed yet.
 
@@ -66,5 +69,5 @@ sudo modprobe -r dvb_usb_rtl28xxu 2>/dev/null
 rtl_eeprom -d 0 2>&1 | grep Serial      # confirm which index is which
 rtl_tcp -d 0 -a 127.0.0.1 -p 1235 -s 2048000 &   # V3, ghost   (index as probed)
 rtl_tcp -d 1 -a 127.0.0.1 -p 1234 -s 2048000 &   # V4, scanner
-RTL_TCP_PORT=1235 GHOST_GAIN=12 python3 ghost/spiritbox.py --mode forward --dwell-ms 150 --no-lock
+RTL_TCP_PORT=1235 python3 ghost/spiritbox.py --mode forward --dwell-ms 150 --no-lock
 ```

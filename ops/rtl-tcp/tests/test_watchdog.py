@@ -75,6 +75,16 @@ def test_has_active_client_remote_peer():
     print("PASS has_active_client: remote ESTABLISHED detected")
 
 
+def test_has_active_client_queued_not_accepted():
+    """A connection still in the accept queue (server-side inode 0) is not a
+    session: a wedged rtl_tcp never accepts, so it must be probed."""
+    queued = "   0: 0100007F:04D3 0100007F:C5A0 01 00000000:00000000 00:00000000 00000000  1000 0 0 1\n"
+    accepted = "   1: 0100007F:04D3 0100007F:C5A2 01 00000000:00000000 00:00000000 00000000  1000 0 12345 1\n"
+    assert not wd.has_active_client(1235, proc_lines=[queued]), "queued connection counted as client"
+    assert wd.has_active_client(1235, proc_lines=[queued, accepted]), "accepted client missed"
+    print("PASS has_active_client: queued ignored, accepted detected")
+
+
 def test_has_active_client_empty():
     """No lines at all must return False."""
     assert not wd.has_active_client(1234, proc_lines=[]), "empty returned True"

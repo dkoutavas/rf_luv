@@ -7,11 +7,12 @@ Seen live on 2026-04-18 after ~13 hours of runtime — only physical replug
 recovered. Unbind/rebind via /sys/bus/usb/drivers/usb is the software
 equivalent of replug, so the watchdog escalates to that on repeated failure.
 
-Client-skip rule: rtl_tcp serves one client at a time. If ANY peer has an
-ESTABLISHED connection on the rtl_tcp port, that client IS the health signal.
-Probing would kick it off (2026-09-20: 14 restarts in one SDR++ session).
-A hung SDR++ is noticed by the human; a starved scanner disconnects within
-its own 10 s timeout, leaving idle windows for the probe.
+Client-skip rule: rtl_tcp serves one client at a time. If a peer has an
+ESTABLISHED connection that rtl_tcp has accepted, that client IS the health
+signal. Probing would kick it off (2026-09-20: 14 restarts in one SDR++
+session). A connection still waiting in the accept queue does not count: a
+wedged rtl_tcp never accepts, and on 2026-09-27 the scanner's queued retries
+hid a wedge from the watchdog for 4 minutes.
 
 Recovery requires two consecutive failed probes before acting. A single
 failure is usually rtl_tcp's own RestartSec window after a crash (2026-09-20:
@@ -102,13 +103,16 @@ def dongle_present(serial: str, dev_dir: str = "/dev") -> bool:
 
 
 def has_active_client(port: int, proc_lines=None) -> bool:
-    """True if rtl_tcp's port has ANY ESTABLISHED connection (loopback included).
+    """True if rtl_tcp has accepted an ESTABLISHED connection on its port
+    (loopback included).
 
     rtl_tcp serves one client at a time; an active probe kicks the current
     client off. On this host every consumer (SDR++, scanner, spiritbox) connects
     from 127.0.0.1, so loopback peers are real clients, not infrastructure noise.
-    An established peer IS the health signal. proc_lines is an optional iterable
-    of /proc/net/tcp-format lines (for tests); when None, read the real files.
+    A server-side row with inode 0 is a connection still in the accept queue:
+    no process owns it yet, so it is not a session. proc_lines is an optional
+    iterable of /proc/net/tcp-format lines (for tests); when None, read the
+    real files.
     """
     target_local = f"{port:04X}"
 
@@ -128,10 +132,10 @@ def has_active_client(port: int, proc_lines=None) -> bool:
         for source in sources:
             for line in source:
                 parts = line.split()
-                if len(parts) < 4:
+                if len(parts) < 10:
                     continue
-                local_addr, state = parts[1], parts[3]
-                if state != "01":  # TCP_ESTABLISHED
+                local_addr, state, inode = parts[1], parts[3], parts[9]
+                if state != "01" or inode == "0":  # not ESTABLISHED, or not accepted
                     continue
                 local_port_hex = local_addr.rsplit(":", 1)[-1]
                 if local_port_hex.upper() == target_local:
@@ -243,8 +247,8 @@ def main():
         return
     state["absent_skip_count"] = 0
 
-    # rtl_tcp is single-client: if ANY peer has an ESTABLISHED connection,
-    # that client IS the health signal. Probing would kick it off.
+    # rtl_tcp is single-client: an accepted ESTABLISHED client IS the health
+    # signal. Probing would kick it off.
     if has_active_client(port):
         if state["consecutive_failures"] > 0:
             log("client connected; clearing failure counter", serial)

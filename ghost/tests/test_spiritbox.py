@@ -78,6 +78,36 @@ class FakeClient:
     def close(self): self.closed = True
 
 
+class FakeLaggedClient:
+    """rtl_tcp stand-in with retune latency. A new frequency shows up in the
+    byte stream `lag` bytes after set_frequency, like the real 256 KiB USB
+    blocks. Each frequency streams a constant IQ level, so a capture's RSSI
+    tells which frequency it really came from."""
+    def __init__(self, level_of, lag=450_000):
+        self.level_of = level_of        # {freq_hz: u8 level}
+        self.lag = lag
+        self.pos = 0
+        self.changes = [(0, None)]      # (stream position, freq), position-ordered
+        self.closed = False
+
+    def set_sample_rate(self, r): pass
+    def set_gain(self, g): pass
+    def set_frequency(self, f): self.changes.append((self.pos + self.lag, int(f)))
+
+    def read_samples(self, n):
+        out, p, end = bytearray(), self.pos, self.pos + n
+        while p < end:
+            freq = [f for q, f in self.changes if q <= p][-1]
+            nxt = min([q for q, _ in self.changes if q > p] + [end])
+            out += bytes([self.level_of.get(freq, 128)]) * (nxt - p)
+            p = nxt
+        self.pos = end
+        return bytes(out)
+
+    def discard(self, n): self.read_samples(n)
+    def close(self): self.closed = True
+
+
 def _peak_freq(audio, fs=dsp.FS_AUDIO):
     spec = np.abs(np.fft.rfft(audio * np.hanning(audio.size)))
     freqs = np.fft.rfftfreq(audio.size, 1.0 / fs)
@@ -130,7 +160,7 @@ def test_wav_roundtrip():
 
 
 def test_run_live_end_to_end(monkeypatch=None):
-    buffers = {dsp.FS_CAPTURE: make_wfm_tone_cu8(dur=0.2)}
+    buffers = {spiritbox.FS_SWEEP: make_wfm_tone_cu8(fs=spiritbox.FS_SWEEP, dur=0.2)}
     client = FakeClient(buffers)
     # Narrow the band so the sweep is a handful of steps, and skip RDS/lock/CH.
     orig = (spiritbox.FM_START, spiritbox.FM_END, spiritbox.WAV_DIR)
@@ -152,8 +182,31 @@ def test_run_live_end_to_end(monkeypatch=None):
                       "rssi_db", "rds_ps", "rds_rt"):
                 assert k in s0, f"sidecar step missing {k}"
             assert client.closed, "client must be closed after the session"
+            with wave.open(wav_path, "rb") as w:
+                audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+            peak = _peak_freq(audio.astype(np.float64))
+            assert abs(peak - 1000.0) < 60.0, f"sweep audio peak {peak:.0f} Hz, expected ~1000"
         finally:
             spiritbox.FM_START, spiritbox.FM_END, spiritbox.WAV_DIR = orig
+
+
+def test_sweep_labels_survive_retune_latency():
+    # Before the fix an 8 KiB discard let each step capture a frequency
+    # from several steps earlier, so labels and audio disagreed.
+    step, start = 100_000, 100_000_000
+    levels = {start + k * step: 140 + 15 * k for k in range(6)}
+    client = FakeLaggedClient(levels)
+    orig = (spiritbox.FM_START, spiritbox.FM_END)
+    try:
+        spiritbox.FM_START, spiritbox.FM_END = start, start + 5 * step
+        _, steps = spiritbox.run_sweep(client, "t", "forward", 150, step, 0, {})
+    finally:
+        spiritbox.FM_START, spiritbox.FM_END = orig
+    assert len(steps) == 6
+    for s in steps:
+        want = dsp.rssi_dbfs(dsp.cu8_to_complex(bytes([levels[s["freq_hz"]]]) * 2000))
+        assert abs(s["rssi_db"] - want) < 0.5, \
+            f"step at {s['freq_hz']} captured {s['rssi_db']} dB, its own level is {want:.1f} dB"
 
 
 def test_rds_prepass_finds_a_station():

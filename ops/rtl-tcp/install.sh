@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# rtl_tcp reliability stack installer (dual-dongle ready).
-#
-# Installs both the legacy singleton units (rtl_tcp.service / rtl-tcp-watchdog)
-# AND the new template units (rtl-tcp@.service / rtl-tcp-watchdog@.service +
-# .timer) side-by-side, so the cutover runbook can swap between them without
-# a rebuild. Also installs the rtl-tcp-by-serial wrapper and the updated
-# USB-reset helper that accepts a serial argument.
+# rtl_tcp reliability stack installer (one template stack per dongle serial).
 #
 # What this script does:
-#   (1) Install systemd user units (both singleton and template)
+#   (1) Install the systemd user template units (rtl-tcp@, rtl-tcp-watchdog@)
+#       and the reset-failed safety net
 #   (2) Install the wrapper + watchdog + USB-reset helpers
 #   (3) Install the udev rules for stable dongle symlinks
 #   (4) Install the sudoers entry (allows per-serial USB resets)
 #   (5) Enable linger + journal group (if not already)
 #
-# What this script does NOT do:
-#   - Start/stop the singleton rtl_tcp.service (leave the running pipeline
-#     alone — cutover runbook does that step explicitly)
-#   - Enable the template instances (explicit during cutover)
+# It does not enable any instance; ops/install-host.sh does that per serial.
 #
 # Run on the host after `git pull`:
 #   bash ops/rtl-tcp/install.sh
@@ -48,13 +40,8 @@ for tool in rtl_tcp rtl_test rtl_eeprom; do
     fi
 done
 
-step "Install user systemd units (singleton + template)"
+step "Install user systemd template units"
 mkdir -p "$USER_UNIT_DIR"
-# Singletons (legacy — preserved for backward compat during cutover)
-install -m 0644 "$SRC_DIR/rtl_tcp.service"          "$USER_UNIT_DIR/"
-install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.service" "$USER_UNIT_DIR/"
-install -m 0644 "$SRC_DIR/rtl-tcp-watchdog.timer"   "$USER_UNIT_DIR/"
-# Template units
 install -m 0644 "$SRC_DIR/rtl-tcp@.service"              "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.service"     "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.timer"       "$USER_UNIT_DIR/"
@@ -65,7 +52,7 @@ install -m 0644 "$SRC_DIR/rtl-tcp-watchdog@.timer"       "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-reset-failed.service"      "$USER_UNIT_DIR/"
 install -m 0644 "$SRC_DIR/rtl-reset-failed.timer"        "$USER_UNIT_DIR/"
 systemctl --user daemon-reload
-info "$USER_UNIT_DIR (singletons + templates + reset-failed safety net installed)"
+info "$USER_UNIT_DIR (templates + reset-failed safety net installed)"
 
 step "Install wrapper + watchdog + USB-reset helper"
 sudo install -m 0755 "$SRC_DIR/rtl-tcp-by-serial.sh" "$WRAPPER_BIN"
@@ -136,17 +123,16 @@ else
 fi
 
 step "Status summary"
-# Do NOT enable/start anything here — cutover is explicit. Just report what's
-# currently active so the operator has a baseline.
-echo "Currently active units matching rtl_tcp/rtl-tcp:"
-systemctl --user list-units --no-pager --all 'rtl_tcp.service' 'rtl-tcp@*.service' \
+# Nothing is enabled here; report what is active as a baseline.
+echo "Currently active rtl-tcp units:"
+systemctl --user list-units --no-pager --all 'rtl-tcp@*.service' \
     'rtl-tcp-watchdog*.service' 'rtl-tcp-watchdog*.timer' 2>/dev/null || true
 
 echo
 echo "Next steps:"
-echo "  Cutover runbook:  spectrum/docs/dongle_cutover_runbook.md"
+echo "  Per-dongle setup: bash ops/install-host.sh (see RESTORE.md)"
 echo "  Sibling installer (scanner template): bash ops/rtl-scanner/install.sh"
-echo "  Enable reset-failed safety net (do this after cutover):"
+echo "  Reset-failed safety net (install-host.sh enables it):"
 echo "    systemctl --user enable --now rtl-reset-failed.timer"
 echo
 echo "Manual verify:  rtl_test 2>&1 | head -5"

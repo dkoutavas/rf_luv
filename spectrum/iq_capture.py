@@ -90,7 +90,8 @@ DONGLE_ID = os.environ.get("SCAN_DONGLE_ID", "v4-01")
 
 DEFAULT_SAMPLE_RATE = int(os.environ.get("SCAN_SAMPLE_RATE", "2048000"))
 DEFAULT_DURATION_S = float(os.environ.get("IQ_DURATION_S", "5.0"))
-DEFAULT_GAIN_DB = float(os.environ.get("IQ_GAIN_DB", "20.0"))
+# Same gain as the scanner on this dongle unless overridden; 20 clips on Athens FM.
+DEFAULT_GAIN_DB = float(os.environ.get("IQ_GAIN_DB", os.environ.get("SCAN_GAIN", "12")))
 
 # rtl_tcp read tuning (byte-for-byte the scanner main-loop warmup pattern).
 WARMUP_BYTES = 131072      # discard(): PLL settle + stale-buffer drain

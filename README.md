@@ -153,8 +153,9 @@ Quarter-wave arm length: **arm (cm) = 7125 / frequency (MHz)**.
 | HF / shortwave | 3–30 MHz | long wire | 10–20 m, direct sampling mode |
 
 Athens note: FM transmitters on Lycabettus and Hymettus are strong enough to
-overload the dongle above gain 12. Use the FM bandstop filter on the scanner
-dongle and start with low gain.
+overload the dongle above gain 12 indoors, and above about 3.7 on an outdoor
+antenna. Use the FM bandstop filter on the scanner dongle and start with low
+gain; the scanner also steps its gain down by itself when a sweep clips.
 
 ## Reference
 

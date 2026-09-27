@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # Manage a single rotating decoder pipeline against the shared rf_luv data layer.
 #
-#   ./pipeline.sh up <pipe>        bring <pipe> up   (compose project rf_luv_<pipe>)
-#   ./pipeline.sh down <pipe>      take <pipe> down
-#   ./pipeline.sh rotate <pipe>    take whatever V4 pipeline is up down, bring <pipe> up
-#   ./pipeline.sh logs <pipe>      tail the pipeline's container logs (no follow)
-#   ./pipeline.sh ps <pipe>        show the pipeline's container status
+#   ./pipeline.sh up <pipe> [serial]      pause that dongle's scanner, bring <pipe> up
+#   ./pipeline.sh down <pipe> [serial]    take <pipe> down, resume that dongle's scanner
+#   ./pipeline.sh rotate <pipe> [serial]  take whatever pipeline is up down, bring <pipe> up
+#   ./pipeline.sh logs <pipe>             tail the pipeline's container logs (no follow)
+#   ./pipeline.sh ps <pipe>               show the pipeline's container status
 #
 # Valid pipes: acars adsb ais ism rds spectrum.  (Plus:  ./pipeline.sh demo)
-#   - This script manages only the V4 (rtl_tcp host.docker.internal:1234). The V4
-#     runs the spectrum scanner AND time-shares with the five rotating decoders
-#     (acars/adsb/ais/ism/rds), so on the V4 the box is EITHER sweeping OR running
-#     one decoder, never both; 'rotate' swaps them.
-#     rds decodes the 57 kHz RDS subcarrier and needs the V4 with the FM notch
-#     REMOVED (with the notch on, the FM band is attenuated and RDS is invisible).
-#   - The V3 (rtl_tcp :1235) is a SEPARATE dongle for the ghost pipeline
-#     (ghost/spiritbox.py), run directly, not through this script.
+#   - [serial] picks the dongle (default v4-01). Its rtl_tcp port comes from
+#     /etc/rtl-scanner/<serial>.env and reaches the overlay as RTL_TCP_PORT.
+#   - rtl_tcp serves one client at a time and the scanner holds its connection,
+#     so 'up' pauses rtl-scanner@<serial> (ops/rf-mode pause) and 'down'
+#     resumes it (ops/rf-mode scan). Pass the same serial to up and down.
+#   - rds decodes the 57 kHz RDS subcarrier and needs a dongle with no FM notch:
+#     since 2026-09-26 that is the V3, so: ./pipeline.sh up rds v3-01
+#   - adsb is refused for now: readsb has no rtl_tcp input (it reads a USB
+#     dongle or already-decoded network messages), so its overlay cannot work
+#     against rtl_tcp.
 #   - spectrum's overlay is the profile-gated containerized scanner (a smoke-test);
 #     the steady scanner runs as native systemd on the local host (ops/rtl-scanner).
 #
@@ -28,8 +30,11 @@ NET=rf_luv_net
 CH_PING_URL="http://127.0.0.1:8123/ping"
 VALID_PIPES="acars adsb ais ism rds spectrum"
 
+DEFAULT_SERIAL=v4-01
+RF_MODE="$SCRIPT_DIR/ops/rf-mode"
+
 usage() {
-    echo "usage: $0 up|down|rotate|logs|ps <pipe>   |   $0 demo" >&2
+    echo "usage: $0 up|down|rotate <pipe> [serial]  |  $0 logs|ps <pipe>  |  $0 demo" >&2
     echo "  pipes: $VALID_PIPES (and 'noaa' for the no-op systemd reminder)" >&2
     echo "  demo:  blind-analyze the bundled sample capture (no hardware needed)" >&2
     exit 2
@@ -62,6 +67,35 @@ compose_pipe() {
         exit 1
     fi
     docker compose -p "$project" -f "$overlay" "$@"
+}
+
+# The dongle's rtl_tcp port, from its scanner env file.
+dongle_port() {
+    local envfile="/etc/rtl-scanner/$1.env" port
+    port="$(grep -E '^RTL_TCP_PORT=' "$envfile" 2>/dev/null | cut -d= -f2 | tr -d ' ')" || true
+    if [ -z "$port" ]; then
+        echo "[pipeline] no RTL_TCP_PORT in $envfile (unknown dongle '$1'?)" >&2
+        exit 1
+    fi
+    echo "$port"
+}
+
+# Lend the dongle to a decoder: the overlay connects to RTL_TCP_PORT, and the
+# scanner must let go of rtl_tcp first.
+claim_dongle() {
+    local pipe="$1" serial="$2"
+    if [ "$pipe" = "adsb" ]; then
+        echo "[pipeline] adsb: readsb cannot read rtl_tcp (USB dongle or decoded network input only); not starting it" >&2
+        exit 1
+    fi
+    RTL_TCP_PORT="$(dongle_port "$serial")"
+    # rds labels its rows with RDS_DONGLE_ID; follow the chosen dongle.
+    RDS_DONGLE_ID="$serial"
+    export RTL_TCP_PORT RDS_DONGLE_ID
+    if systemctl --user is-active --quiet "rtl-scanner@${serial}.service"; then
+        "$RF_MODE" pause "$serial"
+    fi
+    echo "[pipeline] $pipe uses $serial (rtl_tcp :$RTL_TCP_PORT)"
 }
 
 # Preflight: the shared network exists and ClickHouse answers /ping.
@@ -106,6 +140,7 @@ cmd_up() {
         *) echo "[pipeline] unknown pipe '$pipe' (valid: $VALID_PIPES)" >&2; exit 1 ;;
     esac
     preflight
+    claim_dongle "$pipe" "$serial"
     echo "[pipeline] up rf_luv_${pipe}"
     compose_pipe "$pipe" up -d
 }
@@ -123,6 +158,7 @@ cmd_down() {
     esac
     echo "[pipeline] down rf_luv_${pipe}"
     compose_pipe "$pipe" down
+    "$RF_MODE" scan "$serial"
 }
 
 cmd_rotate() {
@@ -137,6 +173,7 @@ cmd_rotate() {
         *) echo "[pipeline] unknown pipe '$target' (valid: $VALID_PIPES)" >&2; exit 1 ;;
     esac
     preflight
+    claim_dongle "$target" "$serial"
     local cur; cur="$(current_up_pipe)"
     if [ -n "$cur" ] && [ "$cur" != "$target" ]; then
         echo "[pipeline] rotating: $cur -> $target"
@@ -183,8 +220,9 @@ cmd_demo() {
 
 main() {
     if [ "${1:-}" = "demo" ]; then cmd_demo; return; fi
-    [ $# -eq 2 ] || usage
+    [ $# -eq 2 ] || [ $# -eq 3 ] || usage
     local action="$1" pipe="$2"
+    serial="${3:-$DEFAULT_SERIAL}"
     case "$action" in
         up)     cmd_up "$pipe" ;;
         down)   cmd_down "$pipe" ;;

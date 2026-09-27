@@ -38,7 +38,7 @@ services:
     networks: [rf_luv_net]
     environment:
       RTL_TCP_HOST: host.docker.internal
-      RTL_TCP_PORT: "1234"
+      RTL_TCP_PORT: "${RTL_TCP_PORT:-1234}"
       ISM_FREQ: "433.92M"
       ISM_GAIN: "40"
       CLICKHOUSE_HOST: clickhouse

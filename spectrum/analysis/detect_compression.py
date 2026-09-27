@@ -51,7 +51,7 @@ import db  # noqa: E402
 
 # ─── Config ──────────────────────────────────────────────
 # Defaults to localhost via spectrum.config; for ad-hoc off-host runs
-# (e.g. backfill from a workstation) set CLICKHOUSE_HOST=<leap-ip>.
+# (e.g. backfill from a workstation) set CLICKHOUSE_HOST=<host-ip>.
 
 # sweep_id format ({preset}:{ts}) is shared across dongles per commit 91d3860,
 # so every scanner-table query must filter by dongle_id or risk conflating regimes.

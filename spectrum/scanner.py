@@ -38,8 +38,9 @@ from coordinator import dongle_lock, CoordinatorMissing
 
 # ─── Config ──────────────────────────────────────────────
 
-# Default works in Docker on both Linux (20.10+ with extra_hosts) and WSL/Docker Desktop
-RTL_HOST = os.environ.get("RTL_TCP_HOST", "host.docker.internal")
+# The scanner runs natively next to rtl_tcp (rtl-scanner@<serial>); the env
+# file sets this too.
+RTL_HOST = os.environ.get("RTL_TCP_HOST", "127.0.0.1")
 RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
 FREQ_START = int(os.environ.get("SCAN_FREQ_START", "88000000"))
 FREQ_END = int(os.environ.get("SCAN_FREQ_END", "470000000"))

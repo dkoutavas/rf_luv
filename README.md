@@ -62,8 +62,8 @@ bash ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickho
 `install-host.sh` handles the DVB kernel blacklist, the udev rule, the rtl_tcp
 units and watchdog, per-dongle config files, and daily backups in one command.
 Run `--verify-only` to check everything passes. Open Grafana at
-<http://localhost:3000> (admin/admin). The first spectrum sweep completes in
-about four minutes.
+<http://localhost:3000> (admin/admin). The first spectrum sweep lands within a
+minute.
 
 Full rebuild manual: [RESTORE.md](RESTORE.md). The installer runs on openSUSE,
 Debian/Ubuntu, Fedora and Arch. A Windows host running `rtl_tcp.exe` is an

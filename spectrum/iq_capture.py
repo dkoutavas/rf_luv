@@ -82,8 +82,7 @@ IQ_MAX_DURATION_S = float(os.environ.get("IQ_MAX_DURATION_S", "30"))
 # global so tests can flip iq_capture.IQ_ALLOW_BLOCKED_BANDS at runtime.
 IQ_ALLOW_BLOCKED_BANDS = os.environ.get("IQ_ALLOW_BLOCKED_BANDS", "0") == "1"
 
-# Host-run recorder talks to the local rtl_tcp directly (NOT the scanner's
-# Docker host.docker.internal default).
+# Host-run recorder talks to the local rtl_tcp directly, like the scanner.
 RTL_HOST = os.environ.get("RTL_TCP_HOST", "127.0.0.1")
 RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
 DONGLE_ID = os.environ.get("SCAN_DONGLE_ID", "v4-01")
@@ -329,8 +328,8 @@ def _set_trigger_status(
 # ─── Capture ─────────────────────────────────────────────
 
 def _capture_filename(freq_hz: int, duration_s: float, when: datetime) -> str:
-    # Hyphens (not colons) in the time so the file survives being dragged onto
-    # Windows SDR++ from WSL2.
+    # Hyphens (not colons) in the time so the file name is also valid on
+    # Windows filesystems (colons are not allowed there).
     ts = when.strftime("%Y-%m-%dT%H-%M-%S")
     return f"{ts}_{freq_hz // 1000}_{duration_s:g}s.cs8"
 

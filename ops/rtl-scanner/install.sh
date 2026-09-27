@@ -22,7 +22,7 @@ set -euo pipefail
 #   - Remove the old docker-compose spectrum-scanner service (that's a
 #     post-cutover cleanup step in the followups)
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/rtl-scanner/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

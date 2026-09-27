@@ -13,7 +13,7 @@ set -euo pipefail
 #   ./scripts/spectrum-scan.sh custom 400M 500M  # custom range
 #
 # Requires: rtl_power (from rtl-sdr package)
-# Note: needs direct USB access (usbipd) or won't work through rtl_tcp
+# Note: needs direct USB access (run `ops/rf-mode listen <serial>` first); rtl_power cannot use rtl_tcp
 #
 # Output: recordings/scan_<name>_<timestamp>.csv
 # Visualize: python3 ~/.local/bin/heatmap.py <csv_file> <output.png>

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # spectrum-classifier-health installer — user-systemd timer that runs the
-# classifier health monitor 45 s after every classifier pass on leap.
+# classifier health monitor 45 s after every classifier pass.
 #
 # Idempotent. Mirrors ops/spectrum-classifier/install.sh layout.
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/spectrum-classifier-health/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

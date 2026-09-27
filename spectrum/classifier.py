@@ -8,7 +8,7 @@ listening_log (within 150 kHz tolerance) are hard overrides.
 Produces one row per freq_hz in spectrum.signal_classifications with:
   class_id, confidence, reasoning (JSON score trace), features_snapshot.
 
-Scheduler: systemd user timer on leap (ops/spectrum-classifier/), fires
+Scheduler: systemd user timer on the host (ops/spectrum-classifier/), fires
 30 s after the feature_extractor timer so fresh features are available.
 
 Design choices:

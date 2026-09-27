@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # spectrum-features installer — user-systemd timer that runs the feature
-# extractor every 5 minutes on the spectrum host (leap).
+# extractor every 5 minutes on the spectrum host.
 #
 # Idempotent. Mirrors ops/rtl-tcp/install.sh conventions:
 #   - user systemd units under ~/.config/systemd/user/
 #   - linger assumed enabled (rtl-tcp installer takes care of that)
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/spectrum-features/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

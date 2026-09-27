@@ -13,7 +13,7 @@ set -euo pipefail
 # legacy "reset all matches" mode would hard-bounce the healthy dongle
 # whenever the other one hiccups.
 #
-# Installed as /usr/local/sbin/rtl-usb-reset on leap; wired via sudoers so
+# Installed as /usr/local/sbin/rtl-usb-reset on the host; wired via sudoers so
 # the watchdog can invoke without a password.
 
 VID="0bda"

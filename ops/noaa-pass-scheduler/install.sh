@@ -14,7 +14,7 @@ set -euo pipefail
 #   - python3 + orbit-predictor pip package installed:
 #       pip install --user orbit-predictor
 #
-# Run on leap after `git pull`:
+# Run on the host after `git pull`:
 #   bash ops/noaa-pass-scheduler/install.sh
 #
 # Note: keeps NOAA_DRY_RUN=1 in the .service file, so the scheduler will

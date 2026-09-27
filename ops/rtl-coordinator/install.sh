@@ -11,7 +11,7 @@ set -euo pipefail
 #   ~/.config/systemd/user/rtl-coordinator@.service — templated unit (optional)
 #   /etc/rtl-coordinator/                  — per-instance env files (you create)
 #
-# Run on leap (one sudo prompt per binary):
+# Run on the host (one sudo prompt per binary):
 #     bash ops/rtl-coordinator/install.sh
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

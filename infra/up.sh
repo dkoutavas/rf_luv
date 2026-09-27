@@ -24,7 +24,9 @@ else
 fi
 
 echo "[up] starting $PROJECT"
-docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d
+# --build so a changed Dockerfile.bootstrap (e.g. a ClickHouse version bump)
+# rebuilds the one-shot instead of reusing the old client image.
+docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d --build
 
 # Block on the bootstrap one-shot. `docker wait` returns the container's exit
 # code; non-zero means schema creation failed and the data layer is not ready.
@@ -44,4 +46,4 @@ echo "  ClickHouse native  : 127.0.0.1:9000"
 echo "  Grafana            : http://127.0.0.1:3000"
 echo "  Logging form       : http://127.0.0.1:8084"
 echo
-echo "Bring a rotating pipeline up with: ./pipeline.sh up <acars|adsb|ais|ism|spectrum>"
+echo "Bring a decoder up with: ./pipeline.sh up <acars|ais|ism|rds> [serial]"

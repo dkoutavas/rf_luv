@@ -56,6 +56,18 @@ Stations decoded:
 Every "word" in the sweep WAV is a fragment of one of these broadcasts. The
 sidecar JSON ties each step to its source frequency and station name.
 
+Commercial spirit boxes also play noise between steps. The P-SB7 maker
+describes "a proprietary high frequency synthetic noise or 'white noise'
+distributed between frequency steps". The replica copies this: 50 ms of
+generated noise, tilted to the high frequencies, sits between the 150 ms
+fragments. The noise breaks the stream into separate fragments, as on the
+device. It carries no information: a random number generator makes it, and the
+sidecar marks it as generated.
+
+The replica also keeps one volume for the whole sweep, like a radio. Most grid
+points hold no station, so most fragments are static, and the noise between
+steps sits at that level.
+
 ### The "creepy voice" effect
 
 The raw sweep sounds like choppy radio. Add a single slapback delay (one echo

@@ -69,7 +69,8 @@ sudo pacman -S rtl-sdr docker docker-compose python-numpy
 
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"      # log out and in again
-# NOAA scheduler only:  pip install --user orbit-predictor
+# NOAA scheduler only:  pip install --user --break-system-packages orbit-predictor==1.15.2
+# Optional, Tumbleweed: decoders, SoX, heatmap.py and more:  bash setup/install-packages.sh
 ```
 
 `install-host.sh` checks for `rtl_tcp`, `rtl_eeprom`, `rtl_test`, `docker`

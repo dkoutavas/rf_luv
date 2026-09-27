@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# RTL-SDR Lab - openSUSE Tumbleweed (WSL) Package Setup
-# Run: bash setup/install-wsl.sh
+# RTL-SDR Lab - openSUSE Tumbleweed package setup
+# Run: bash setup/install-packages.sh
 #
-# This installs the SDR toolchain on WSL. The RTL-SDR dongle itself
-# is typically accessed via Windows (SDR++/SDR#) or usbipd passthrough.
-# These tools are for processing, decoding, and pipeline work.
+# Installs the SDR toolchain (rtl-sdr, decoders, audio and Python tools) on
+# the native Tumbleweed host, where the dongles sit on USB directly. The
+# services come from ops/install-host.sh; RESTORE.md has the full order.
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -182,12 +182,11 @@ try_zypper rtl-ais "rtl-ais (AIS ship tracking decoder)" || \
 
 step "Data pipeline and visualization"
 
-# Docker should already be available in WSL
 if command -v docker &>/dev/null; then
     info "Docker available"
 else
-    warn "Docker not found - install Docker Desktop for Windows or docker-ce in WSL"
-    FAILED+=("Docker (needed for ADS-B pipeline)")
+    warn "Docker not found - see RESTORE.md step 1 (zypper install docker docker-compose)"
+    FAILED+=("Docker (needed for the shared data layer and the decoders)")
 fi
 
 if command -v docker-compose &>/dev/null || docker compose version &>/dev/null 2>&1; then
@@ -225,18 +224,6 @@ else
     SKIPPED+=("heatmap.py (already exists)")
 fi
 
-# ─── usbipd check ────────────────────────────────────────────
-
-step "USB passthrough status"
-
-if command -v usbip &>/dev/null; then
-    info "usbip client available in WSL"
-else
-    warn "usbip not available - USB passthrough from Windows requires usbipd-win"
-    warn "  Install on Windows: winget install usbipd"
-    warn "  In WSL you may need: sudo zypper install usbip"
-fi
-
 # ─── Summary ─────────────────────────────────────────────────
 
 step "Installation Summary"
@@ -257,14 +244,4 @@ if [ ${#FAILED[@]} -gt 0 ]; then
 fi
 
 echo ""
-info "WSL setup complete. Next steps:"
-echo "  1. Install SDR++ on Windows: https://github.com/AlexandreRouma/SDRPlusPlus/releases"
-echo "  2. Install Zadig on Windows: https://zadig.akeo.ie (for USB driver swap)"
-echo "  3. When dongle arrives: run Zadig → Bulk-In Interface 0 → replace with WinUSB"
-echo "  4. Start rtl_tcp on the host:"
-echo "       Windows: rtl_tcp.exe -a 0.0.0.0 -p 1234 -s 2048000"
-echo "       Linux:   bash ops/rtl-tcp/install.sh  (systemd unit + watchdog)"
-echo "  5. Bring up the shared data layer:"
-echo "       docker network create rf_luv_net && bash infra/up.sh"
-echo "       Grafana: http://localhost:3000  (one folder per pipeline)"
-echo "  6. Rotating V4 decoders: bash pipeline.sh up <pipe>  (adsb/ais/ism/acars)"
+info "Package setup complete. Next: RESTORE.md step 3 (dongle serials), then infra/up.sh and ops/install-host.sh."

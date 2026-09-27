@@ -191,7 +191,7 @@ Output: `.wav` file containing IQ samples (not audio). Open back in SDR++ as a "
 
 In SDR++: Recorder → Mode: **Audio**. Records the demod output as a normal WAV. Useful for documenting unusual sounds or running through `multimon-ng`.
 
-### Offline decoders - what's installed (per `setup/install-wsl.sh`)
+### Offline decoders - what's installed (per `setup/install-packages.sh`)
 
 | Tool | What it decodes | One-liner |
 |---|---|---|

@@ -26,5 +26,7 @@ fi
 SERIAL="$1"
 shift
 
-echo "rtl-tcp-by-serial: $SERIAL (rtl_tcp -d by serial)" >&2
+# /usr/local/bin/rtl_tcp (patched, see build-rtl-tcp.sh) wins over the
+# packaged /usr/bin/rtl_tcp by PATH order; log which one runs.
+echo "rtl-tcp-by-serial: $SERIAL ($(command -v rtl_tcp) -d by serial)" >&2
 exec rtl_tcp -d "$SERIAL" "$@"

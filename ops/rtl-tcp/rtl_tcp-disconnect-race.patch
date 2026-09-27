@@ -1,0 +1,82 @@
+--- a/src/rtl_tcp.c
++++ b/src/rtl_tcp.c
+@@ -91,6 +91,15 @@
+ 
+ static volatile int do_exit = 0;
+ 
++/* rf_luv: a client disconnect used to call the signal handler from a worker
++ * thread, which cancelled the async read while command_worker could still be
++ * inside a USB control transfer (a retune sent just before the close). The
++ * teardown in rtlsdr_read_async() then raced it: libusb aborted with
++ * "usbi_mutex_destroy: Assertion `pthread_mutex_destroy(mutex) == 0' failed"
++ * or the session hung. dev_lock orders the two: a command either finishes
++ * before the stream is cancelled, or is skipped after it. */
++static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
++
+ 
+ void usage(void)
+ {
+@@ -152,6 +161,19 @@
+ }
+ #endif
+ 
++/* Client gone: stop the stream, but never in the middle of a device command.
++ * Real signals keep sighandler(); locking a mutex there could deadlock. */
++static void request_exit(void)
++{
++	pthread_mutex_lock(&dev_lock);
++	if (!do_exit) {
++		fprintf(stderr, "client gone, stopping stream\n");
++		do_exit = 1;
++		rtlsdr_cancel_async(dev);
++	}
++	pthread_mutex_unlock(&dev_lock);
++}
++
+ void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
+ {
+ 	if(!do_exit) {
+@@ -219,7 +241,7 @@
+ 		if(r == ETIMEDOUT) {
+ 			pthread_mutex_unlock(&ll_mutex);
+ 			printf("worker cond timeout\n");
+-			sighandler(0);
++			request_exit();
+ 			pthread_exit(NULL);
+ 		}
+ 
+@@ -244,7 +266,7 @@
+ 				}
+ 				if(bytessent == SOCKET_ERROR || do_exit) {
+ 						printf("worker socket bye\n");
+-						sighandler(0);
++						request_exit();
+ 						pthread_exit(NULL);
+ 				}
+ 			}
+@@ -308,10 +330,16 @@
+ 			}
+ 			if(received == SOCKET_ERROR || do_exit) {
+ 				printf("comm recv bye\n");
+-				sighandler(0);
++				request_exit();
+ 				pthread_exit(NULL);
+ 			}
+ 		}
++		pthread_mutex_lock(&dev_lock);
++		if (do_exit) {
++			pthread_mutex_unlock(&dev_lock);
++			printf("comm recv bye\n");
++			pthread_exit(NULL);
++		}
+ 		switch(cmd.cmd) {
+ 		case 0x01:
+ 			printf("set freq %d\n", ntohl(cmd.param));
+@@ -373,6 +401,7 @@
+ 		default:
+ 			break;
+ 		}
++		pthread_mutex_unlock(&dev_lock);
+ 		cmd.cmd = 0xff;
+ 	}
+ }

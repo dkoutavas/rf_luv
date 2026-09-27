@@ -171,7 +171,8 @@ rest.
 ## Step 7: restore ClickHouse data (only if a backup exists)
 
 If snapshots exist on the backup disk, restore after step 4 so the schema is
-already there:
+already there. To test the snapshots first on a throwaway server, run
+`bash ops/clickhouse-backup/restore-drill.sh`.
 
 ```bash
 bash ops/clickhouse-backup/restore.sh --db spectrum --latest

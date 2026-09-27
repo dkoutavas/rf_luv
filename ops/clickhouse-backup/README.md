@@ -86,6 +86,21 @@ storage). Detaching the views during the base insert stops base-table rows
 from fanning out and double-counting into the rollups. Use `--from <timestamp>`
 for a specific snapshot, or `--dry-run` to preview.
 
+## Restore drill
+
+```bash
+bash ops/clickhouse-backup/restore-drill.sh            # all databases
+bash ops/clickhouse-backup/restore-drill.sh spectrum   # just some
+```
+
+The drill proves the latest snapshots restore, without touching the live
+server. It starts a throwaway `clickhouse-drill` container (same image, no
+ports, no volume), builds the schema with the normal `ch-bootstrap` image,
+restores every database with `restore.sh`, and compares each table and view
+against its `MANIFEST.tsv` row count. It prints PASS or FAIL per row, exits 1
+on any mismatch, and removes the container on exit. Run it monthly and before
+any ClickHouse upgrade.
+
 ## Verify a backup
 
 ```bash

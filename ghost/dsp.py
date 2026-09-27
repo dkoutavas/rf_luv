@@ -100,11 +100,14 @@ def wfm_demod(
     audio_lp_hz: float = AUDIO_LP_HZ,
     deemph_tau: float = DEEMPH_TAU_S,
     lp_taps: int = 65,
+    normalize: bool = True,
 ) -> np.ndarray:
     """Wideband-FM demodulate a complex IQ block to real audio at fs_out.
 
     Chain: quadrature discriminator -> anti-alias low-pass -> decimate -> de-emphasis.
-    Returns float audio roughly in [-1, 1] (not normalized to full-scale).
+    normalize=True scales the block to 0.9 peak. The sweep passes False and
+    applies one gain to the whole recording (fixed_gain), like a radio's
+    volume knob, so static and stations keep their real relative levels.
     """
     if iq.size < 4:
         return np.zeros(0, dtype=np.float64)
@@ -114,11 +117,30 @@ def wfm_demod(
     lp = np.convolve(disc, h, mode="same")
     audio = lp[::decim]                                    # decimate to fs_out
     audio = deemphasis(audio, fs_out, deemph_tau)
+    if not normalize:
+        return audio
     # Scale so a typical broadcast lands near unity without clipping the WAV.
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > 0:
         audio = audio / (peak + 1e-9) * 0.9
     return audio
+
+
+def fixed_gain(x: np.ndarray, target: float = 0.9, pct: float = 99.9) -> np.ndarray:
+    """One gain for a whole recording: the pct-th percentile of |x| lands at
+    target, so a single pop cannot turn everything else down. to_int16 clips
+    the few samples above it."""
+    ref = float(np.percentile(np.abs(x), pct)) if x.size else 0.0
+    return x * (target / ref) if ref > 0 else x
+
+
+def hiss(n: int, rms: float, rng=None) -> np.ndarray:
+    """Synthetic noise between sweep steps, like the SB7's "high frequency
+    synthetic noise": white noise through a first difference (+6 dB/octave,
+    so it leans to the highs), scaled to the given RMS."""
+    rng = rng if rng is not None else np.random.default_rng()
+    x = np.diff(rng.standard_normal(n + 1))
+    return x * (rms / (float(np.sqrt(np.mean(x ** 2))) + 1e-12))
 
 
 def to_int16(x: np.ndarray) -> np.ndarray:

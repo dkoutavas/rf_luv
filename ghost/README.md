@@ -41,7 +41,7 @@ the length of a session through the coordinator. Host bring-up is in
 python3 ghost/spiritbox.py --file ghost/samples/spirit_demo.cs8 --out /tmp/demo.wav
 
 # Live (after HOSTPREP): sweep the FM band, RDS-label each fragment, write to ClickHouse.
-python3 ghost/spiritbox.py --mode forward --dwell-ms 150 --duration 60
+python3 ghost/spiritbox.py --mode forward --dwell-ms 150
 
 # The same, dry (WAV + sidecar only, no ClickHouse), with the "creepy voice" fx on:
 python3 ghost/spiritbox.py --mode random --steps 200 --fx --dry-run
@@ -51,6 +51,12 @@ Each run writes `<session>.wav` and a `<session>.json` sidecar under `GHOST_WAV_
 (default `/data/rf_luv/ghost/recordings`). The sidecar carries, per step:
 `step_idx, t_start, t_end, freq_hz, dwell_ms, rssi_db, rds_ps, rds_rt`. That is the
 receipt: every "word" in the WAV is tied to the station and frequency it came from.
+
+Between fragments the sweep plays 50 ms of generated noise, as the SB7 does
+(`--noise-ms` changes the length, `--no-noise` removes it). The sidecar records
+`noise_ms`; the gaps between step `t_end` and the next `t_start` are that noise,
+not reception. The whole WAV gets one volume, like a radio, so static and
+stations keep their real relative levels.
 
 ## Forensics quick start
 

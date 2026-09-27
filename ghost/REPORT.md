@@ -25,30 +25,48 @@ moves on. Meaning comes from the listener.
 ### Replication
 
 `ghost/spiritbox.py` rebuilds this receiver on an RTL-SDR V3 dongle (rtl_tcp,
-87.5–108 MHz, 240 kHz capture rate per step, 150 ms dwell). The demodulation
+87.5–108 MHz, 150 ms dwell per step). Each step is captured at 1.92 MS/s,
+low-pass filtered to one station and decimated to 240 kHz. The demodulation
 chain is a quadrature discriminator, a 50 µs de-emphasis filter (EU standard),
 an anti-alias low-pass at 15 kHz, and decimation to 48 kHz — the same FM
 broadcast receiver path any radio uses. The output is a WAV file.
 
-Before the sweep, the tool dwells 4 s on each strong FM carrier and decodes its
-RDS data (Programme Service name, Programme Identification code, RadioText).
-That labels every fragment in the WAV with the station it came from: frequency,
-name, and timestamp.
+The tool discards 200 ms of samples after every retune. The dongle hands
+samples over in 256 KiB blocks, so the old frequency keeps arriving for a while
+after a retune. Without the discard, a fragment carries a station from one to
+three steps earlier than its label. Measured on 2026-09-27: the signal strength
+per step matched the real spectrum best at a 200 kHz offset (correlation 0.25)
+before the fix, and at zero offset (correlation 0.63) after it.
 
-Polygono, Athens, 2026-09-19. Two sessions, 206 steps each, gain 12. Stations
-decoded:
+Before the sweep, the tool dwells 2 s on each of the 12 strongest FM carriers
+and decodes its RDS data (Programme Service name, Programme Identification
+code, RadioText). That labels every fragment in the WAV with the station it
+came from: frequency, name, and timestamp.
+
+Polygono, Athens, 2026-09-27. One session, 206 steps, gain 3.7, patio antenna.
+Stations decoded:
 
 | MHz   | PI     | PS         | RadioText excerpt       |
 |-------|--------|------------|-------------------------|
-| 102.2 | 0x6560 |            | L.21                    |
-| 105.8 | 0x1201 | TEL 8 FM   | 105,8 MHz &             |
-| 105.8 | 0x1201 | 105.8 FM   | ertecho.gr/radio/...    |
-| 105.9 | 0x1201 |            | 91,6 MHz ATH            |
-| 106.2 | 0x3D44 |            |                         |
-| 107.3 | 0x10DF |            |                         |
+| 88.9  | 0x0889 | HiT 88.9   |                         |
+| 92.6  | 0xB926 | BEST 926   |                         |
+| 92.9  | 0x108B | KISS       | AVU - I                 |
+| 94.9  | 0x9978 | RYTHMOS    |                         |
 
 Every "word" in the sweep WAV is a fragment of one of these broadcasts. The
 sidecar JSON ties each step to its source frequency and station name.
+
+Commercial spirit boxes also play noise between steps. The P-SB7 maker
+describes "a proprietary high frequency synthetic noise or 'white noise'
+distributed between frequency steps". The replica copies this: 50 ms of
+generated noise, tilted to the high frequencies, sits between the 150 ms
+fragments. The noise breaks the stream into separate fragments, as on the
+device. It carries no information: a random number generator makes it, and the
+sidecar marks it as generated.
+
+The replica also keeps one volume for the whole sweep, like a radio. Most grid
+points hold no station, so most fragments are static, and the noise between
+steps sits at that level.
 
 ### The "creepy voice" effect
 

@@ -141,7 +141,7 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
       "targets": [
         {
-          "rawSql": "SELECT hex_ident, anyLast(callsign) AS callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE AND callsign != '' GROUP BY hex_ident ORDER BY last_seen DESC LIMIT 20",
+          "rawSql": "SELECT hex_ident, anyLast(callsign) AS last_callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE AND callsign != '' GROUP BY hex_ident ORDER BY last_seen DESC LIMIT 20",
           "format": 1
         }
       ]

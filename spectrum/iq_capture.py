@@ -72,7 +72,10 @@ log = logging.getLogger("iq_capture")
 IQ_CAPTURE_DIR = os.environ.get("IQ_CAPTURE_DIR", "/var/lib/spectrum/iq_captures")
 IQ_MAX_CAPTURES_PER_HOUR = int(os.environ.get("IQ_MAX_CAPTURES_PER_HOUR", "3"))
 IQ_DIR_MAX_BYTES = int(os.environ.get("IQ_DIR_MAX_BYTES", "2000000000"))
-IQ_LOCK_TIMEOUT_S = float(os.environ.get("IQ_LOCK_TIMEOUT_S", "30"))
+# The scanner holds the dongle lock for a whole sweep, and a full 88-470 MHz
+# sweep takes ~37 s since the 192 ms per-hop settle (scanner.SETTLE_BYTES).
+# 60 s lets a capture wait out one full sweep.
+IQ_LOCK_TIMEOUT_S = float(os.environ.get("IQ_LOCK_TIMEOUT_S", "60"))
 IQ_POLL_INTERVAL_S = float(os.environ.get("IQ_POLL_INTERVAL_S", "5"))
 IQ_MAX_DURATION_S = float(os.environ.get("IQ_MAX_DURATION_S", "30"))
 # Operator override for the legal blocklist. Default OFF. Read as a module

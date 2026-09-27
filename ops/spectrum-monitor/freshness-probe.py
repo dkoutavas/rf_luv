@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Pinned to 3.11 because leap's default `python3` is 3.6 (Leap 15.6).
 """ClickHouse-level freshness probe for the spectrum pipeline.
 
 The user-level rtl_tcp watchdog is TCP-aware: it knows IQ samples flow out of
@@ -14,6 +13,8 @@ and notifies on state transitions:
     healthy → WARN at >FRESHNESS_WARN_S stale
     healthy → CRITICAL at >FRESHNESS_CRITICAL_S stale
     any → recovered when stale drops below FRESHNESS_WARN_S
+    unplugged dongle → ABSENT, no alert (collection is session-based)
+    rtl_tcp held by another client (SDR++) → IN_USE, no alert
 
 State persisted at /var/lib/spectrum-monitor/freshness.json so transitions
 are detected across runs.
@@ -40,7 +41,13 @@ DEFAULTS = {
     "ACTION_LOG": "/var/log/rtl-recovery.log",
     "NOTIFY_BIN": "/usr/local/bin/rf-notify",
     "EXPECTED_DONGLES": "v4-01",
+    "DEV_DIR": "/dev",
+    "DONGLE_ENV_DIR": "/etc/rtl-scanner",
 }
+
+# Our own clients of rtl_tcp. The scanner is the data source this probe
+# checks; the watchdog connects for ~2 s to test an idle server.
+OWN_CLIENTS = ("scanner.py", "rtl-tcp-watchdog")
 
 
 def load_env(path: str = "/etc/rtl-scanner/freshness-probe.env") -> dict:
@@ -111,6 +118,77 @@ def query_freshness(cfg: dict) -> dict:
     return out
 
 
+def rtl_tcp_port(cfg: dict, dongle: str) -> int | None:
+    """RTL_TCP_PORT from the dongle's scanner env file, or None."""
+    try:
+        with open(os.path.join(cfg["DONGLE_ENV_DIR"], f"{dongle}.env")) as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key == "RTL_TCP_PORT":
+                    return int(value)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _read_tcp_table() -> list[list[str]]:
+    rows = []
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(path) as f:
+                next(f)  # header
+                rows += [line.split() for line in f]
+        except OSError:
+            continue
+    return rows
+
+
+def _socket_owners() -> dict[str, str]:
+    """Socket inode -> command line of the process holding it."""
+    owners = {}
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            for fd in os.listdir(f"/proc/{pid}/fd"):
+                link = os.readlink(f"/proc/{pid}/fd/{fd}")
+                if link.startswith("socket:["):
+                    owners[link[8:-1]] = cmdline
+        except OSError:
+            continue  # process exited or is not ours to read
+    return owners
+
+
+def foreign_clients(port: int) -> list[str]:
+    """Clients of rtl_tcp on `port` that are not our own scanner or watchdog.
+
+    rtl_tcp serves one client at a time. When SDR++ (or anything else) holds
+    the port, the scanner cannot collect, so missing data is expected rather
+    than a fault. The scanner itself is excluded on purpose: if it is
+    connected but no rows arrive, the ingest path is broken and that must
+    still alert.
+
+    Each connection shows up twice in /proc/net/tcp: the server side (local
+    port = rtl_tcp's port) and the client side (remote port = rtl_tcp's port).
+    The client side's inode leads to the process. A server-side peer with no
+    client side in this network namespace (a Docker decoder) is foreign too.
+    """
+    port_hex = f"{port:04X}"
+    ESTABLISHED = "01"
+    rows = [r for r in _read_tcp_table() if len(r) > 9 and r[3] == ESTABLISHED]
+    peers = {r[2] for r in rows if r[1].rsplit(":", 1)[-1] == port_hex}
+    if not peers:
+        return []
+    client_inodes = {r[1]: r[9] for r in rows
+                     if r[2].rsplit(":", 1)[-1] == port_hex and r[1] in peers}
+    owners = _socket_owners() if client_inodes else {}
+    foreign = []
+    for peer in peers:
+        cmdline = owners.get(client_inodes.get(peer, ""), "")
+        if not any(own in cmdline for own in OWN_CLIENTS):
+            foreign.append(cmdline.split(" ")[0].rsplit("/", 1)[-1] or f"unknown peer {peer}")
+    return foreign
+
+
 def classify(stale_sec: int, warn_s: int, crit_s: int) -> str:
     if stale_sec >= crit_s:
         return "CRITICAL"
@@ -163,13 +241,51 @@ def main():
     # Walk expected dongles even if missing from query (no rows in 6h = stale).
     new_dongles = {}
     for d in expected:
+        prev_level = prev.get(d, {}).get("level", "OK")
+
+        # Collection is session-based: the dongles are unplugged between
+        # sessions. udev's /dev/rtl_sdr_<serial> symlink exists only while the
+        # dongle is on the bus (the watchdog uses the same test). An unplugged
+        # dongle is not a fault, so it gets no alert.
+        dev_link = os.path.join(cfg["DEV_DIR"], f"rtl_sdr_{d}")
+        try:
+            plugged_for = int(now - os.lstat(dev_link).st_mtime)
+        except FileNotFoundError:
+            new_dongles[d] = {"stale_sec": fresh.get(d), "level": "ABSENT"}
+            if prev_level != "ABSENT":
+                log_action(cfg, "dongle_absent", dongle=d)
+            continue
+
+        # Listening sessions: SDR++ holds the dongle's rtl_tcp, so the
+        # scanner cannot collect. Expected, so no alert.
+        port = rtl_tcp_port(cfg, d)
+        clients = foreign_clients(port) if port else []
+        if clients:
+            new_dongles[d] = {"stale_sec": fresh.get(d), "level": "IN_USE"}
+            if prev_level != "IN_USE":
+                log_action(cfg, "dongle_in_use", dongle=d, clients=clients)
+            continue
+
         stale = fresh.get(d)
         if stale is None:
             # No rows in last 6h. Treat as critical.
             stale = 6 * 3600
+        # udev creates the symlink at plug-in, so its mtime is the plug time.
+        # Data cannot be expected from before the plug, so staleness is
+        # capped at the time since then; a new session starts at OK.
+        stale = min(stale, plugged_for)
+        # Same cap after a listening session: the last row is from before it,
+        # so count from when the other client let go. The scanner then gets
+        # the normal warn window to reconnect.
+        in_use_ended = now if prev_level == "IN_USE" else prev.get(d, {}).get("in_use_ended")
+        if in_use_ended and now - in_use_ended < crit_s:
+            stale = min(stale, int(now - in_use_ended))
+        else:
+            in_use_ended = None
         level = classify(stale, warn_s, crit_s)
-        prev_level = prev.get(d, {}).get("level", "OK")
         new_dongles[d] = {"stale_sec": stale, "level": level}
+        if in_use_ended:
+            new_dongles[d]["in_use_ended"] = in_use_ended
 
         # State transition?
         if level != prev_level:

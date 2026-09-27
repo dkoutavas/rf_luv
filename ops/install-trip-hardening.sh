@@ -105,7 +105,7 @@ info "/var/lib/* + /var/log/rtl-recovery.log ready"
 step "Install env-file placeholder (notify.env)"
 if [ ! -f /etc/rtl-scanner/notify.env ]; then
     run sudo install -m 0640 "$NOTIFY_DIR/notify.env.example" /etc/rtl-scanner/notify.env
-    warn "Edit /etc/rtl-scanner/notify.env and set NTFY_TOPIC before leaving."
+    info "Alerts go to desktop popups; set NTFY_TOPIC in /etc/rtl-scanner/notify.env for phone alerts."
 else
     info "/etc/rtl-scanner/notify.env exists; not overwriting"
 fi
@@ -182,8 +182,9 @@ echo
 info "Install complete."
 echo
 echo "Next steps:"
-echo "  1. Edit /etc/rtl-scanner/notify.env and set NTFY_TOPIC=<your-topic>"
-echo "  2. Test the alert pipe:  rf-notify INFO 'install test' -m 'pipe alive' --force"
+echo "  1. Optional: set NTFY_TOPIC in /etc/rtl-scanner/notify.env for phone alerts"
+echo "  2. Test the alert pipe as root (a desktop popup must appear):"
+echo "       sudo rf-notify INFO 'install test' -m 'pipe alive' --force"
 echo "  3. One-shot dry-run of escalator:  sudo /usr/local/bin/rtl-tcp-escalator --dry-run"
 echo "  4. One-shot freshness:             sudo /usr/local/bin/rf-freshness-probe"
 echo "  5. One-shot signal quality:        sudo /usr/local/bin/rf-signal-quality-probe"

@@ -4,11 +4,14 @@
 #
 # Usage:
 #   rf-mode status                  show per-serial state (read-only)
+#   rf-mode pause SERIAL            stop only the scanner, keep rtl_tcp up
+#                                   (lend the dongle to SDR++ or a decoder)
 #   rf-mode listen [SERIAL]         free a dongle for direct USB access
 #   rf-mode scan [SERIAL|all]       return a dongle to systemd management
 #
-# The scanner serial is auto-detected: whichever serial has rtl-scanner@
-# enabled. rf-mode listen refuses the scanner serial unless --force is given.
+# A scanner serial is one whose rtl-scanner@ is enabled or pulled in by the
+# rtl-tcp@ drop-in (the v3-01 setup). rf-mode listen refuses a scanner serial
+# unless --force is given.
 #
 # Rule learned 2026-09-20: stop the watchdog timer BEFORE the unit, start
 # the unit BEFORE the timer. Otherwise the watchdog resurrects what you stopped.
@@ -24,20 +27,23 @@ discover_serials() {
     local serials=()
     for f in "$ENV_DIR"/*.env; do
         [ -f "$f" ] || continue
-        local base
-        base="$(basename "$f" .env)"
-        # skip non-serial env files
-        case "$base" in
-            clickhouse-backup|escalator|notify|*scheduler*) continue ;;
-        esac
-        serials+=("$base")
+        # Only a dongle's env file defines RTL_TCP_PORT. The same directory
+        # also holds env files for backups, notify, the escalator and the
+        # probes; a skip-list of their names broke when the probe env files
+        # were added (2026-09-26), so match on content instead.
+        grep -qs '^RTL_TCP_PORT=' "$f" || continue
+        serials+=("$(basename "$f" .env)")
     done
     echo "${serials[@]}"
 }
 
-# Check if a serial is the scanner (rtl-scanner@ enabled)
+# Check if a serial is a scanner: rtl-scanner@ is enabled, or the rtl-tcp@
+# drop-in (20-scanner.conf) pulls it in with Wants=, which is how the V3's
+# scanner starts on plug without being enabled.
 is_scanner() {
-    systemctl --user is-enabled "rtl-scanner@${1}.service" &>/dev/null
+    systemctl --user is-enabled "rtl-scanner@${1}.service" &>/dev/null && return 0
+    systemctl --user show "rtl-tcp@${1}.service" -p Wants --value 2>/dev/null \
+        | grep -qw "rtl-scanner@${1}.service"
 }
 
 # Read port from env file
@@ -114,6 +120,19 @@ cmd_listen() {
     info "run 'rf-mode scan $serial' when done."
 }
 
+# rtl_tcp serves one client at a time and the scanner holds its connection
+# for the whole run, so SDR++ or a Docker decoder cannot connect while the
+# scanner runs. Stop only the scanner: rtl_tcp and its watchdog stay up (the
+# watchdog skips its probe while a client is connected).
+cmd_pause() {
+    local serial="$1"
+    [ -n "$serial" ] || die "pause needs a SERIAL"
+    systemctl --user stop "rtl-scanner@${serial}.service"
+    info "  systemctl --user stop rtl-scanner@${serial}.service"
+    info "$serial: rtl_tcp on port $(get_port "$serial") is free for SDR++ or a decoder."
+    info "run 'rf-mode scan $serial' when done."
+}
+
 cmd_scan() {
     local target="$1"
 
@@ -147,7 +166,7 @@ cmd_scan() {
 }
 
 usage() {
-    echo "usage: rf-mode status | listen [SERIAL] [--force] | scan [SERIAL|all]" >&2
+    echo "usage: rf-mode status | pause SERIAL | listen [SERIAL] [--force] | scan [SERIAL|all]" >&2
     exit 2
 }
 
@@ -158,6 +177,9 @@ main() {
     case "$action" in
         status)
             cmd_status
+            ;;
+        pause)
+            cmd_pause "${1:-}"
             ;;
         listen)
             local serial="${1:-}"

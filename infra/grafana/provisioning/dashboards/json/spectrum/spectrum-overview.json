@@ -462,7 +462,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id IN ('gov', 'business', 'marine') AND s.sweep_id LIKE 'full:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
+          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id IN ('nfm_voice_repeater', 'marine_vhf_channel', 'tetra') AND s.sweep_id LIKE 'full:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
           "format": 0
         }
       ],
@@ -515,7 +515,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id = 'airband' AND s.sweep_id LIKE 'airband:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
+          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id IN ('am_airband_atc', 'am_airband_atis', 'acars_downlink') AND s.sweep_id LIKE 'airband:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
           "format": 0
         }
       ],
@@ -547,7 +547,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id = 'marine' AND s.sweep_id LIKE 'full:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
+          "rawSql": "SELECT s.timestamp AS time, max(s.power_dbfs) AS value, kf.name AS metric FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies kf WHERE abs(toInt64(s.freq_hz) - toInt64(kf.freq_hz)) <= toInt64(greatest(kf.bandwidth_hz / 2, 50000)) AND $__timeFilter(s.timestamp) AND kf.class_id IN ('marine_vhf_channel', 'ais') AND s.sweep_id LIKE 'full:%' AND s.dongle_id = '$dongle' GROUP BY s.timestamp, kf.name ORDER BY time",
           "format": 0
         }
       ],
@@ -998,29 +998,25 @@
       {
         "name": "dongle",
         "label": "Dongle",
-        "type": "custom",
-        "query": "v4-01,v3-01",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "P_SPECTRUM_CLICKHOUSE"
+        },
+        "query": "SELECT dongle_id FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY dongle_id ORDER BY dongle_id",
+        "definition": "SELECT dongle_id FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY dongle_id ORDER BY dongle_id",
+        "refresh": 1,
+        "sort": 0,
         "current": {
           "selected": true,
-          "text": "v4-01",
-          "value": "v4-01"
+          "text": "v3-01",
+          "value": "v3-01"
         },
-        "options": [
-          {
-            "selected": true,
-            "text": "v4-01",
-            "value": "v4-01"
-          },
-          {
-            "selected": false,
-            "text": "v3-01",
-            "value": "v3-01"
-          }
-        ],
+        "options": [],
         "includeAll": false,
         "multi": false,
         "hide": 0,
-        "description": "Which RTL-SDR dongle to view. Switch to v4-01 to see the second dongle's data after Phase 6."
+        "description": "Which RTL-SDR dongle to view. The list comes from dongles that scanned in the last 30 days. The default is the official scanner dongle (v3-01 since 2026-09-26); change current.value here when that changes."
       }
     ]
   },

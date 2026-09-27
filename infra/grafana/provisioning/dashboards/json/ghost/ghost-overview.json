@@ -242,7 +242,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT timestamp AS time, clip_fraction FROM ghost.spins WHERE $__timeFilter(timestamp) AND clip_fraction > 0 ORDER BY timestamp",
+          "rawSql": "SELECT timestamp AS time, clip_fraction FROM ghost.spins WHERE $__timeFilter(timestamp) ORDER BY timestamp",
           "format": 1,
           "datasource": {
             "type": "grafana-clickhouse-datasource",

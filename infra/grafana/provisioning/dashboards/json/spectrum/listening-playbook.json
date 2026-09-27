@@ -78,7 +78,7 @@
       },
       "targets": [
         {
-          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), latest_data AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, freq_hz, power_dbfs FROM spectrum.scans WHERE sweep_id = (SELECT sweep_id FROM latest)), history AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, avg(power_dbfs) AS historical_avg, stddevPop(power_dbfs) AS historical_std, countIf(power_dbfs > -40) * 100.0 / count() AS activity_pct FROM spectrum.scans WHERE sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 24 HOUR GROUP BY freq_bin), kf_lookup AS (SELECT l.freq_hz, max(k.name) AS kf_name, max(k.modulation) AS kf_modulation FROM latest_data l CROSS JOIN spectrum.known_frequencies k WHERE abs(toInt64(l.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000)) GROUP BY l.freq_hz) SELECT round(l.freq_hz / 1000000, 3) AS freq_mhz, round(l.power_dbfs, 1) AS current_power, round(h.historical_avg, 1) AS avg_24h, round(l.power_dbfs - h.historical_avg, 1) AS above_normal, round(h.activity_pct, 0) AS activity_pct_24h, CASE WHEN m.kf_name IS NOT NULL THEN m.kf_name WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'Airband (unidentified)' WHEN l.freq_hz BETWEEN 137000000 AND 156000000 THEN 'VHF Gov/Business' WHEN l.freq_hz BETWEEN 156000000 AND 163000000 THEN 'Marine VHF' WHEN l.freq_hz BETWEEN 163000000 AND 170000000 THEN 'Land Mobile' ELSE 'Unknown' END AS likely_id, CASE WHEN m.kf_modulation IS NOT NULL THEN m.kf_modulation WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'AM' ELSE 'NFM' END AS mode, CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 'UNUSUAL' WHEN l.power_dbfs > -15 THEN 'STRONG' WHEN h.activity_pct > 80 THEN 'ALWAYS ON' WHEN h.historical_std > 5 THEN 'BURSTY' ELSE '' END AS status FROM latest_data l JOIN history h ON l.freq_bin = h.freq_bin LEFT JOIN kf_lookup m ON l.freq_hz = m.freq_hz WHERE l.power_dbfs > -40 AND l.freq_hz NOT BETWEEN 174000000 AND 230000000 AND l.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 0 WHEN h.historical_std > 5 THEN 1 WHEN l.power_dbfs > -15 THEN 2 ELSE 3 END, l.power_dbfs DESC LIMIT 20",
+          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' AND dongle_id = '$dongle' ORDER BY timestamp DESC LIMIT 1), latest_data AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, freq_hz, power_dbfs FROM spectrum.scans WHERE dongle_id = '$dongle' AND sweep_id = (SELECT sweep_id FROM latest)), history AS (SELECT round(freq_hz / 100000) * 100000 AS freq_bin, avg(power_dbfs) AS historical_avg, stddevPop(power_dbfs) AS historical_std, countIf(power_dbfs > -40) * 100.0 / count() AS activity_pct FROM spectrum.scans WHERE dongle_id = '$dongle' AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 24 HOUR GROUP BY freq_bin), kf_lookup AS (SELECT l.freq_hz, max(k.name) AS kf_name, max(k.modulation) AS kf_modulation FROM latest_data l CROSS JOIN spectrum.known_frequencies k WHERE abs(toInt64(l.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000)) GROUP BY l.freq_hz) SELECT round(l.freq_hz / 1000000, 3) AS freq_mhz, round(l.power_dbfs, 1) AS current_power, round(h.historical_avg, 1) AS avg_24h, round(l.power_dbfs - h.historical_avg, 1) AS above_normal, round(h.activity_pct, 0) AS activity_pct_24h, CASE WHEN m.kf_name IS NOT NULL THEN m.kf_name WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'Airband (unidentified)' WHEN l.freq_hz BETWEEN 137000000 AND 156000000 THEN 'VHF Gov/Business' WHEN l.freq_hz BETWEEN 156000000 AND 163000000 THEN 'Marine VHF' WHEN l.freq_hz BETWEEN 163000000 AND 170000000 THEN 'Land Mobile' ELSE 'Unknown' END AS likely_id, CASE WHEN m.kf_modulation IS NOT NULL THEN m.kf_modulation WHEN l.freq_hz BETWEEN 118000000 AND 137000000 THEN 'AM' ELSE 'NFM' END AS mode, CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 'UNUSUAL' WHEN l.power_dbfs > -15 THEN 'STRONG' WHEN h.activity_pct > 80 THEN 'ALWAYS ON' WHEN h.historical_std > 5 THEN 'BURSTY' ELSE '' END AS status FROM latest_data l JOIN history h ON l.freq_bin = h.freq_bin LEFT JOIN kf_lookup m ON l.freq_hz = m.freq_hz WHERE l.power_dbfs > -40 AND l.freq_hz NOT BETWEEN 174000000 AND 230000000 AND l.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY CASE WHEN l.power_dbfs - h.historical_avg > 10 THEN 0 WHEN h.historical_std > 5 THEN 1 WHEN l.power_dbfs > -15 THEN 2 ELSE 3 END, l.power_dbfs DESC LIMIT 20",
           "format": 1
         }
       ],
@@ -179,7 +179,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT name, round(freq_hz / 1000000, 3) AS freq_mhz, modulation AS mode, class_id, notes FROM spectrum.known_frequencies WHERE class_id IN ('airband', 'marine', 'gov', 'business') ORDER BY CASE class_id WHEN 'airband' THEN 1 WHEN 'marine' THEN 2 WHEN 'gov' THEN 3 WHEN 'business' THEN 4 END, freq_hz",
+          "rawSql": "SELECT name, round(freq_hz / 1000000, 3) AS freq_mhz, modulation AS mode, class_id, notes FROM spectrum.known_frequencies WHERE class_id IN ('am_airband_atc', 'am_airband_atis', 'acars_downlink', 'marine_vhf_channel', 'ais', 'nfm_voice_repeater', 'tetra', 'satcom') ORDER BY multiIf(class_id LIKE 'am_airband%' OR class_id = 'acars_downlink', 1, class_id IN ('marine_vhf_channel', 'ais'), 2, class_id IN ('nfm_voice_repeater', 'tetra'), 3, 4), freq_hz",
           "format": 1
         }
       ]
@@ -196,7 +196,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "# [Open Signal Logger](http://192.168.2.10:8084)\n\nLog what you hear during active monitoring sessions.\n\nThe form submits directly to ClickHouse \u2014 entries appear in the Listening Log panel to the right.\n\n**Tip:** You can also bookmark the logger page or keep it in a separate tab."
+        "content": "# [Open Signal Logger](http://localhost:8084)\n\nLog what you hear during active monitoring sessions.\n\nThe form submits directly to ClickHouse \u2014 entries appear in the Listening Log panel to the right.\n\n**Tip:** You can also bookmark the logger page or keep it in a separate tab."
       }
     },
     {
@@ -236,7 +236,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS time, maxIf(power_dbfs, freq_hz BETWEEN 118000000 AND 122000000) AS ATC, maxIf(power_dbfs, freq_hz BETWEEN 146000000 AND 153000000) AS Military_VHF, maxIf(power_dbfs, freq_hz BETWEEN 156000000 AND 163000000) AS Marine, maxIf(power_dbfs, freq_hz BETWEEN 164000000 AND 170000000) AS Land_Mobile FROM spectrum.scans WHERE (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 1 HOUR GROUP BY time ORDER BY time",
+          "rawSql": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS time, maxIf(power_dbfs, freq_hz BETWEEN 118000000 AND 122000000) AS ATC, maxIf(power_dbfs, freq_hz BETWEEN 146000000 AND 153000000) AS Military_VHF, maxIf(power_dbfs, freq_hz BETWEEN 156000000 AND 163000000) AS Marine, maxIf(power_dbfs, freq_hz BETWEEN 164000000 AND 170000000) AS Land_Mobile FROM spectrum.scans WHERE dongle_id = '$dongle' AND (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 1 HOUR GROUP BY time ORDER BY time",
           "format": 0
         }
       ],
@@ -328,7 +328,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT 'ATIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 136000000 AND 136300000 AND (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'ATC Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 118000000 AND 137000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE",
+          "rawSql": "SELECT 'ATIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE dongle_id = '$dongle' AND freq_hz BETWEEN 136000000 AND 136300000 AND (sweep_id LIKE 'airband:%' OR sweep_id LIKE 'full:%') AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'ATC Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE dongle_id = '$dongle' AND freq_hz BETWEEN 118000000 AND 137000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE",
           "format": 1
         }
       ],
@@ -389,7 +389,7 @@
       },
       "targets": [
         {
-          "rawSql": "SELECT 'Ch16 Distress' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 156700000 AND 156900000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'Marine Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE freq_hz BETWEEN 156000000 AND 163000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'AIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -45 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE freq_hz BETWEEN 161900000 AND 162100000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE",
+          "rawSql": "SELECT 'Ch16 Distress' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -48 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE dongle_id = '$dongle' AND freq_hz BETWEEN 156700000 AND 156900000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'Marine Bursts (15m)' AS signal, toFloat64(count()) AS current_power, CASE WHEN count() > 5 THEN 'BUSY' WHEN count() > 0 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.events WHERE dongle_id = '$dongle' AND freq_hz BETWEEN 156000000 AND 163000000 AND event_type = 'appeared' AND timestamp > now() - INTERVAL 15 MINUTE UNION ALL SELECT 'AIS' AS signal, ifNull(round(max(power_dbfs), 1), -99) AS current_power, CASE WHEN max(power_dbfs) > -45 THEN 'ACTIVE' ELSE 'QUIET' END AS status FROM spectrum.scans WHERE dongle_id = '$dongle' AND freq_hz BETWEEN 161900000 AND 162100000 AND sweep_id LIKE 'full:%' AND timestamp > now() - INTERVAL 15 MINUTE",
           "format": 1
         }
       ],
@@ -450,7 +450,7 @@
       },
       "targets": [
         {
-          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' ORDER BY timestamp DESC LIMIT 1), kf_match AS (SELECT DISTINCT s.freq_hz FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies k WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND abs(toInt64(s.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000))) SELECT round(s.freq_hz / 1000000, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, 'NFM' AS try_mode FROM spectrum.scans s WHERE s.sweep_id = (SELECT sweep_id FROM latest) AND s.freq_hz NOT IN (SELECT freq_hz FROM kf_match) AND s.power_dbfs > -30 AND s.freq_hz NOT BETWEEN 174000000 AND 230000000 AND s.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY s.power_dbfs DESC LIMIT 10",
+          "rawSql": "WITH latest AS (SELECT sweep_id FROM spectrum.sweep_health WHERE preset = 'full' AND dongle_id = '$dongle' ORDER BY timestamp DESC LIMIT 1), kf_match AS (SELECT DISTINCT s.freq_hz FROM spectrum.scans s CROSS JOIN spectrum.known_frequencies k WHERE s.dongle_id = '$dongle' AND s.sweep_id = (SELECT sweep_id FROM latest) AND abs(toInt64(s.freq_hz) - toInt64(k.freq_hz)) <= toInt64(greatest(k.bandwidth_hz / 2, 50000))) SELECT round(s.freq_hz / 1000000, 2) AS freq_mhz, round(s.power_dbfs, 1) AS power, 'NFM' AS try_mode FROM spectrum.scans s WHERE s.dongle_id = '$dongle' AND s.sweep_id = (SELECT sweep_id FROM latest) AND s.freq_hz NOT IN (SELECT freq_hz FROM kf_match) AND s.power_dbfs > -30 AND s.freq_hz NOT BETWEEN 174000000 AND 230000000 AND s.freq_hz NOT BETWEEN 88000000 AND 108000000 ORDER BY s.power_dbfs DESC LIMIT 10",
           "format": 1
         }
       ],
@@ -646,7 +646,31 @@
     "rtl-sdr"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "dongle",
+        "label": "Dongle",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "P_SPECTRUM_CLICKHOUSE"
+        },
+        "query": "SELECT dongle_id FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY dongle_id ORDER BY dongle_id",
+        "definition": "SELECT dongle_id FROM spectrum.sweep_health WHERE timestamp > now() - INTERVAL 30 DAY GROUP BY dongle_id ORDER BY dongle_id",
+        "refresh": 1,
+        "sort": 0,
+        "current": {
+          "selected": true,
+          "text": "v3-01",
+          "value": "v3-01"
+        },
+        "options": [],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "description": "Which RTL-SDR dongle to read. The list comes from dongles that scanned in the last 30 days. The default is the official scanner dongle (v3-01 since 2026-09-26); change current.value here when that changes."
+      }
+    ]
   },
   "time": {
     "from": "now-1h",

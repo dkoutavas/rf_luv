@@ -29,6 +29,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rds_decoder import (  # noqa: E402
+    Decimator,
     FS_DEFAULT,
     OFFSET_WORDS,
     PILOT_HZ,
@@ -133,10 +134,9 @@ def build_bitstream(repeats: int = 4, prefix_bits: int = 200, seed: int = 7):
 
 # ─── MPX synthesizer + FM modulator ──────────────────────
 
-def modulate_cu8(diff_bits, fs: int = FS_DEFAULT, snr_db: float = 30.0, seed: int = 3):
+def fm_iq(diff_bits, fs: int = FS_DEFAULT) -> np.ndarray:
     """Build a phase-locked MPX (mono audio + 19 kHz pilot + 57 kHz DBPSK
-    biphase), FM-modulate, add AWGN, and quantize to interleaved CU8 bytes —
-    exercising the reader's exact byte path.
+    biphase) and FM-modulate it: unit-amplitude complex baseband, no noise.
     """
     hb = fs // 1187  # ~96 samples per biphase half-bit; use exact fs/BITRATE/2
     half = int(round(fs / 1187.5 / 2))   # 96
@@ -154,8 +154,14 @@ def modulate_cu8(diff_bits, fs: int = FS_DEFAULT, snr_db: float = 30.0, seed: in
 
     dev = 75000.0 / np.max(np.abs(mpx))
     phase = 2.0 * np.pi * dev * np.cumsum(mpx) / fs
-    iq = np.exp(1j * phase)
+    return np.exp(1j * phase)
 
+
+def modulate_cu8(diff_bits, fs: int = FS_DEFAULT, snr_db: float = 30.0, seed: int = 3):
+    """fm_iq plus AWGN, quantized to interleaved CU8 bytes — exercising the
+    reader's exact byte path.
+    """
+    iq = fm_iq(diff_bits, fs)
     rng = np.random.default_rng(seed)
     sigma = np.sqrt(10.0 ** (-snr_db / 10.0) / 2.0)
     iq = iq + (rng.standard_normal(iq.size) + 1j * rng.standard_normal(iq.size)) * sigma
@@ -254,10 +260,47 @@ def test_full_mpx_roundtrip():
     print(f"PASS test_full_mpx_roundtrip ({recovered}/{n_groups} groups, {frac:.0%})")
 
 
+def test_neighbour_station_needs_wide_capture():
+    """A strong neighbour 300 kHz away must not break the decode.
+
+    The regression this guards: rds_reader captured at 228 kS/s, where the RTL
+    chip's weak anti-alias filter lets a neighbour 300 kHz away fold into the
+    window (300 - 228 = 72 kHz off centre). On the patio antenna that hid every
+    station's RDS. Modelled here with plain every-D-th-sample decimation (no
+    filter) against rds_decoder.Decimator. D=4 keeps the test small; the fold
+    is the same as at 8x.
+    """
+    fs_in = FS_DEFAULT * 4
+    diff, n_groups = build_bitstream(repeats=2)
+    wanted = fm_iq(diff, fs_in)
+    n = np.arange(wanted.size)
+    rng = np.random.default_rng(11)
+    # Neighbour: noise-modulated FM, 3 dB stronger than the wanted station.
+    audio = np.convolve(rng.standard_normal(wanted.size), np.ones(40) / 40, mode="same")
+    neighbour = 1.41 * np.exp(1j * (2 * np.pi * 300_000 * n / fs_in
+                                    + 2 * np.pi * 75_000 * np.cumsum(audio / np.abs(audio).max()) / fs_in))
+    iq = wanted + neighbour + (rng.standard_normal(n.size) + 1j * rng.standard_normal(n.size)) * 0.02
+
+    def recovered(iq228):
+        demod = RDSDemodulator(fs=FS_DEFAULT)
+        return sum(len(demod.process(iq228[i:i + FS_DEFAULT]))
+                   for i in range(0, iq228.size, FS_DEFAULT))
+
+    naive = recovered(iq[::4])                       # neighbour aliases in
+    dec = Decimator(fs_in=fs_in, fs_out=FS_DEFAULT)  # filtered, streamed in 1 s chunks
+    filtered = recovered(np.concatenate([dec.process(iq[i:i + fs_in])
+                                         for i in range(0, iq.size, fs_in)]))
+    assert naive < 0.1 * n_groups, f"naive decimation should fail, got {naive}/{n_groups}"
+    assert filtered >= 0.9 * n_groups, f"Decimator recovered only {filtered}/{n_groups}"
+    print(f"PASS test_neighbour_station_needs_wide_capture "
+          f"(naive {naive}/{n_groups}, Decimator {filtered}/{n_groups})")
+
+
 def main():
     test_crc10()
     test_block_sync_bitstream()
     test_full_mpx_roundtrip()
+    test_neighbour_station_needs_wide_capture()
     print("OK")
     return 0
 

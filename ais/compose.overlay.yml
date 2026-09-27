@@ -36,7 +36,7 @@ services:
     depends_on:
       - ais-ingest
     command: >
-      -t rtltcp host.docker.internal 1234
+      -t rtltcp host.docker.internal ${RTL_TCP_PORT:-1234}
       -gt tuner 40.0
       -u ais-ingest 10110
     extra_hosts:

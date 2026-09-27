@@ -40,10 +40,9 @@ services:
     depends_on:
       - acars-ingest
     environment:
-      # Tuner: full SoapySDR string. On leap, set this to:
-      #   driver=rtltcp,rtltcp=<dongle-host>:1234
-      # Adjust per-deployment via .env.
-      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:1234}"
+      # Tuner: full SoapySDR string. The port comes from RTL_TCP_PORT, which
+      # pipeline.sh sets from the chosen dongle's env file (1234 = v4-01).
+      SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:${RTL_TCP_PORT:-1234}}"
       FREQUENCIES: "${ACARS_FREQUENCIES:-131.525;131.725;131.825}"
       GAIN: "${ACARS_GAIN:-30}"
       PPM: "${ACARS_PPM:-0}"

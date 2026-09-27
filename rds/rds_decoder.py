@@ -102,6 +102,52 @@ def sinc_lpf(cutoff_hz: float, fs: float, ntaps: int) -> np.ndarray:
     return h.astype(np.float64)
 
 
+# Live capture rate: 8x the decoder rate. At 228 kS/s the RTL chip's own
+# anti-alias filter is weak, and Athens FM stations sit 100-300 kHz apart,
+# so a neighbour just outside the window folds into it (a station 300 kHz
+# away lands 72 kHz off centre). Capturing wide and filtering in software
+# keeps neighbours out. Measured 2026-09-26 on the patio antenna: BEST 92.6
+# decodes at the full group rate this way; at 228 kS/s direct, nothing.
+FS_WIDE = FS_DEFAULT * 8     # 1.824 MS/s, a valid RTL rate
+WIDE_CUTOFF_HZ = 100_000     # keeps one station: +/-75 kHz deviation + margin
+WIDE_NTAPS = 129
+
+
+class Decimator:
+    """Anti-alias low-pass, then keep every D-th sample (D = fs_in / fs_out).
+
+    Streaming: feed consecutive chunks to process(); the last ntaps-1 input
+    samples carry over, so chunk boundaries leave no seam. Only the kept
+    output samples are computed (a polyphase-style loop over the taps), which
+    is 1/D of the work of filtering everything and discarding.
+    """
+
+    def __init__(self, fs_in: int = FS_WIDE, fs_out: int = FS_DEFAULT,
+                 cutoff_hz: float = WIDE_CUTOFF_HZ, ntaps: int = WIDE_NTAPS):
+        if fs_in % fs_out:
+            raise ValueError(f"fs_in {fs_in} is not a multiple of fs_out {fs_out}")
+        self.d = fs_in // fs_out
+        self.h = sinc_lpf(cutoff_hz, fs_in, ntaps)
+        self.tail = np.zeros(ntaps - 1, dtype=np.complex128)
+        self.pos = 0   # global index of the next input sample
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        ntaps = self.h.size
+        buf = np.concatenate((self.tail, np.asarray(x, dtype=np.complex128)))
+        # Output samples sit on global input indices that are multiples of d.
+        # buf[ntaps-1] has global index self.pos.
+        i0 = ntaps - 1 + (-self.pos) % self.d
+        nout = (buf.size - 1 - i0) // self.d + 1 if buf.size > i0 else 0
+        y = np.zeros(nout, dtype=np.complex128)
+        if nout:
+            stop = i0 + (nout - 1) * self.d + 1
+            for k in range(ntaps):      # y[m] = sum_k h[k] * buf[i0 + m*d - k]
+                y += self.h[k] * buf[i0 - k:stop - k:self.d]
+        self.tail = buf[-(ntaps - 1):]
+        self.pos += np.asarray(x).size
+        return y
+
+
 def fm_discriminate(iq: np.ndarray) -> np.ndarray:
     """WFM discriminator: instantaneous frequency via the phase of
     x[n]*conj(x[n-1]). Equivalent to diff(unwrap(angle(x))) but immune to

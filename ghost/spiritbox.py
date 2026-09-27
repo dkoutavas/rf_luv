@@ -118,16 +118,28 @@ def build_station_table(client, session_id: str, step_hz: int,
     Strong-carrier discovery is by RSSI on the channel grid (a real station's
     200 kHz occupies several grid points; the RDS decode confirms which are real).
     """
-    from rds_decoder import decode_iq  # local, numpy-only
+    from rds_decoder import decode_iq, Decimator, FS_WIDE  # local, numpy-only
+
+    # Capture wide and filter down to FS_RDS in software: at 228 kS/s the RTL
+    # chip lets neighbouring stations fold into the window (see
+    # rds_decoder.FS_WIDE). After each retune, drop 200 ms: old-frequency
+    # samples keep arriving for up to ~136 ms (the scanner's measurement).
+    def tune_wide(f):
+        client.set_frequency(int(f))
+        client.discard(int(FS_WIDE * 2 * 0.2))
+
+    def read_rds_iq(n):
+        iq_wide, _ = _read_iq(client, n * (FS_WIDE // FS_RDS))
+        return Decimator(fs_in=FS_WIDE, fs_out=FS_RDS).process(iq_wide)
 
     # 1. rank the channel grid by a short RSSI probe at the RDS rate.
-    client.set_sample_rate(FS_RDS)
+    client.set_sample_rate(FS_WIDE)
     grid = list(range(FM_START, FM_END + 1, step_hz))
     probe_n = int(FS_RDS * 0.05)
     ranked = []
     for f in grid:
-        _tune(client, f)
-        iq, _ = _read_iq(client, probe_n)
+        tune_wide(f)
+        iq = read_rds_iq(probe_n)
         ranked.append((dsp.rssi_dbfs(iq), f))
     ranked.sort(reverse=True)
     candidates = [f for _, f in ranked[:top_n]]
@@ -136,8 +148,8 @@ def build_station_table(client, session_id: str, step_hz: int,
     table, rows = {}, []
     cap_n = int(FS_RDS * dwell_s)
     for f in sorted(candidates):
-        _tune(client, f)
-        iq, _ = _read_iq(client, cap_n)
+        tune_wide(f)
+        iq = read_rds_iq(cap_n)
         rssi = dsp.rssi_dbfs(iq)
         groups = decode_iq(iq, fs=FS_RDS)
         pi = next((g["pi"] for g in groups if g.get("pi")), 0)

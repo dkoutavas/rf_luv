@@ -5,7 +5,8 @@ RDS reader — thin runner around the pure decoder in rds_decoder.py.
 Two modes, both emitting one JSON line per decoded RDS group to stdout so
 rds_ingest.py can consume them (the ism entrypoint pipe shape):
 
-  live:    connect to rtl_tcp, tune RDS_FREQ_HZ at 228000 S/s, feed 1-s IQ
+  live:    connect to rtl_tcp, tune RDS_FREQ_HZ at 1.824 MS/s, filter and
+           decimate to 228000 S/s (rds_decoder.Decimator), feed 1-s IQ
            chunks to RDSDemodulator.
 
   offline: --file capture.cs8   (signed 8-bit interleaved I/Q, as produced
@@ -28,15 +29,19 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from rds_decoder import RDSDemodulator, FS_DEFAULT
+from rds_decoder import RDSDemodulator, Decimator, FS_DEFAULT, FS_WIDE
 
 # ─── Config ──────────────────────────────────────────────
 
 RTL_HOST = os.environ.get("RTL_TCP_HOST", "host.docker.internal")
 RTL_PORT = int(os.environ.get("RTL_TCP_PORT", "1234"))
-FREQ_HZ = int(os.environ.get("RDS_FREQ_HZ", "99600000"))
-GAIN_DB = float(os.environ.get("RDS_GAIN", "29.7"))
+# BEST 92.6 carries strong RDS on the patio antenna (survey 2026-09-26);
+# 99.6, 95.2 and 105.5 carry little or none there. Gain 3.7: FM on that
+# antenna clips the bare V3 at 12.5.
+FREQ_HZ = int(os.environ.get("RDS_FREQ_HZ", "92600000"))
+GAIN_DB = float(os.environ.get("RDS_GAIN", "3.7"))
 DONGLE_ID = os.environ.get("RDS_DONGLE_ID", "v4-01")
+# Rate of a recorded file for --file mode. Live mode always captures at FS_WIDE.
 SAMPLE_RATE = int(os.environ.get("RDS_SAMPLE_RATE", str(FS_DEFAULT)))
 # Pilot gate: median |pilot| below this => no stereo pilot => nothing emitted.
 # 0.0 (off) by default so a marginal capture still decodes; raise it if a
@@ -130,21 +135,23 @@ def emit(group: dict):
 # ─── Live mode ───────────────────────────────────────────
 
 def run_live():
-    demod = RDSDemodulator(fs=SAMPLE_RATE, pilot_thresh=PILOT_THRESH)
+    demod = RDSDemodulator(fs=FS_DEFAULT, pilot_thresh=PILOT_THRESH)
+    decimator = Decimator(fs_in=FS_WIDE, fs_out=FS_DEFAULT)
     client = RTLTCPClient(RTL_HOST, RTL_PORT)
     try:
-        client.set_sample_rate(SAMPLE_RATE)
+        client.set_sample_rate(FS_WIDE)
         client.set_frequency(FREQ_HZ)
         client.set_gain(GAIN_DB)
-        client.discard(SAMPLE_RATE)  # ~0.5 s of settling bytes (SAMPLE_RATE bytes)
-        log.info(f"Decoding RDS at {FREQ_HZ/1e6:.3f} MHz, {SAMPLE_RATE} S/s, gain {GAIN_DB} dB")
+        client.discard(FS_WIDE)  # ~0.5 s of settling bytes (FS_WIDE bytes)
+        log.info(f"Decoding RDS at {FREQ_HZ/1e6:.3f} MHz, capture {FS_WIDE} S/s "
+                 f"decimated to {FS_DEFAULT}, gain {GAIN_DB} dB")
 
         total = 0
         while running:
-            raw = client.read_samples(SAMPLE_RATE * 2)  # 1 s of CU8 (I,Q interleaved)
+            raw = client.read_samples(FS_WIDE * 2)  # 1 s of CU8 (I,Q interleaved)
             buf = np.frombuffer(raw, dtype=np.uint8).astype(np.float64)
             iq = ((buf[0::2] - 127.5) + 1j * (buf[1::2] - 127.5)) / 127.5
-            for group in demod.process(iq):
+            for group in demod.process(decimator.process(iq)):
                 emit(group)
                 total += 1
     finally:

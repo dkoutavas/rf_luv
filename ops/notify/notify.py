@@ -6,9 +6,9 @@ Stdlib-only POST to https://ntfy.sh/<topic>. Reads NTFY_TOPIC + NTFY_URL from
 /etc/rtl-scanner/notify.env (KEY=VALUE lines). Idempotent within a 5-min
 window per (level,title) pair, so repeated CB-open ticks don't spam the phone.
 
-For a local desk (no phone), leave NTFY_TOPIC unset and alerts pop up via
-notify-send (libnotify) instead; set NTFY_LOCAL=1 to also mirror ntfy sends to
-the desktop.
+For a local desk (no phone), leave NTFY_TOPIC unset and alerts pop up on the
+desktop instead (D-Bus Notify via busctl); set NTFY_LOCAL=1 to also mirror
+ntfy sends to the desktop.
 
 Importable: from notify import send
 CLI: notify.py LEVEL TITLE [-m MESSAGE] [-t TAG ...]
@@ -22,6 +22,7 @@ Levels map to ntfy priorities:
 import argparse
 import json
 import os
+import pwd
 import subprocess
 import sys
 import time
@@ -50,22 +51,43 @@ def load_env(path: str = ENV_PATH) -> dict:
                     continue
                 k, _, v = line.partition("=")
                 out[k.strip()] = v.strip().strip('"').strip("'")
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
+        # notify.env is 0640 root. A user-level caller (clickhouse-backup,
+        # a CLI test) cannot read it and falls through to the desktop popup,
+        # which needs no config.
         pass
     return out
 
 
-def _desktop_notify(level: str, title: str, message: str) -> bool:
-    """Best-effort local desktop popup via notify-send (libnotify). Returns
-    True if the command was launched. ponytail: native desktop tool, no new
-    dependency; a silent no-op if notify-send is absent (headless / no session
-    bus), which is fine — the action log still carries the alert."""
-    urgency = {"INFO": "low", "WARN": "normal", "CRITICAL": "critical"}.get(level, "normal")
+def _desktop_notify(level: str, title: str, message: str, desktop_uid: int) -> bool:
+    """Local desktop popup. Returns True only if the desktop accepted it.
+
+    Calls the freedesktop Notify method over D-Bus with busctl, which ships
+    with systemd. notify-send would read better but lives in libnotify-tools,
+    which openSUSE does not install by default. Notify signature: app name,
+    replaces-id, icon, summary, body, actions (none), hints (urgency byte:
+    0 low, 1 normal, 2 critical), timeout (-1 = desktop default).
+
+    The escalator and the probes run as root from system timers. Root has no
+    desktop session, so from root we run busctl as the desktop user (runuser)
+    and point it at that user's session bus in /run/user/<uid>/bus."""
+    urgency = {"INFO": "0", "WARN": "1", "CRITICAL": "2"}.get(level, "1")
+    cmd = ["busctl", "--user", "call", "org.freedesktop.Notifications",
+           "/org/freedesktop/Notifications", "org.freedesktop.Notifications",
+           "Notify", "susssasa{sv}i", "rf_luv", "0", "",
+           f"rf_luv: {title}", message or title, "0", "1", "urgency", "y", urgency,
+           "--", "-1"]
+    if os.geteuid() == 0:
+        try:
+            user = pwd.getpwuid(desktop_uid).pw_name
+        except KeyError:
+            return False
+        cmd = ["runuser", "-u", user, "--", "env",
+               f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{desktop_uid}/bus"] + cmd
     try:
-        subprocess.run(["notify-send", "-u", urgency,
-                        f"rf_luv: {title}", message or title],
-                       check=False, timeout=10)
-        return True
+        result = subprocess.run(cmd, check=False, timeout=10,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -110,7 +132,8 @@ def send(level: str, title: str, message: str = "", tags: list | None = None,
         # No topic configured — the local single-host default: pop up a desktop
         # notification instead of a phone push. The action log still carries the
         # signal regardless.
-        shown = _desktop_notify(level, title, message)
+        shown = _desktop_notify(level, title, message,
+                                int(env.get("DESKTOP_UID", "1000")))
         if not shown:
             print(f"[notify] no NTFY_TOPIC and no desktop; would send: "
                   f"{level} {title}: {message}", file=sys.stderr, flush=True)
@@ -134,7 +157,7 @@ def send(level: str, title: str, message: str = "", tags: list | None = None,
         return False
     _record_sent(level, title)
     if local:
-        _desktop_notify(level, title, message)
+        _desktop_notify(level, title, message, int(env.get("DESKTOP_UID", "1000")))
     return True
 
 

@@ -49,6 +49,16 @@ FFT_SIZE = int(os.environ.get("SCAN_FFT_SIZE", "1024"))
 SAMPLE_RATE = int(os.environ.get("SCAN_SAMPLE_RATE", "2048000"))
 NUM_AVERAGES = int(os.environ.get("SCAN_NUM_AVERAGES", "8"))
 
+# Bytes to throw away after every retune before measuring. The dongle hands
+# samples over in 256 KiB USB blocks (64 ms at 2.048 MS/s), and rtl_tcp queues
+# a few more, so samples from the OLD frequency keep arriving after
+# set_frequency. Measured on the V3 (2026-09-26): 80-136 ms, 320-544 KiB.
+# The old 32 KiB (8 ms) read each hop's samples from a frequency many hops
+# earlier: loud FM was smeared 20-30 MHz up into airband and VHF.
+# 786432 B = 192 ms covers the worst case with margin. Cost: a full
+# 88-470 MHz sweep takes ~38 s instead of ~2.3 s.
+SETTLE_BYTES = int(os.environ.get("SCAN_SETTLE_BYTES", "786432"))
+
 # Sweep intervals
 FULL_INTERVAL = int(os.environ.get("SCAN_INTERVAL_SECONDS", "280"))
 AIRBAND_INTERVAL = int(os.environ.get("SCAN_AIRBAND_INTERVAL", "60"))
@@ -152,6 +162,19 @@ class RTLTCPClient:
 
     def discard(self, num_bytes: int):
         self._read_exact(num_bytes)
+
+    def drain(self, seconds: float):
+        """Read and throw away samples for `seconds`.
+
+        rtl_tcp streams 4 MB/s whether or not we read. Between sweeps an
+        unread socket makes rtl_tcp queue up to 500 x 256 KiB buffers (and
+        log an "ll+" line per buffer). Reading during idle ticks keeps its
+        queue near empty, so the next sweep starts on fresh samples.
+        """
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if not self.sock.recv(262144):
+                raise ConnectionError("rtl_tcp connection closed")
 
     def close(self):
         self.sock.close()
@@ -275,8 +298,9 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> tuple[list[di
 
     while center < freq_end + SAMPLE_RATE // 2:
         client.set_frequency(center)
-        time.sleep(0.005)
-        client.discard(32768)
+        # Wait for samples from the new frequency (see SETTLE_BYTES). Reading
+        # them also covers the PLL settle time, so no separate sleep.
+        client.discard(SETTLE_BYTES)
 
         power_sum = np.zeros(FFT_SIZE)
         for _ in range(NUM_AVERAGES):
@@ -438,6 +462,14 @@ def main():
     }), flush=True)
     first_full_done = False
 
+    # One rtl_tcp connection for the whole run, reopened only after an error.
+    # rtl_tcp starts the USB stream when a client connects and cancels it when
+    # the client leaves. Its command thread can still be inside
+    # rtlsdr_set_center_freq during that teardown, and libusb aborts the
+    # process (SIGABRT). Reconnecting for every sweep (~180 connects/hour)
+    # hit that race about twice a day.
+    client = None
+
     while running:
         # Pick the most overdue preset
         now = time.monotonic()
@@ -449,16 +481,14 @@ def main():
                 best_overdue = overdue
                 best = p
 
-        # If nothing is due yet, sleep 1s and check again
-        if best_overdue < 0:
-            time.sleep(1)
-            continue
-
         preset = best
 
-        # Per-sweep dongle coordination. We're a low-priority consumer: if a
-        # decoder (e.g. NOAA recorder.py during a satellite pass) holds the
-        # lock, skip this sweep and try again next pick. Graceful when the
+        # Dongle coordination, checked on every tick (not only when a sweep is
+        # due). rtl_tcp serves one client at a time, so while we hold the
+        # socket nobody else can connect. Another consumer (iq_capture.py, the
+        # NOAA recorder) takes this lock first; checking every second lets us
+        # see that and hand the socket over within ~1 s. We're a low-priority
+        # consumer: if a decoder holds the lock, skip. Graceful when the
         # coordinator install hasn't been run on this host — one warning,
         # then proceed unlocked. See ops/rtl-coordinator/.
         try:
@@ -476,22 +506,34 @@ def main():
         try:
           with cm as got_lock:
             if not got_lock:
-                log.info(
-                    f"[{preset['name']}] dongle {DONGLE_ID} held by another "
-                    f"consumer — deferring sweep"
-                )
-                last_run[preset["name"]] = time.monotonic()
+                if client is not None:
+                    client.close()
+                    client = None
+                    log.info(f"Released rtl_tcp for another consumer of {DONGLE_ID}")
+                if best_overdue >= 0:
+                    log.info(
+                        f"[{preset['name']}] dongle {DONGLE_ID} held by another "
+                        f"consumer — deferring sweep"
+                    )
+                    last_run[preset["name"]] = time.monotonic()
                 time.sleep(2)
                 continue
-            client = RTLTCPClient(RTL_HOST, RTL_PORT)
-            client.set_sample_rate(SAMPLE_RATE)
-            client.set_gain(effective_gain)
-            # Warmup: tune to sweep start frequency and discard enough
-            # for PLL to settle after large frequency jump (e.g. 470→118 MHz).
-            # 131072 bytes = 64K IQ samples = ~32ms at 2.048 MS/s.
-            client.set_frequency(preset["start"] + SAMPLE_RATE // 2)
-            time.sleep(0.010)
-            client.discard(131072)
+
+            # Nothing due yet: keep reading so rtl_tcp's queue stays empty
+            if best_overdue < 0:
+                if client is not None:
+                    client.drain(1.0)
+                else:
+                    time.sleep(1)
+                continue
+
+            if client is None:
+                client = RTLTCPClient(RTL_HOST, RTL_PORT)
+                client.set_sample_rate(SAMPLE_RATE)
+                client.set_gain(effective_gain)
+            # No separate warmup: sweep() retunes to the first hop and
+            # discards SETTLE_BYTES, which also flushes samples from before
+            # the sweep.
 
             sweep_ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             sweep_id = f"{preset['name']}:{sweep_ts}"
@@ -500,7 +542,6 @@ def main():
             bins, clipping = sweep(client, preset["start"], preset["end"])
             elapsed = time.monotonic() - t0
 
-            client.close()
             last_run[preset["name"]] = time.monotonic()
 
             # Output scan bins
@@ -567,6 +608,8 @@ def main():
                     f"reducing gain {effective_gain} → {new_gain} dB"
                 )
                 effective_gain = new_gain
+                # The connection stays open, so the new gain must be sent now
+                client.set_gain(effective_gain)
             elif clipping["clipped"]:
                 log.warning(
                     f"[{preset['name']}] ADC CLIPPING: "
@@ -602,8 +645,16 @@ def main():
             )
 
         except (ConnectionRefusedError, ConnectionError, socket.error, OSError) as e:
-            log.warning(f"Connection error: {e} — retrying in 10s...")
+            # Close before sleeping: with no connection on the port, the
+            # rtl_tcp watchdog can probe and restart a stalled server.
+            if client is not None:
+                client.close()
+                client = None
+            log.warning(f"Connection error: {e} — reconnecting in 10s...")
             time.sleep(10)
+
+    if client is not None:
+        client.close()
 
     # Emit run_end so ingest can close the scan_runs entry
     print(json.dumps({

@@ -13,7 +13,9 @@ escalates anything that has been CB-open for ≥CB_OPEN_DURATION_S to a full
 unwedge sequence (the 2026-04-29 manual recovery recipe):
 
     1. Per-device USB unbind/rebind for the stuck dongle (rtl-usb-reset)
-    2. Full xHCI controller bounce on PCI 0000:00:14.0 (clears stuck tuner i2c)
+    2. Bounce the dongle's own xHCI controller, found from sysfs (clears a
+       stuck tuner i2c). Skipped when other USB devices share that
+       controller, unless XHCI_BOUNCE_SHARED=1.
     3. Restart rtl-tcp@<serial>.service in the user manager (linger required)
     4. Record the attempt; back off UNWEDGE_COOLDOWN_S before retrying
 
@@ -33,6 +35,7 @@ All actions append a JSON line to /var/log/rtl-recovery.log. State transitions
 import argparse
 import json
 import os
+import pwd
 import subprocess
 import sys
 import time
@@ -41,10 +44,11 @@ from pathlib import Path
 # Defaults (overridable via /etc/rtl-scanner/escalator.env, KEY=VALUE).
 DEFAULTS = {
     "TARGET_USER": "dio_nysi",
-    "TARGET_UID": "1000",
     "SERIALS": "v4-01",              # two-dongle host: set "v4-01,v3-01" in escalator.env
-    "WATCHDOG_STATE_DIR": "/run/user/1000",
-    "XHCI_PCI": "0000:00:14.0",
+    "WATCHDOG_STATE_DIR": "",         # empty: /run/user/<uid of TARGET_USER>
+    # A controller bounce drops every USB device on it for ~8 s. On the Omen the
+    # V4 shares its controller with the webcam and Bluetooth, so skip by default.
+    "XHCI_BOUNCE_SHARED": "0",
     "RTL_USB_RESET": "/usr/local/sbin/rtl-usb-reset",
     "RTL_SERVICE_TEMPLATE": "rtl-tcp@%s.service",
     "CB_FAILURE_THRESHOLD": "10",     # mirrors watchdog MAX_CONSECUTIVE_FAILURES
@@ -73,6 +77,8 @@ def load_env(path: str = "/etc/rtl-scanner/escalator.env") -> dict:
                 out[k.strip()] = v.strip().strip('"').strip("'")
     except FileNotFoundError:
         pass
+    if not out["WATCHDOG_STATE_DIR"]:
+        out["WATCHDOG_STATE_DIR"] = f"/run/user/{pwd.getpwnam(out['TARGET_USER']).pw_uid}"
     return out
 
 
@@ -149,11 +155,51 @@ def restart_user_unit(cfg: dict, serial: str) -> int:
     return r.returncode
 
 
-def xhci_bounce(cfg: dict) -> bool:
-    """Unbind + rebind the xHCI host controller. Affects every USB device on
-    that controller for ~10s. Returns True on success.
+def xhci_for_serial(serial: str, sys_root: str = "/sys"):
+    """Return (xHCI PCI address, other devices on that controller) for the
+    dongle with this EEPROM serial, or None when it is not on the bus.
+
+    The controller is the PCI device in the dongle's sysfs path that is bound
+    to xhci_hcd. Hubs do not count as other devices; what hangs off them does.
     """
-    pci = cfg["XHCI_PCI"]
+    usb = Path(sys_root) / "bus/usb/devices"
+    xhci = {p.name for p in (Path(sys_root) / "bus/pci/drivers/xhci_hcd").glob("0000:*")}
+
+    def controller(dev):
+        return next((part for part in dev.resolve().parts if part in xhci), None)
+
+    def read(dev, attr):
+        try:
+            return (dev / attr).read_text().strip()
+        except OSError:
+            return ""
+
+    devices = [d for d in usb.glob("*-*") if ":" not in d.name and read(d, "idVendor")]
+    dongle = next((d for d in devices if read(d, "serial") == serial), None)
+    if dongle is None or controller(dongle) is None:
+        return None
+    pci = controller(dongle)
+    others = sorted(read(d, "product") or f"{read(d, 'idVendor')}:{read(d, 'idProduct')}"
+                    for d in devices
+                    if d != dongle and controller(d) == pci and read(d, "bDeviceClass") != "09")
+    return pci, others
+
+
+def xhci_plan(cfg: dict, serial: str) -> dict:
+    """Which controller to bounce for this dongle, or why to skip it."""
+    found = xhci_for_serial(serial)
+    if found is None:
+        return {"skip": "dongle not on the bus"}
+    pci, others = found
+    if others and cfg["XHCI_BOUNCE_SHARED"] != "1":
+        return {"pci": pci, "skip": "shared with " + ", ".join(others)}
+    return {"pci": pci}
+
+
+def xhci_bounce(pci: str) -> bool:
+    """Unbind + rebind one xHCI host controller. Affects every USB device on
+    that controller for ~8 s. Returns True on success.
+    """
     drv = "/sys/bus/pci/drivers/xhci_hcd"
     try:
         with open(f"{drv}/unbind", "w") as f:
@@ -189,11 +235,12 @@ def unwedge(cfg: dict, serial: str, dry_run: bool) -> dict:
     # the other 40% need the controller bounce to clear the tuner i2c bus.
     # We do both unconditionally because we only get here when the watchdog
     # has already exhausted soft restarts AND a per-device hard reset.
-    if dry_run:
-        result["steps"].append({"step": "xhci_bounce", "dry_run": True})
+    plan = xhci_plan(cfg, serial)
+    if dry_run or "skip" in plan:
+        result["steps"].append({"step": "xhci_bounce", "dry_run": dry_run, **plan})
     else:
-        ok = xhci_bounce(cfg)
-        result["steps"].append({"step": "xhci_bounce", "ok": ok})
+        ok = xhci_bounce(plan["pci"])
+        result["steps"].append({"step": "xhci_bounce", "pci": plan["pci"], "ok": ok})
 
     # Step 3: restart the user unit so rtl_tcp gets a fresh libusb handle
     if dry_run:

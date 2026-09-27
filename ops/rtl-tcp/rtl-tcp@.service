@@ -25,8 +25,10 @@ Restart=always
 RestartSec=10
 # Timeouts cap how long rtl_tcp can sit in "activating"/"deactivating"
 # before systemd kills it (a dead USB handle can stall the SIGTERM path).
+# A healthy rtl_tcp exits on SIGTERM at once; a wedged one never does
+# (2026-09-27: 15 s of waiting before the SIGKILL), so the stop timeout is short.
 TimeoutStartSec=30
-TimeoutStopSec=15
+TimeoutStopSec=3
 
 [Install]
 WantedBy=default.target

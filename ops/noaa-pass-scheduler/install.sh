@@ -12,7 +12,9 @@ set -euo pipefail
 # Prerequisites:
 #   - noaa/ pipeline ClickHouse stack running (docker compose up -d in noaa/)
 #   - python3 + orbit-predictor pip package installed:
-#       pip install --user orbit-predictor
+#       pip install --user --break-system-packages orbit-predictor==1.15.2
+#     (--break-system-packages: Tumbleweed marks the system Python as
+#     externally managed, and orbit-predictor is not packaged there.)
 #
 # Run on the host after `git pull`:
 #   bash ops/noaa-pass-scheduler/install.sh
@@ -66,7 +68,7 @@ if python3 -c "import orbit_predictor" 2>/dev/null; then
     info "orbit-predictor present"
 else
     warn "orbit-predictor not installed; scheduler.py will warn and exit cleanly until you run:"
-    warn "  pip3 install --user orbit-predictor"
+    warn "  pip3 install --user --break-system-packages orbit-predictor==1.15.2"
 fi
 
 step "Enable + start timers"

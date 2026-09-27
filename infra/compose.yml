@@ -76,7 +76,7 @@ services:
     command: ["/repo/infra/bootstrap.sh"]
 
   grafana:
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:13.2.2
     container_name: grafana
     restart: unless-stopped
     networks:
@@ -87,7 +87,9 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource"
+      # Pinned, and _SYNC so the plugin is installed before Grafana serves the
+      # datasources. Plain GF_PLUGINS_PREINSTALL skipped it on Grafana 13.
+      GF_PLUGINS_PREINSTALL_SYNC: "grafana-clickhouse-datasource@4.21.3"
       # Dashboards embed raw HTML panels (status tables); keep them un-sanitized.
       GF_PANELS_DISABLE_SANITIZE_HTML: "true"
       GF_SECURITY_ADMIN_USER: "${GF_ADMIN_USER:-admin}"
@@ -99,7 +101,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro,z
 
   logging-form:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.5-alpine
     container_name: logging-form
     restart: unless-stopped
     networks:

@@ -14,6 +14,7 @@ the first time coordinator.dongle_lock(mode="timeout") is driven under a held
 lock.
 """
 
+import contextlib
 import os
 import sys
 import time
@@ -240,11 +241,25 @@ def test_rotate_capture_dir_oldest_first():
 
 # ─── (4) capture-to-.cs8 with a MOCKED rtl_tcp client ────
 
+@contextlib.contextmanager
+def _no_real_lock():
+    """perform_capture takes the real dongle lock in /var/lib/rtl-coordinator,
+    which a live scanner on the host holds for up to a full sweep (~37 s), so
+    these tests could wait on it and time out. They check capture logic; real
+    locking is tested in (5) against a temp lock dir."""
+    saved = iq_capture.dongle_lock
+    iq_capture.dongle_lock = lambda *a, **kw: contextlib.nullcontext(True)
+    try:
+        yield
+    finally:
+        iq_capture.dongle_lock = saved
+
+
 def test_perform_capture_writes_cs8_and_row():
     rate = 2048
     dur = 0.5
     total_bytes = int(dur * rate) * 2  # 2048 bytes
-    with tempfile.TemporaryDirectory() as d, _StubDB(scalar=_router(0, 0)) as sdb:
+    with tempfile.TemporaryDirectory() as d, _StubDB(scalar=_router(0, 0)) as sdb, _no_real_lock():
         trigger = {
             "trigger_id": "tid-abc",
             "freq_hz": 99_600_000,
@@ -286,7 +301,7 @@ def test_perform_capture_writes_cs8_and_row():
 
 
 def test_perform_capture_refuses_blocked_band():
-    with tempfile.TemporaryDirectory() as d, _StubDB() as sdb:
+    with tempfile.TemporaryDirectory() as d, _StubDB() as sdb, _no_real_lock():
         saved = iq_capture.IQ_ALLOW_BLOCKED_BANDS
         iq_capture.IQ_ALLOW_BLOCKED_BANDS = False
         try:

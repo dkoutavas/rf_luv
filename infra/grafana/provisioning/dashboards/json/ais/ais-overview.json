@@ -259,7 +259,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["ais", "maritime", "rtl-sdr"],
+  "tags": ["ais", "maritime", "rtl-sdr", "rf_luv"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},

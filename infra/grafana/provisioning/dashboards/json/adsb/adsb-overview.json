@@ -171,7 +171,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["adsb", "aviation", "rtl-sdr"],
+  "tags": ["adsb", "aviation", "rtl-sdr", "rf_luv"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},

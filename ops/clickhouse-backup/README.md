@@ -14,25 +14,33 @@ is cheap insurance. This closes that gap.
 
 ## What it does
 
-`backup.sh` walks each configured database and, for every MergeTree-family
-table, runs:
+`backup.sh` walks each configured database in the shared `clickhouse`
+container and, for every MergeTree-family table, runs:
 
 ```
-docker exec clickhouse-<db> clickhouse-client \
-  --query "SELECT * FROM <db>.<table> FORMAT Native" | gzip > <table>.native.gz
+docker exec clickhouse clickhouse-client \
+  --query "SELECT * FROM <db>.<table> SETTINGS final = 1 FORMAT Native" | gzip > <table>.native.gz
 ```
 
 - **No extra binaries, no server reconfiguration.** Pure `docker exec` +
   `clickhouse-client` + `gzip`, in keeping with the project's stdlib ethos.
 - **Native format preserves AggregateFunction states**, so AggregatingMergeTree
-  and ReplacingMergeTree rollup tables restore exactly.
-- Implicit `.inner` materialized-view storage and `Dictionary` tables are
-  skipped: they are derived and repopulate from base inserts / reload from
-  their source table on restore.
+  and ReplacingMergeTree rollup tables restore exactly. `final = 1` collapses
+  rows that background merges have not collapsed yet, so the MANIFEST row count
+  is the logical count and matches a restored table.
+- **Materialized views with hidden storage are dumped too.** A view created
+  without `TO <table>` keeps its rollups in a hidden `.inner_id.<uuid>` table.
+  `SELECT * FROM <view>` reads that storage, so each such view gets its own
+  `<view>.native.gz`. The rollups cannot be rebuilt from the base table after
+  a restore, because the view only sees rows inserted after it exists. Views
+  with an explicit `TO` target (spectrum `hourly_baseline_mv`) need no dump:
+  the target table is dumped like any other.
+- `Dictionary` tables are skipped: they reload from their source table.
 - Each run writes a timestamped snapshot `BACKUP_DIR/<db>/<UTC-timestamp>/`
-  containing `<table>.native.gz` files, a `MANIFEST.tsv` (table, rows, bytes),
-  and a `schema.sql` (SHOW CREATE, for self-containment). A `latest` symlink
-  points at the newest snapshot. Snapshots older than `RETENTION_DAYS` prune.
+  containing `<table>.native.gz` and `<view>.native.gz` files, a `MANIFEST.tsv`
+  (name, rows, bytes), and a `schema.sql` (SHOW CREATE of every table and view,
+  for self-containment). A `latest` symlink points at the newest snapshot.
+  Snapshots older than `RETENTION_DAYS` prune.
 
 ## Deploy
 
@@ -57,25 +65,26 @@ Defaults (all overridable in the env file):
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `BACKUP_DIR` | `/var/backups/rf-clickhouse` | snapshot target (set off-host) |
-| `DATABASES` | `spectrum acars` | space-separated db list |
+| `DATABASES` | all eight | space-separated db list |
 | `RETENTION_DAYS` | `14` | prune snapshots older than this |
 | `<DB>_PASSWORD` | `<db>_local` | per-db password override |
 
 ## Restore
 
-Bring the target stack up first so migrations recreate the schema (tables +
-materialized views), then restore the data:
+Bring the data layer up first so `ch-bootstrap` recreates the schema (tables
+and materialized views), then restore the data:
 
 ```bash
-cd spectrum && docker compose up -d        # migrate.py creates schema + MVs
+bash infra/up.sh                            # ch-bootstrap creates schema + MVs
 bash ops/clickhouse-backup/restore.sh --db spectrum --latest
 ```
 
 `restore.sh` detaches the materialized views, `TRUNCATE`s and re-inserts each
-dumped table from its Native dump, then reattaches the MVs. Detaching the MVs
-during the insert prevents base-table rows from fanning out and double-counting
-into the rollup tables (which are restored from their own dumps). Use
-`--from <timestamp>` for a specific snapshot, or `--dry-run` to preview.
+dumped table from its Native dump, then reattaches the views and restores the
+view rollups from their own dumps (`INSERT INTO <view>` writes to the hidden
+storage). Detaching the views during the base insert stops base-table rows
+from fanning out and double-counting into the rollups. Use `--from <timestamp>`
+for a specific snapshot, or `--dry-run` to preview.
 
 ## Verify a backup
 
@@ -85,7 +94,8 @@ journalctl --user -u clickhouse-backup -n 50     # last run log
 systemctl --user list-timers clickhouse-backup.timer
 ```
 
-A failed run fires a CRITICAL ntfy alert via `rf-notify` (if installed).
+A failed run fires a CRITICAL alert via `rf-notify` (if installed): ntfy if a
+topic is set, else a desktop popup.
 
 ## Limitations
 

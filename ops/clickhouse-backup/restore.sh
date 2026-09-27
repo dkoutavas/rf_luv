@@ -5,15 +5,19 @@ set -euo pipefail
 #
 # Procedure (correct-by-construction, no double-counting):
 #   1. The fresh stack must already be up and migrated (tables + MVs exist):
-#        bash infra/up.sh   # ch-bootstrap migrates schema for all 6 databases
+#        bash infra/up.sh   # ch-bootstrap migrates schema for all 8 databases
 #   2. DETACH every materialized view so re-inserting base data does NOT fan
 #      out into rollup tables (we restore those rollups from their own dumps).
 #   3. For each dumped table: TRUNCATE then INSERT ... FORMAT Native.
 #   4. ATTACH the materialized views back so they are live for future inserts.
+#   5. For each view dumped by backup.sh (views without a TO table, whose
+#      rollups sit in a hidden .inner table): TRUNCATE the view and INSERT the
+#      dump through it. Both statements pass through to the hidden table.
 #
-# This reproduces the snapshot exactly: base tables AND explicit MV-target
-# rollups come back to their saved state. Implicit .inner MV storage was not
-# dumped (its data is derived); it repopulates from subsequent live inserts.
+# This reproduces the snapshot exactly: base tables, explicit MV-target
+# tables, and the rollups of views without a TO table all come back to their
+# saved state. Snapshots taken before 2026-09-27 have no view dumps; restoring
+# one leaves those rollups empty until new data arrives.
 #
 # Usage:
 #   bash ops/clickhouse-backup/restore.sh --db spectrum --latest
@@ -78,7 +82,9 @@ if [ "$DRY" -eq 1 ]; then
     for f in "$SNAP"/*.native.gz; do
         [ -e "$f" ] || continue
         t="$(basename "$f" .native.gz)"
-        echo "    TRUNCATE + INSERT $DB.$t  ($(du -h "$f" | cut -f1))"
+        kind="table"
+        printf '%s\n' "${mvs[@]}" | grep -qx "$t" && kind="view rollups, after re-attach"
+        echo "    TRUNCATE + INSERT $DB.$t  ($(du -h "$f" | cut -f1), $kind)"
     done
     exit 0
 fi
@@ -128,5 +134,26 @@ for f in "$SNAP"/*.native.gz; do
     restored=$((restored + 1))
 done
 
-info "restore complete: $restored tables into $DB"
+# Views live again, then their rollups back through them.
+reattach_mvs
+trap - EXIT
+rollups=0
+for mv in "${mvs[@]}"; do
+    [ -z "$mv" ] && continue
+    f="$SNAP/${mv}.native.gz"
+    [ -e "$f" ] || continue
+    ch --query "TRUNCATE TABLE ${DB}.${mv}"
+    tmp="$(mktemp)"
+    gunzip -c "$f" > "$tmp"
+    if [ -s "$tmp" ]; then
+        ch_in --query "INSERT INTO ${DB}.${mv} FORMAT Native" < "$tmp"
+        info "restored rollups of ${DB}.${mv}"
+    else
+        info "restored rollups of ${DB}.${mv} (empty dump; truncated)"
+    fi
+    rm -f "$tmp"
+    rollups=$((rollups + 1))
+done
+
+info "restore complete: $restored tables and $rollups view rollups into $DB"
 warn "verify: docker exec $container clickhouse-client --user $user --password '***' --query \"SELECT count() FROM ${DB}.scans\" (or the relevant base table)"

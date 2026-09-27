@@ -101,7 +101,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro,z
 
   logging-form:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.5-alpine
     container_name: logging-form
     restart: unless-stopped
     networks:

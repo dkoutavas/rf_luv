@@ -31,7 +31,7 @@ ClickHouse ports published now; the old per-pipeline ports are retired.
 |---|---|---|---|
 | clickhouse | `clickhouse/clickhouse-server:26.8.12.53-alpine` | 8123 (HTTP), 9000 (native) | the one database server |
 | grafana | `grafana/grafana:13.2.2` | 3000 | all eight dashboards |
-| logging-form | `nginx:1.27-alpine` | 8084 | the spectrum logging form |
+| logging-form | `nginx:1.30.5-alpine` | 8084 | the spectrum logging form |
 | ch-bootstrap | built from `Dockerfile.bootstrap` | (none, one-shot) | creates identities + schema |
 
 All host ports bind to `127.0.0.1`. Docker writes its own nftables rules, so a

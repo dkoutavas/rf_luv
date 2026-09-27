@@ -46,10 +46,12 @@ def make_wfm_tone_cu8(fs=dsp.FS_CAPTURE, dur=0.25, tone=1000.0, dev=75000.0):
 
 
 def make_rds_cu8():
-    """A synthetic RDS MPX at 228 kHz, reusing the rds decoder's own test rig."""
+    """A synthetic RDS MPX at the wide capture rate the pre-pass uses
+    (rds_decoder.FS_WIDE), reusing the rds decoder's own test rig."""
     import test_rds_decoder as rds_t
-    diff, _ = rds_t.build_bitstream(repeats=6, prefix_bits=200, seed=7)
-    cu8 = rds_t.modulate_cu8(diff, fs=spiritbox.FS_RDS, snr_db=35.0, seed=3)
+    from rds_decoder import FS_WIDE
+    diff, _ = rds_t.build_bitstream(repeats=3, prefix_bits=200, seed=7)
+    cu8 = rds_t.modulate_cu8(diff, fs=FS_WIDE, snr_db=35.0, seed=3)
     return cu8.tobytes() if hasattr(cu8, "tobytes") else bytes(cu8)
 
 
@@ -155,7 +157,8 @@ def test_run_live_end_to_end(monkeypatch=None):
 
 
 def test_rds_prepass_finds_a_station():
-    buffers = {spiritbox.FS_RDS: make_rds_cu8()}
+    from rds_decoder import FS_WIDE
+    buffers = {FS_WIDE: make_rds_cu8()}
     client = FakeClient(buffers)
     orig = (spiritbox.FM_START, spiritbox.FM_END)
     try:

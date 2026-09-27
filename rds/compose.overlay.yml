@@ -43,8 +43,8 @@ services:
     environment:
       RTL_TCP_HOST: ${RTL_TCP_HOST:-host.docker.internal}
       RTL_TCP_PORT: ${RTL_TCP_PORT:-1234}
-      RDS_FREQ_HZ: ${RDS_FREQ_HZ:-99600000}
-      RDS_GAIN: ${RDS_GAIN:-29.7}
+      RDS_FREQ_HZ: ${RDS_FREQ_HZ:-92600000}
+      RDS_GAIN: ${RDS_GAIN:-3.7}
       RDS_DONGLE_ID: ${RDS_DONGLE_ID:-v4-01}
       RDS_SAMPLE_RATE: ${RDS_SAMPLE_RATE:-228000}
       RDS_PILOT_THRESH: ${RDS_PILOT_THRESH:-0.0}

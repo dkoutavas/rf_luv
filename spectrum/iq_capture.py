@@ -92,8 +92,11 @@ DEFAULT_DURATION_S = float(os.environ.get("IQ_DURATION_S", "5.0"))
 # Same gain as the scanner on this dongle unless overridden; 20 clips on Athens FM.
 DEFAULT_GAIN_DB = float(os.environ.get("IQ_GAIN_DB", os.environ.get("SCAN_GAIN", "12")))
 
-# rtl_tcp read tuning (byte-for-byte the scanner main-loop warmup pattern).
-WARMUP_BYTES = 131072      # discard(): PLL settle + stale-buffer drain
+# rtl_tcp read tuning. After connect + tune, samples from the dongle's previous
+# frequency keep arriving for 136 ms (557,056 bytes, measured 2026-09-27 at
+# 2.048 MS/s; rtl_tcp's 256 KiB USB blocks). Discard the scanner's settle
+# amount, from the same env setting, so a capture starts on its own frequency.
+WARMUP_BYTES = int(os.environ.get("SCAN_SETTLE_BYTES", "786432"))
 CHUNK_BYTES = 262144       # 256 KiB reads keep memory flat, socket un-starved
 MAX_LOCK_ATTEMPTS = 5      # consecutive lock timeouts -> mark trigger failed
 

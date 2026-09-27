@@ -18,8 +18,13 @@ set -euo pipefail
 #   so the per-db user/pass select the database, not a per-db container.
 #   ClickHouse Native format preserves AggregateFunction states, so rollup
 #   (AggregatingMergeTree / ReplacingMergeTree) tables restore exactly.
-#   SHOW CREATE output is also captured per snapshot for self-containment,
-#   though the repo migrations remain the canonical schema source.
+#   Materialized views without a TO table keep their rollups in a hidden
+#   `.inner_id.<uuid>` table whose name changes on every install, so those are
+#   dumped by selecting from the view itself (<view>.native.gz); restore.sh
+#   inserts them back through the view. Views with a TO table need nothing
+#   extra: their target is an ordinary table and is dumped with the rest.
+#   SHOW CREATE output (tables and views) is also captured per snapshot for
+#   self-containment, though the repo migrations remain the canonical schema.
 #
 # Restore with restore.sh. Old snapshots prune past RETENTION_DAYS.
 #
@@ -37,7 +42,7 @@ ENV_FILE="${CLICKHOUSE_BACKUP_ENV:-/etc/rtl-scanner/clickhouse-backup.env}"
 # mount, rclone-mounted bucket). A backup on the same failing disk is no backup.
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rf-clickhouse}"
 
-# Which databases to dump. Post-consolidation all six live on one server;
+# Which databases to dump. Post-consolidation all eight live on one server;
 # spectrum/acars hold the irreplaceable data, adsb/ais/ism/noaa are companion
 # pipelines (often empty) but cheap to include.
 DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa rds ghost}"
@@ -65,6 +70,16 @@ notify_fail() {
 # Per-db credentials. Convention: user == db name, password == <db>_local,
 # overridable per db via <DBUPPER>_PASSWORD in the env file (e.g. SPECTRUM_PASSWORD).
 db_user() { echo "$1"; }
+# Rows actually inside a dump, read back with clickhouse-local. A separate
+# count() after the dump drifts on live tables (the scanner inserts every
+# minute), and restore-drill.sh checks restored counts against these exactly.
+# An empty table dumps to an empty file, which clickhouse-local cannot read.
+dump_rows() {
+    if [ -z "$(gunzip -c "$1" | head -c 1)" ]; then echo 0; return; fi
+    gunzip -c "$1" | docker exec -i "$CONTAINER" clickhouse local \
+        --input-format Native --query "SELECT count() FROM table"
+}
+
 db_pass() {
     local db="$1" var
     var="$(echo "$db" | tr '[:lower:]' '[:upper:]')_PASSWORD"
@@ -97,14 +112,28 @@ for db in $DATABASES; do
     ch() { docker exec "$CONTAINER" clickhouse-client --user "$user" --password "$pass" "$@"; }
 
     # MergeTree-family base + explicit MV-target tables. Skip Views,
-    # MaterializedView definitions, Dictionaries, and implicit .inner tables
-    # (those repopulate from base inserts via the MV chain on restore).
+    # Dictionaries, and the hidden .inner tables (their data is dumped through
+    # the view below, because the .inner name is not stable across installs).
     mapfile -t tables < <(ch --query "
         SELECT name FROM system.tables
         WHERE database='${db}'
           AND engine LIKE '%MergeTree%'
           AND name NOT LIKE '.inner%'
           AND name NOT LIKE '.tmp%'
+        ORDER BY name FORMAT TabSeparated")
+
+    # Materialized views that store their own rollups (no TO clause). Their
+    # data can outlive the base table (a monthly summary keeps months after
+    # the raw rows expire), so it cannot be rebuilt from base data on restore.
+    mapfile -t rollup_views < <(ch --query "
+        SELECT name FROM system.tables
+        WHERE database='${db}'
+          AND engine = 'MaterializedView'
+          AND NOT match(create_table_query, '^CREATE MATERIALIZED VIEW \\S+ TO ')
+        ORDER BY name FORMAT TabSeparated")
+    mapfile -t all_views < <(ch --query "
+        SELECT name FROM system.tables
+        WHERE database='${db}' AND engine = 'MaterializedView'
         ORDER BY name FORMAT TabSeparated")
 
     if [ "${#tables[@]}" -eq 0 ]; then
@@ -128,12 +157,37 @@ for db in $DATABASES; do
         } >> "$dest/schema.sql"
 
         # Data: Native preserves aggregate states; gzip on the way out.
-        ch --query "SELECT * FROM ${db}.${t} FORMAT Native" | gzip -c > "$dest/${t}.native.gz"
+        # final=1 applies FINAL where the engine supports it (Replacing/
+        # Aggregating MergeTree) and is a no-op on plain MergeTree, so the dump
+        # holds the merged logical state and a restore's row count cannot shift
+        # when background merges fold unmerged rows later.
+        ch --query "SELECT * FROM ${db}.${t} SETTINGS final = 1 FORMAT Native" | gzip -c > "$dest/${t}.native.gz"
 
-        rows="$(ch --query "SELECT count() FROM ${db}.${t}")"
+        rows="$(dump_rows "$dest/${t}.native.gz")"
         bytes="$(stat -c %s "$dest/${t}.native.gz" 2>/dev/null || echo 0)"
         printf '%s\t%s\t%s\n' "$t" "$rows" "$bytes" >> "$dest/MANIFEST.tsv"
         total_tables=$((total_tables + 1))
+    done
+
+    for v in "${rollup_views[@]}"; do
+        [ -z "$v" ] && continue
+        # Selecting from the view reads its hidden storage table.
+        ch --query "SELECT * FROM ${db}.${v} SETTINGS final = 1 FORMAT Native" | gzip -c > "$dest/${v}.native.gz"
+        rows="$(dump_rows "$dest/${v}.native.gz")"
+        bytes="$(stat -c %s "$dest/${v}.native.gz" 2>/dev/null || echo 0)"
+        printf '%s\t%s\t%s\n' "$v" "$rows" "$bytes" >> "$dest/MANIFEST.tsv"
+        total_tables=$((total_tables + 1))
+    done
+
+    # View definitions, after the tables they read from, so schema.sql replays.
+    for v in "${all_views[@]}"; do
+        [ -z "$v" ] && continue
+        {
+            echo "-- ${db}.${v} (materialized view)"
+            ch --query "SHOW CREATE TABLE ${db}.${v}" --format TabSeparatedRaw || true
+            echo ";"
+            echo
+        } >> "$dest/schema.sql"
     done
 
     # Mark newest snapshot for restore --latest.

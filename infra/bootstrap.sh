@@ -10,7 +10,8 @@
 set -euo pipefail
 
 REPO=/repo
-CH_HOST=clickhouse
+# Overridable so restore-drill.sh can build a throwaway server the same way.
+CH_HOST="${CH_HOST:-clickhouse}"
 CH_NATIVE_PORT=9000
 CH_HTTP_PORT=8123
 

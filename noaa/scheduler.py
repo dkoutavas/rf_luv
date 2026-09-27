@@ -12,7 +12,7 @@ run is idempotent: it skips passes that already have a row in the table.
 Status: SCAFFOLD. Stubbed pieces:
   - TLE source: reads from /var/lib/noaa/tles.txt (refreshed by tle_refresh.sh
     daily). If the file is missing, exits 0 with a warning — does not fetch.
-  - Pass prediction: requires `orbit-predictor` (installed via setup/install-wsl.sh).
+  - Pass prediction: requires `orbit-predictor` (installed via setup/install-packages.sh).
     If not present, exits 0 with a warning so the deploy doesn't crash before the
     operator has installed it.
   - Systemd queueing: prints `systemd-run --on-calendar=... --unit=noaa-pass-XXX

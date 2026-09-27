@@ -25,11 +25,10 @@ have independent watchdogs without cross-bouncing each other. The USB-reset
 helper takes the same serial and unbinds only the matching device path.
 
 Environment / CLI:
-    --serial SERIAL    Dongle serial (e.g. v3-01). Required for template usage.
-                       Controls the state file path AND which USB device gets
-                       reset. Default: empty (single-instance legacy mode).
+    --serial SERIAL    Dongle serial (e.g. v3-01). Required. Controls the state
+                       file path AND which USB device gets reset.
     --unit NAME        systemd unit to restart on soft-recovery (e.g.
-                       rtl-tcp@v3-01.service). Default: rtl_tcp.service.
+                       rtl-tcp@v3-01.service). Required.
     RTL_TCP_HOST       Probe target host. Default 127.0.0.1.
     RTL_TCP_PORT       Probe target port. Default 1234.
 """
@@ -63,9 +62,9 @@ HARD_RESET_COOLDOWN_S = 300
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--serial", default="",
+    ap.add_argument("--serial", required=True,
                     help="Dongle serial (v3-01, v4-01); used for state file + rtl-usb-reset target")
-    ap.add_argument("--unit", default="rtl_tcp.service",
+    ap.add_argument("--unit", required=True,
                     help="systemd user unit to restart on soft-recovery")
     return ap.parse_args()
 
@@ -77,8 +76,7 @@ def log(msg, serial=""):
 
 def state_path(serial: str) -> str:
     base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
-    suffix = f"-{serial}" if serial else ""
-    return os.path.join(base, f"rtl-tcp-watchdog{suffix}.state")
+    return os.path.join(base, f"rtl-tcp-watchdog-{serial}.state")
 
 
 def load_state(path: str):
@@ -99,12 +97,7 @@ def save_state(path: str, state):
 
 
 def dongle_present(serial: str, dev_dir: str = "/dev") -> bool:
-    """True if udev's /dev/rtl_sdr_<serial> symlink exists (dongle on the bus).
-
-    Empty serial (legacy single-instance mode) means "assume present".
-    """
-    if not serial:
-        return True
+    """True if udev's /dev/rtl_sdr_<serial> symlink exists (dongle on the bus)."""
     return os.path.exists(os.path.join(dev_dir, f"rtl_sdr_{serial}"))
 
 
@@ -198,9 +191,8 @@ def recover(fails: int, serial: str, unit: str, state: dict):
     Side effect: may update state["last_hard_reset_ts"].
     """
     soft_restart = ["systemctl", "--user", "restart", unit]
-    hard_reset_cmd = ["sudo", "-n", "/usr/local/sbin/rtl-usb-reset"]
-    if serial:
-        hard_reset_cmd.append(serial)  # per-serial USB reset — unbinds only this dongle
+    # per-serial USB reset: unbinds only this dongle
+    hard_reset_cmd = ["sudo", "-n", "/usr/local/sbin/rtl-usb-reset", serial]
 
     if fails <= 2:
         log(f"soft restart (fail #{fails}) → {unit}", serial)
@@ -219,7 +211,7 @@ def recover(fails: int, serial: str, unit: str, state: dict):
         subprocess.run(soft_restart, check=False)
         return
 
-    log(f"hard USB reset (fail #{fails}) → rtl-usb-reset {serial or '(all)'}", serial)
+    log(f"hard USB reset (fail #{fails}) → rtl-usb-reset {serial}", serial)
     r = subprocess.run(hard_reset_cmd, check=False)
     if r.returncode != 0:
         log(f"rtl-usb-reset returned {r.returncode}", serial)

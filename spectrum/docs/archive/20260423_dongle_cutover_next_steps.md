@@ -13,7 +13,7 @@
 ## Context for the next agent
 
 Before acting, load:
-- `spectrum/docs/dongle_cutover_runbook.md` — the original 9-phase plan
+- `spectrum/docs/archive/20260422_dongle_cutover_runbook.md` — the original 9-phase plan
 - `spectrum/docs/ab_comparison.md` — **needs rewriting** (see pending item #2); describes the abandoned dual-dongle-with-splitter A/B, not the current self-A/B approach
 - `spectrum/docs/followups/dongle_id_downstream.md` — mark completed items
 - `/home/dio_nysi/.claude/projects/-home-dio-nysi-dev-rf-luv/memory/project_fm_filter_v3_install.md` — canonical record of the filter-install timestamp and query examples

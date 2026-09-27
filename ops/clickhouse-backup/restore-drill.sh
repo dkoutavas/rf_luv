@@ -11,6 +11,8 @@ set -euo pipefail
 # snapshot's MANIFEST.tsv. The live server is never touched.
 #
 # Run it monthly, and before any ClickHouse upgrade (it is the rollback test).
+# To test a candidate version before an upgrade, set DRILL_IMAGE:
+#   DRILL_IMAGE=clickhouse/clickhouse-server:<tag> bash ops/clickhouse-backup/restore-drill.sh
 #
 # Usage:
 #   bash ops/clickhouse-backup/restore-drill.sh            # all databases
@@ -32,7 +34,7 @@ DATABASES="${*:-${DATABASES:-spectrum acars adsb ais ism noaa rds ghost}}"
 
 DRILL=clickhouse-drill
 NET=rf_luv_net
-IMAGE="$(docker inspect -f '{{.Config.Image}}' clickhouse)"
+IMAGE="${DRILL_IMAGE:-$(docker inspect -f '{{.Config.Image}}' clickhouse)}"
 BOOTSTRAP_IMAGE=rf_luv_infra-ch-bootstrap
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'

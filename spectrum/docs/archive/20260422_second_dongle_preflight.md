@@ -1,5 +1,8 @@
 # Second dongle pre-flight checklist
 
+> Archived 2026-09-27: leap-era runbook (two-dongle cutover on leap, legacy
+> singleton units). Current setup: `RESTORE.md` and `ops/install-host.sh`.
+
 Every item is a runnable command or SQL query against leap / its ClickHouse.
 If an item's expected output doesn't appear, **do not proceed** — fix the
 discrepancy or open a followup first.

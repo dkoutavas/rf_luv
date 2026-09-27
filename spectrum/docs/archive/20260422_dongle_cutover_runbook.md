@@ -1,5 +1,8 @@
 # Dongle-aware cutover runbook (V3-only → template units + dongle_id)
 
+> Archived 2026-09-27: leap-era runbook (two-dongle cutover on leap, legacy
+> singleton units). Current setup: `RESTORE.md` and `ops/install-host.sh`.
+
 ## Scope
 
 Execute on `leap` (192.168.2.10) to migrate the running single-dongle (V3)
@@ -15,7 +18,7 @@ pipeline onto the new dual-dongle-capable infrastructure:
 - V4 stub: install `rtl-tcp@v4-01.service` in expected-failing state.
 
 **This runbook does NOT plug in V4.** V4 install is a separate step, gated
-by `spectrum/docs/second_dongle_preflight.md`.
+by `spectrum/docs/archive/20260422_second_dongle_preflight.md`.
 
 ## Pre-execution checks
 
@@ -355,7 +358,7 @@ curl -s "http://localhost:8123/?user=spectrum&password=spectrum_local" \
 
 ## Phase 9 — Preflight verification
 
-Run through `spectrum/docs/second_dongle_preflight.md` → "Before V4 plug-in"
+Run through `spectrum/docs/archive/20260422_second_dongle_preflight.md` → "Before V4 plug-in"
 checklist. Every item must pass before V4 can be plugged in.
 
 ---
@@ -394,4 +397,4 @@ Once all phases are complete and `preflight` passes:
    or equivalent).
 2. Remove the `spectrum-scanner` service from `spectrum/docker-compose.yml`
    after ~1 week of stable native-systemd operation. Covered as a followup.
-3. Plan V4 physical installation (`spectrum/docs/second_dongle_preflight.md`).
+3. Plan V4 physical installation (`spectrum/docs/archive/20260422_second_dongle_preflight.md`).

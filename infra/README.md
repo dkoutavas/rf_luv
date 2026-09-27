@@ -29,7 +29,7 @@ ClickHouse ports published now; the old per-pipeline ports are retired.
 
 | Service | Image | Host port | Role |
 |---|---|---|---|
-| clickhouse | `clickhouse/clickhouse-server:24.3-alpine` | 8123 (HTTP), 9000 (native) | the one database server |
+| clickhouse | `clickhouse/clickhouse-server:26.8.12.53-alpine` | 8123 (HTTP), 9000 (native) | the one database server |
 | grafana | `grafana/grafana:11.1.0` | 3000 | all eight dashboards |
 | logging-form | `nginx:1.27-alpine` | 8084 | the spectrum logging form |
 | ch-bootstrap | built from `Dockerfile.bootstrap` | (none, one-shot) | creates identities + schema |
@@ -94,7 +94,7 @@ migrate.py skips applied versions), so a `ch-bootstrap` restart re-runs cleanly.
 as a specific user) and `python3` (to run the migrators). The alpine
 clickhouse-server image is musl-based and will not run inside a glibc python
 image, so the Dockerfile is multi-stage: it copies the single `clickhouse`
-binary out of the **non-alpine** (glibc) `clickhouse/clickhouse-server:24.3`
+binary out of the **non-alpine** (glibc) `clickhouse/clickhouse-server:26.8.12.53`
 image into `python:3.12-slim` (Debian/glibc) and symlinks `clickhouse-client`
 (same binary, dispatched on `argv[0]`). Both tags are pinned.
 `PYTHONDONTWRITEBYTECODE=1` because the repo is bind-mounted read-only.

@@ -13,7 +13,7 @@
 # (also glibc, Debian). clickhouse-client is the same binary under a different
 # argv[0], so a symlink is all that is needed. Both tags are pinned.
 
-FROM clickhouse/clickhouse-server:24.3 AS chbin
+FROM clickhouse/clickhouse-server:26.8.12.53 AS chbin
 
 FROM python:3.12-slim
 

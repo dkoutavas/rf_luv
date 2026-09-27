@@ -20,7 +20,7 @@ volumes:
 
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
+    image: clickhouse/clickhouse-server:26.8.12.53-alpine
     container_name: clickhouse
     restart: unless-stopped
     networks:

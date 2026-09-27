@@ -32,8 +32,10 @@ services:
   # Connects to rtl_tcp via SOAPYSDR=driver=rtltcp,rtltcp=<host>:<port>
   # and ships decoded messages as JSON UDP datagrams to acars-ingest:5550.
   acarsdec:
-    # was :latest_soapy (soak build 4.1.6Build1494); digest resolved 2026-06-13 on Omen via docker buildx imagetools inspect
-    image: ghcr.io/sdr-enthusiasts/docker-acarsdec@sha256:506e422d6fd8462fa42c267e6a480fd260b01b06d62dd4134468869ef3f362d2
+    # :latest as of 2026-09-27 (built 2026-09-19, acarsdec 0b7ba27, libacars 2.2.1),
+    # resolved with docker buildx imagetools inspect. The previous pin was a
+    # 2023-07-30 build (the leap soak ran on it).
+    image: ghcr.io/sdr-enthusiasts/docker-acarsdec@sha256:115e8b7b660ac351ee70d662e375221e8f50bc2be172646c7ee15287b078e2db
     container_name: acarsdec
     restart: unless-stopped
     networks: [rf_luv_net]
@@ -44,17 +46,13 @@ services:
       # pipeline.sh sets from the chosen dongle's env file (1234 = v4-01).
       SOAPYSDR: "${SOAPYSDR:-driver=rtltcp,rtltcp=host.docker.internal:${RTL_TCP_PORT:-1234}}"
       FREQUENCIES: "${ACARS_FREQUENCIES:-131.525;131.725;131.825}"
-      GAIN: "${ACARS_GAIN:-30}"
+      GAIN: "${ACARS_GAIN:-12}"
       PPM: "${ACARS_PPM:-0}"
       FEED_ID: "${ACARS_FEED_ID:-rf_luv-v4-01}"
-      # The image ships decoded JSON via the `acars_feeder` s6 service,
-      # which reads SERVER + SERVER_PORT (NOT the `OUTPUT_SERVER*` env
-      # vars implied by the docker-acarsdec README -- that maps to a
-      # different downstream feeder script). Default SERVER is "acarshub"
-      # which doesn't exist on our network -- overriding to our ingest sidecar.
-      SERVER: "acars-ingest"
-      SERVER_PORT: "5550"
-      # Kept for forward compat with any future feeder script that reads them.
+      # acarsdec sends JSON to 127.0.0.1:5550 inside the container; the
+      # image's acars_bridge service forwards it to OUTPUT_SERVER. The default
+      # target ("acars_router") does not exist here, so point it at our ingest
+      # sidecar. The older SERVER / SERVER_PORT names are deprecated aliases.
       MODE: "J"
       OUTPUT_SERVER: "acars-ingest"
       OUTPUT_SERVER_PORT: "5550"

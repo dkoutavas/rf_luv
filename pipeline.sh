@@ -89,9 +89,11 @@ claim_dongle() {
         exit 1
     fi
     RTL_TCP_PORT="$(dongle_port "$serial")"
-    # rds labels its rows with RDS_DONGLE_ID; follow the chosen dongle.
+    # rds and acars label their rows with the dongle; follow the chosen one.
     RDS_DONGLE_ID="$serial"
-    export RTL_TCP_PORT RDS_DONGLE_ID
+    ACARS_DONGLE_ID="$serial"
+    ACARS_FEED_ID="rf_luv-$serial"
+    export RTL_TCP_PORT RDS_DONGLE_ID ACARS_DONGLE_ID ACARS_FEED_ID
     if systemctl --user is-active --quiet "rtl-scanner@${serial}.service"; then
         "$RF_MODE" pause "$serial"
     fi

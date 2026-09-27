@@ -60,7 +60,6 @@ path is still a scaffold, so the scanner has never actually seen a held lock
 | `migrate.py` | ✅ Production-ready | Cloned from `acars/migrate.py` with database name swap |
 | `scheduler.py` | 🟡 Scaffold | TLE reading, orbit-predictor integration, INSERT logic all in place. **NOAA_DRY_RUN=1 by default** so it doesn't fire systemd-run yet. |
 | `recorder.py` | 🟡 Scaffold | CLI parsing, status updates, lock-acquisition stub all in place. **rtl-tcp service stop/start orchestration is intentionally NOT implemented** - needs operator review. Current behaviour: marks the pass as `failed` with a clear scaffold note. |
-| `Dockerfile.ingest` | ✅ Production-ready | Just runs migrations. No long-lived container; schema is also applied by the infra ch-bootstrap. |
 | schema (`clickhouse/migrations/`) | ✅ Production-ready | Applied into the shared ClickHouse (`noaa` database) by the infra ch-bootstrap; no per-pipeline ClickHouse or Grafana anymore. |
 | `grafana/provisioning/` | ✅ Production-ready | NOAA Overview dashboard (passes table, daily count, by-satellite bar chart, decode rate), provisioned from `infra/grafana/` into the shared Grafana NOAA folder. |
 | `tle_refresh.sh` | ❌ TODO | Should pull NOAA + METEOR TLEs from celestrak weekly. |

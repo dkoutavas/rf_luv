@@ -15,11 +15,13 @@ and notifies on state transitions:
     any → recovered when stale drops below FRESHNESS_WARN_S
     unplugged dongle → ABSENT, no alert (collection is session-based)
     rtl_tcp held by another client (SDR++) → IN_USE, no alert
+    rtl_tcp stopped by `rf-mode listen` (readsb, rtl_fm over USB) → LISTEN, no alert
 
 State persisted at /var/lib/spectrum-monitor/freshness.json so transitions
 are detected across runs.
 """
 
+import glob
 import json
 import os
 import sys
@@ -43,6 +45,7 @@ DEFAULTS = {
     "EXPECTED_DONGLES": "v4-01",
     "DEV_DIR": "/dev",
     "DONGLE_ENV_DIR": "/etc/rtl-scanner",
+    "RUN_USER_DIR": "/run/user",    # where rf-mode leaves its listen markers
 }
 
 # Our own clients of rtl_tcp. The scanner is the data source this probe
@@ -249,11 +252,23 @@ def main():
         # dongle is not a fault, so it gets no alert.
         dev_link = os.path.join(cfg["DEV_DIR"], f"rtl_sdr_{d}")
         try:
-            plugged_for = int(now - os.lstat(dev_link).st_mtime)
+            plug_ts = os.lstat(dev_link).st_mtime
         except FileNotFoundError:
             new_dongles[d] = {"stale_sec": fresh.get(d), "level": "ABSENT"}
             if prev_level != "ABSENT":
                 log_action(cfg, "dongle_absent", dongle=d)
+            continue
+        plugged_for = int(now - plug_ts)
+
+        # USB-mode sessions: `rf-mode listen` stopped rtl_tcp on purpose so a
+        # decoder (readsb for ADS-B) or rtl_fm owns the dongle, and left a
+        # marker. A replug restarts rtl_tcp (udev), so a marker older than the
+        # plug no longer counts.
+        markers = glob.glob(os.path.join(cfg["RUN_USER_DIR"], "*", f"rf-mode-{d}.listen"))
+        if any(os.stat(m).st_mtime >= plug_ts for m in markers):
+            new_dongles[d] = {"stale_sec": fresh.get(d), "level": "LISTEN"}
+            if prev_level != "LISTEN":
+                log_action(cfg, "dongle_listen", dongle=d)
             continue
 
         # Listening sessions: SDR++ holds the dongle's rtl_tcp, so the
@@ -274,10 +289,10 @@ def main():
         # Data cannot be expected from before the plug, so staleness is
         # capped at the time since then; a new session starts at OK.
         stale = min(stale, plugged_for)
-        # Same cap after a listening session: the last row is from before it,
-        # so count from when the other client let go. The scanner then gets
-        # the normal warn window to reconnect.
-        in_use_ended = now if prev_level == "IN_USE" else prev.get(d, {}).get("in_use_ended")
+        # Same cap after a listening session (IN_USE or LISTEN): the last row
+        # is from before it, so count from when the other client let go. The
+        # scanner then gets the normal warn window to reconnect.
+        in_use_ended = now if prev_level in ("IN_USE", "LISTEN") else prev.get(d, {}).get("in_use_ended")
         if in_use_ended and now - in_use_ended < crit_s:
             stale = min(stale, int(now - in_use_ended))
         else:

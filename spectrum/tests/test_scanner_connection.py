@@ -105,3 +105,35 @@ def test_releases_connection_when_lock_is_taken(monkeypatch, fake_server, capsys
     assert len(clients) == 2
     assert clients[0] is not clients[1]
     assert fake_server.accepts == 2
+
+
+def test_idle_scanner_lets_another_consumer_take_the_lock(monkeypatch, fake_server, tmp_path):
+    """Between sweeps the scanner must leave the lock free long enough for a
+    consumer polling it (iq_capture, the NOAA recorder) to win. It used to hold
+    the lock through its 1 s idle drain and release it only for microseconds,
+    so iq_capture timed out after 60 s whenever the scanner ran (2026-09-28)."""
+    import time as _time
+    import coordinator
+
+    monkeypatch.setattr(coordinator, "LOCK_DIR", tmp_path)   # real flock
+    monkeypatch.setattr(scanner, "FULL_INTERVAL", 3600)      # sweep once, then idle
+    monkeypatch.setattr(scanner, "AIRBAND_INTERVAL", 3600)
+    clients = []
+    _stub_sweep(monkeypatch, clients, stop_after=99)
+    result = {}
+
+    def contender():
+        while not clients:                                    # wait until the scanner idles
+            _time.sleep(0.05)
+        t0 = _time.monotonic()
+        with coordinator.dongle_lock(scanner.DONGLE_ID, mode="timeout", timeout=5) as ok:
+            result["ok"], result["wait"] = ok, _time.monotonic() - t0
+        scanner.running = False
+
+    th = threading.Thread(target=contender)
+    th.start()
+    scanner.main()
+    th.join()
+
+    assert result["ok"], "a waiting consumer never got the lock from an idle scanner"
+    assert result["wait"] < 2.5, result["wait"]

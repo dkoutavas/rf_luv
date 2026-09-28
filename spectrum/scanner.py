@@ -476,6 +476,9 @@ def main():
     # process (SIGABRT). Reconnecting for every sweep (~180 connects/hour)
     # hit that race about twice a day.
     client = None
+    # Set on a tick with nothing due; the next tick drains before taking the
+    # lock (see the idle branch below).
+    idle_drain = False
 
     while running:
         # Pick the most overdue preset
@@ -511,6 +514,14 @@ def main():
             cm = contextlib.nullcontext(True)
 
         try:
+          if idle_drain:
+              # Drain with the lock released: a consumer polling for it gets a
+              # ~1 s window every idle tick. Holding it here starved them.
+              idle_drain = False
+              if client is not None:
+                  client.drain(1.0)
+              else:
+                  time.sleep(1)
           with cm as got_lock:
             if not got_lock:
                 if client is not None:
@@ -526,12 +537,11 @@ def main():
                 time.sleep(2)
                 continue
 
-            # Nothing due yet: keep reading so rtl_tcp's queue stays empty
+            # Nothing due yet: release the lock (leaving this block) and drain
+            # at the top of the next tick, so rtl_tcp's queue stays empty
+            # while other consumers get a chance at the lock.
             if best_overdue < 0:
-                if client is not None:
-                    client.drain(1.0)
-                else:
-                    time.sleep(1)
+                idle_drain = True
                 continue
 
             if client is None:

@@ -18,6 +18,11 @@
 set -euo pipefail
 
 ENV_DIR="/etc/rtl-scanner"
+# listen leaves rf-mode-<serial>.listen here and scan removes it. The
+# freshness probe (root) reads it to report LISTEN instead of alerting on a
+# dongle that is scanning nothing on purpose. /run/user is a tmpfs, so a
+# reboot clears it along with the listen session.
+MARKER_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 die()  { echo "rf-mode: $*" >&2; exit 1; }
 info() { echo "rf-mode: $*"; }
@@ -112,6 +117,8 @@ cmd_listen() {
     systemctl --user stop "rtl-tcp@${serial}.service" 2>/dev/null || true
     info "  systemctl --user stop rtl-tcp@${serial}.service"
 
+    touch "$MARKER_DIR/rf-mode-${serial}.listen"
+
     echo ""
     info "$serial is free for direct USB access."
     # librtlsdr tools accept a serial for -d (rtl_fm, rtl_433, rtl_test ...).
@@ -144,6 +151,8 @@ cmd_scan() {
     fi
 
     for serial in "${serials[@]}"; do
+        rm -f "$MARKER_DIR/rf-mode-${serial}.listen"
+
         info "starting rtl-tcp unit for $serial"
         systemctl --user start "rtl-tcp@${serial}.service"
         info "  systemctl --user start rtl-tcp@${serial}.service"

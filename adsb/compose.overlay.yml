@@ -1,18 +1,22 @@
 # ADS-B Tracking Pipeline (overlay)
-# readsb (decoder) -> tar1090 (map) + adsb-ingest (SBS->ClickHouse)
+# ultrafeeder (readsb decoder + tar1090 map) -> adsb-ingest (SBS->ClickHouse)
 #
-# This is a ROTATING pipeline overlay. The always-on data layer
-# (shared ClickHouse + Grafana) lives in infra/compose.yml as the
-# rf_luv_infra project. Bring infra up first, then this overlay:
-#   docker compose -f infra/compose.yml up -d
-#   docker compose -f adsb/compose.overlay.yml up -d
+# Bring it up with pipeline.sh, not with docker compose directly:
+#   bash infra/up.sh                      # shared ClickHouse + Grafana first
+#   bash pipeline.sh up adsb v4-01        # hands the dongle to readsb over USB
 #   open http://localhost:8080 for the live map (tar1090)
 #   open http://localhost:3000 for Grafana dashboards (shared)
+#   bash pipeline.sh down adsb v4-01      # hands the dongle back to rtl_tcp
 #
-# Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1234 — the same V4 the native systemd spectrum
-# scanner owns; these rotating decoders time-share it via the coordinator.
-#   Native Omen host: rtl_tcp runs as rtl-tcp@v4-01.service on :1234.
+# Dongle: USB mode, not rtl_tcp. readsb has no rtl_tcp input (it reads a USB
+# dongle or already-decoded network messages), so it opens the dongle itself.
+# `pipeline.sh up adsb` runs `rf-mode listen <serial> --force`, which stops
+# rtl-tcp@<serial> (and with it the scanner) and leaves a marker so the
+# freshness probe reports LISTEN instead of alerting. `down` runs
+# `rf-mode scan`, which restarts rtl_tcp and the scanner.
+# Validated 2026-09-28 on the water-damaged V4: the damage is in its VHF
+# input, 1090 MHz uses the UHF path (620 frames, 69 aircraft in 120 s with
+# rtl_adsb, 6.5 cm arms, window mount).
 #
 # ClickHouse is reached over the shared rf_luv_net network at the
 # alias `clickhouse` on HTTP port 8123.
@@ -23,81 +27,79 @@ networks:
 
 services:
 
-  # --- ADS-B Decoder --------------------------------------
-  readsb:
-    image: ghcr.io/sdr-enthusiasts/docker-readsb-protobuf:v4.0.3
-    container_name: readsb
-    restart: unless-stopped
+  # --- ADS-B decoder + web map ----------------------------
+  # sdr-enthusiasts ultrafeeder replaces docker-readsb-protobuf (archived
+  # upstream, its README points here) plus the separate tar1090 container.
+  ultrafeeder:
+    # :latest as of 2026-09-28 (built 2026-09-27, revision b76d04455ca6,
+    # readsb 3.16.17), resolved with docker buildx imagetools inspect. Its
+    # librtlsdr is the rtl-sdr-blog fork (logs "RTL-SDR Blog V4 Detected").
+    image: ghcr.io/sdr-enthusiasts/docker-adsb-ultrafeeder@sha256:9095387de98c93722ae8a786606cc894202963cc90f488e7326e42a51c40c728
+    container_name: ultrafeeder
+    # on-failure, not unless-stopped: after a reboot udev hands the dongle
+    # back to rtl-tcp@ and the scanner, and a restarted readsb would fight
+    # them for it. Run `pipeline.sh up adsb` again to resume.
+    restart: on-failure
     networks: [rf_luv_net]
+    # USB passthrough as the ultrafeeder README recommends: the whole bus plus
+    # a cgroup rule for USB character devices (major 189). A fixed --device
+    # path would break, because the bus/device number changes on every replug.
+    # label=disable: Tumbleweed runs SELinux enforcing, and its policy does
+    # not let container_t open usb_device_t nodes (readsb logged "usb_open
+    # error -3"). Scoped to this container; the host-wide alternative is the
+    # container_use_devices boolean.
+    security_opt:
+      - label=disable
+    device_cgroup_rules:
+      - "c 189:* rwm"
     environment:
-      # -- Device config --
-      # Option B: rtl_tcp from the dongle host (default). V4 dongle on 1234.
-      READSB_DEVICE_TYPE: rtltcp
-      READSB_NET_CONNECTOR: "host.docker.internal,1234,raw_in"
-      READSB_GAIN: 40
+      TZ: Europe/Athens
+      # -- Device --
+      READSB_DEVICE_TYPE: rtlsdr
+      READSB_RTLSDR_DEVICE: ${ADSB_SERIAL:-v4-01}    # librtlsdr matches the EEPROM serial
+      # readsb's built-in autogain (the README default since 2024-11). Set
+      # ADSB_GAIN to a number in dB to pin it, e.g. while comparing antennas.
+      READSB_GAIN: ${ADSB_GAIN:-auto}
 
       # -- Location (Polygono, Athens) --
       READSB_LAT: "37.989"
       READSB_LON: "23.736"
+      READSB_ALT: "100m"            # same default as noaa/scheduler.py
+      READSB_STATS_RANGE: "true"    # polar range plot in tar1090 / graphs1090
 
-      # -- Network outputs --
-      READSB_NET_ENABLE: "true"
-      READSB_NET_SBS_OUTPUT_PORT: "30003"       # BaseStation format (CSV-like)
-      READSB_NET_RAW_OUTPUT_PORT: "30002"
-      READSB_NET_BEAST_OUTPUT_PORT: "30005"     # Beast binary format
-
-      # -- Stats --
-      READSB_STATS_EVERY: "60"
-      READSB_STATS_RANGE: "true"
-    ports:
-      - "127.0.0.1:30002:30002"   # raw output
-      - "127.0.0.1:30003:30003"   # SBS/BaseStation output (used by ingest script)
-      - "127.0.0.1:30005:30005"   # Beast output
-    volumes:
-      - readsb-data:/run/readsb
-    # host.docker.internal -> host IP, so the rtl_tcp dongle bridge is reachable.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # --- Web Map --------------------------------------------
-  tar1090:
-    image: ghcr.io/sdr-enthusiasts/docker-tar1090:v2024.07.10
-    container_name: tar1090
-    restart: unless-stopped
-    networks: [rf_luv_net]
-    depends_on:
-      - readsb
-    environment:
-      BEASTHOST: readsb
-      BEASTPORT: 30005
+      # -- Map --
       TAR1090_DEFAULTCENTERLAT: "37.989"
       TAR1090_DEFAULTCENTERLON: "23.736"
-      TAR1090_DEFAULTRANGE: "200"               # default zoom range in NM
       TAR1090_MESSAGERATEINTITLE: "true"
       TAR1090_PLANECOUNTINTITLE: "true"
-      UPDATE_TAR1090: "true"
+      TAR1090_ENABLE_AC_DB: "true"  # type + registration on the map (~50 MB RAM)
+      # Pinned image means pinned map: no git fetch of tar1090 at startup.
+      UPDATE_TAR1090: "false"
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8080:80"         # tar1090 map, graphs1090 at /graphs1090/
     volumes:
-      - readsb-data:/run/readsb:ro
+      - /dev/bus/usb:/dev/bus/usb:rw
+      # Range outline, heatmap and graphs survive between sessions.
+      - adsb-globe-history:/var/globe_history
+      - adsb-collectd:/var/lib/collectd
     tmpfs:
       - /run:exec,size=256M
       - /var/log
 
   # --- ADS-B Ingest Worker --------------------------------
-  # Reads SBS BaseStation output from readsb, inserts into shared ClickHouse.
+  # Reads SBS BaseStation output (:30003) from readsb, inserts into shared ClickHouse.
   adsb-ingest:
     build:
       context: .
       dockerfile: Dockerfile.ingest
     container_name: adsb-ingest
-    restart: unless-stopped
+    restart: on-failure
     networks: [rf_luv_net]
     depends_on:
-      readsb:
+      ultrafeeder:
         condition: service_started
     environment:
-      SBS_HOST: readsb
+      SBS_HOST: ultrafeeder
       SBS_PORT: "30003"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
@@ -108,4 +110,5 @@ services:
       FLUSH_INTERVAL_SECONDS: "5"
 
 volumes:
-  readsb-data:
+  adsb-globe-history:
+  adsb-collectd:

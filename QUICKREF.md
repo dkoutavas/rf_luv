@@ -84,8 +84,15 @@ rf-mode listen v3-01
 bash scripts/airband-listen.sh approach       # Athens Approach 118.575 AM
 bash scripts/ais-monitor.sh                   # AIS ships 161.975/162.025
 bash scripts/ism-monitor.sh                   # ISM 433 MHz sensors
-bash scripts/satellite-pass.sh noaa19         # NOAA 19 APT (patio, V-dipole)
+bash scripts/satellite-pass.sh noaa19         # NOAA APT: satellites decommissioned 2025, silent
 rf-mode scan v3-01                            # give it back when done
+```
+
+### ADS-B (readsb owns the dongle over USB)
+```bash
+bash pipeline.sh up adsb v4-01                # stops rtl_tcp and the scanner on v4-01
+# map: http://localhost:8080   Grafana: ADS-B folder   antenna: 6.5 cm arms, vertical
+bash pipeline.sh down adsb v4-01              # rtl_tcp and the scanner come back
 ```
 
 ### Decode pagers (POCSAG, stop rtl_tcp first)
@@ -146,9 +153,8 @@ FM Broadcast      88–108 MHz        Strong, good first test
 Athens Approach   118.575 MHz       Airport ATC (AM mode)
 Athens Tower      118.1 MHz         ATC (AM)
 ATIS              136.125 MHz       Airport weather
-NOAA 15           137.620 MHz       Weather satellite (patio)
-NOAA 18           137.9125 MHz      Weather satellite
-NOAA 19 / Meteor  137.100 MHz       Weather satellite
+NOAA 15/18/19     137.1–137.9 MHz   Decommissioned 2025, no APT left
+Meteor-M (LRPT)   137 MHz band      Weather satellite, digital (patio)
 Marine Ch16       156.800 MHz       Distress/calling
 AIS Ch87          161.975 MHz       Ship positions
 AIS Ch88          162.025 MHz       Ship positions

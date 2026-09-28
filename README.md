@@ -82,8 +82,8 @@ has its own database, its own Grafana folder, and its own README.
 | [spectrum/](spectrum/) | running | Wideband 88–470 MHz scanner, peak and transient detection, signal classifier, hourly baselines |
 | [acars/](acars/) | built | ACARS aircraft messages from Athens airport traffic |
 | [rds/](rds/) | built | RDS station metadata decoder (PS, PI, RadioText) |
-| [noaa/](noaa/) | partial | NOAA / Meteor weather-sat pass scheduler (recorder is a scaffold) |
-| [adsb/](adsb/) | companion | ADS-B aircraft tracking with a live map |
+| [noaa/](noaa/) | partial | Weather-sat pass scheduler (recorder is a scaffold). NOAA 15/18/19 were decommissioned in 2025, so it needs a Meteor-M LRPT re-scope |
+| [adsb/](adsb/) | validated | ADS-B aircraft tracking with a live map (readsb owns the dongle over USB) |
 | [ais/](ais/) | companion | AIS ship tracking (Piraeus / Saronic Gulf) |
 | [ism/](ism/) | companion | ISM 433 MHz sensor and device decoding |
 | [ghost/](ghost/) | validated | Spirit-box replica, RDS labels, forensic audio tools |
@@ -136,7 +136,9 @@ The scanner holds one rtl_tcp connection per run and drains it between
 sweeps. Each dongle is single-client, so only one consumer holds it at a time.
 Docker decoders (ACARS, AIS, ISM, RDS) run on either dongle through
 `pipeline.sh up <pipe> <serial>`, which pauses that dongle's scanner and
-resumes it on `down`. ADS-B is not usable yet: readsb cannot read rtl_tcp.
+resumes it on `down`. ADS-B is the exception. readsb has no rtl_tcp input, so
+`pipeline.sh up adsb <serial>` stops that dongle's rtl_tcp and readsb opens it
+over USB. `down` starts rtl_tcp and the scanner again.
 rtl_tcp itself runs from a patched build (`ops/rtl-tcp/build-rtl-tcp.sh`):
 stock rtl_tcp crashes or hangs when a client closes during a retune.
 

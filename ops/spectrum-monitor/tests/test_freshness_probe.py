@@ -27,8 +27,10 @@ SIX_HOURS = 6 * 3600
 def _run(plugged_seconds_ago, stale_sec, ticks=((),)):
     """Run main() for dongle v4-01, once per entry in `ticks`, sharing one
     state file. Each tick is the list of foreign rtl_tcp clients seen then
-    (empty = only our own scanner, or nobody). plugged_seconds_ago=None means
-    the dongle is unplugged. Returns (last level in state, alert levels sent)."""
+    (empty = only our own scanner, or nobody), or a number: an `rf-mode
+    listen` marker written that many seconds ago, with no clients.
+    plugged_seconds_ago=None means the dongle is unplugged.
+    Returns (last level in state, alert levels sent)."""
     alerts = []
     with tempfile.TemporaryDirectory() as tmp:
         dev_dir = Path(tmp, "dev")
@@ -39,15 +41,26 @@ def _run(plugged_seconds_ago, stale_sec, ticks=((),)):
             t = time.time() - plugged_seconds_ago
             os.utime(link, (t, t), follow_symlinks=False)
         Path(tmp, "v4-01.env").write_text("RTL_TCP_PORT=1234\n")
+        marker = Path(tmp, "run", "1000", "rf-mode-v4-01.listen")
+        marker.parent.mkdir(parents=True)
         cfg = dict(probe.DEFAULTS,
                    DEV_DIR=str(dev_dir),
+                   RUN_USER_DIR=str(Path(tmp, "run")),
                    DONGLE_ENV_DIR=tmp,
                    STATE_FILE=str(Path(tmp, "state.json")),
                    ACTION_LOG=str(Path(tmp, "actions.log")))
         probe.load_env = lambda: cfg
         probe.query_freshness = lambda cfg: {"v4-01": stale_sec}
         probe.notify = lambda cfg, level, title, message="": alerts.append(level)
-        for clients in ticks:
+        for tick in ticks:
+            clients = tick
+            if isinstance(tick, (int, float)):
+                marker.touch()
+                t = time.time() - tick
+                os.utime(marker, (t, t))
+                clients = []
+            else:
+                marker.unlink(missing_ok=True)
             probe.foreign_clients = lambda port, clients=clients: list(clients)
             probe.main()
         state = probe.load_state(cfg)
@@ -96,6 +109,32 @@ def test_first_tick_after_listening_session_starts_ok():
     # The scanner gets the normal warn window to reconnect.
     level, alerts = _run(plugged_seconds_ago=3600, stale_sec=SIX_HOURS,
                          ticks=[["sdrpp"], []])
+    assert level == "OK"
+    assert alerts == []
+
+
+def test_usb_listen_session_does_not_alert():
+    # pipeline.sh up adsb: rf-mode listen stopped rtl_tcp so readsb owns the
+    # dongle over USB. No scanner rows for hours is expected.
+    level, alerts = _run(plugged_seconds_ago=3600, stale_sec=SIX_HOURS,
+                         ticks=[60])
+    assert level == "LISTEN"
+    assert alerts == []
+
+
+def test_listen_marker_from_before_replug_is_ignored():
+    # The dongle was replugged after rf-mode listen, so udev restarted
+    # rtl_tcp and the scanner. The old marker must not hide a dead pipeline.
+    level, alerts = _run(plugged_seconds_ago=3600, stale_sec=SIX_HOURS,
+                         ticks=[7200])
+    assert level == "CRITICAL"
+    assert alerts == ["CRITICAL"]
+
+
+def test_first_tick_after_usb_listen_starts_ok():
+    # rf-mode scan removed the marker; the scanner gets the warn window.
+    level, alerts = _run(plugged_seconds_ago=3600, stale_sec=SIX_HOURS,
+                         ticks=[60, []])
     assert level == "OK"
     assert alerts == []
 

@@ -141,7 +141,7 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
       "targets": [
         {
-          "rawSql": "SELECT hex_ident, anyLast(callsign) AS last_callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE AND callsign != '' GROUP BY hex_ident ORDER BY last_seen DESC LIMIT 20",
+          "rawSql": "SELECT hex_ident, argMaxIf(callsign, timestamp, callsign != '') AS last_callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE GROUP BY hex_ident HAVING last_callsign != '' ORDER BY last_seen DESC LIMIT 20",
           "format": 1
         }
       ]
@@ -166,6 +166,55 @@
             "showPoints": "never"
           }
         }
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "Aircraft Positions - Live",
+      "description": "Last known position of each aircraft heard in the last 2 minutes, colored by altitude, rotated by track. SBS splits an aircraft's state across message types (callsign in MSG 1, position in MSG 3, track in MSG 4), so each field takes its own latest non-NULL value.",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT hex_ident, argMaxIf(callsign, timestamp, callsign != '') AS callsign, argMaxIf(lat, timestamp, lat IS NOT NULL) AS lat, argMaxIf(lon, timestamp, lon IS NOT NULL) AS lon, argMaxIf(altitude, timestamp, altitude IS NOT NULL) AS altitude, argMaxIf(track, timestamp, track IS NOT NULL) AS track, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 2 MINUTE GROUP BY hex_ident HAVING lat IS NOT NULL AND lon IS NOT NULL",
+          "format": 1
+        }
+      ],
+      "options": {
+        "view": { "id": "coords", "lat": 37.989, "lon": 23.736, "zoom": 8 },
+        "basemap": { "type": "default", "name": "OpenStreetMap" },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Aircraft",
+            "config": {
+              "showLegend": true,
+              "style": {
+                "size": { "fixed": 10 },
+                "color": { "field": "altitude", "fixed": "semi-dark-blue" },
+                "symbol": { "fixed": "img/icons/marker/plane.svg" },
+                "rotation": { "field": "track", "mode": "mod", "min": 0, "max": 360 }
+              }
+            },
+            "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" },
+            "tooltip": true
+          }
+        ],
+        "tooltip": { "mode": "details" }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "altitude" },
+            "properties": [
+              { "id": "unit", "value": "lengthft" },
+              { "id": "color", "value": { "mode": "continuous-GrYlRd" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 40000 }
+            ]
+          }
+        ]
       }
     }
   ],

@@ -20,7 +20,7 @@ This file is the "what should I expect at frequency X" + "I heard Y, what is it?
 | **USB** | 2.4-3 kHz | Voice, no carrier; "Donald Duck" if mistuned | HF amateur SSB voice 14/21/28 MHz, marine HF, utility |
 | **LSB** | 2.4-3 kHz | Voice, no carrier (lower sideband) | HF amateur SSB on 80m / 40m (3.5 / 7 MHz) |
 | **CW** | 50-500 Hz | Pure tone, on/off keying = morse | HF beacons, time signals (RWM), amateur morse, weak-signal work. **In SDR++: select CW mode → BFO offset 600-800 Hz so the tone is audible.** A continuous tone with no on/off pattern = unmodulated carrier (broadcast off-air, beacon, intermod product). |
-| **APT** | 34 kHz | Tick-tick-tick from satellite | NOAA 15/18/19 (137 MHz). Use `noaa-apt` to convert WAV to image. |
+| **APT** | 34 kHz | Tick-tick-tick from satellite | NOAA 15/18/19 (137 MHz), decommissioned June to August 2025, so there is no APT left to hear. |
 | **OFDM / digital** | 7-8 MHz / 25 kHz | White noise / hash | DVB-T (Hymettus muxes), DAB (169 MHz), TETRA (380-400). Cannot demodulate to audio - visual-only. |
 
 CW note: many "raspy" or "high-pitched continuous" HF signals are actually unmodulated AM carriers from broadcast stations between scheduled programs. CW mode with the offset is the easiest way to hear them at all (AM mode would just give silence + hiss).
@@ -74,11 +74,12 @@ Need sky view; indoor reception will not work. APT mode for analog NOAAs, LRPT f
 
 | Freq | Name | Schedule |
 |---|---|---|
-| 137.100 | NOAA 19 / Meteor M2-3 | Use `gpredict` for pass times |
-| 137.620 | NOAA 15 | |
-| 137.9125 | NOAA 18 | |
+| 137.100 | NOAA 19 (decommissioned 2025) / Meteor M2-3 | Use `gpredict` for pass times |
+| 137.620 | NOAA 15 (decommissioned 2025) | |
+| 137.9125 | NOAA 18 (decommissioned 2025) | |
 
-Recording: `bash scripts/satellite-pass.sh noaa15` - see script header.
+NOAA 15, 18 and 19 are off the air, so `scripts/satellite-pass.sh` records silence on
+their channels. Meteor-M LRPT is the remaining target.
 
 ### VHF Marine + AIS (156-162 MHz)
 

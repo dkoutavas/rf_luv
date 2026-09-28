@@ -15,9 +15,9 @@
 #     resumes it (ops/rf-mode scan). Pass the same serial to up and down.
 #   - rds decodes the 57 kHz RDS subcarrier and needs a dongle with no FM notch:
 #     since 2026-09-26 that is the V3, so: ./pipeline.sh up rds v3-01
-#   - adsb is refused for now: readsb has no rtl_tcp input (it reads a USB
-#     dongle or already-decoded network messages), so its overlay cannot work
-#     against rtl_tcp.
+#   - adsb opens the dongle over USB: readsb has no rtl_tcp input. 'up' stops
+#     rtl_tcp for that serial (ops/rf-mode listen --force, which also stops the
+#     scanner) and 'down' starts it again (ops/rf-mode scan).
 #   - The spectrum scanner is not a pipe: it runs natively under systemd
 #     (rtl-scanner@<serial>, ops/rtl-scanner).
 #
@@ -85,8 +85,14 @@ dongle_port() {
 claim_dongle() {
     local pipe="$1" serial="$2"
     if [ "$pipe" = "adsb" ]; then
-        echo "[pipeline] adsb: readsb cannot read rtl_tcp (USB dongle or decoded network input only); not starting it" >&2
-        exit 1
+        # readsb opens the dongle over USB, so rtl_tcp must let go of it
+        # entirely. --force: the serial may be the scanner's, and taking the
+        # dongle from the scanner is what 'up' does for every pipe.
+        ADSB_SERIAL="$serial"
+        export ADSB_SERIAL
+        "$RF_MODE" listen "$serial" --force
+        echo "[pipeline] adsb uses $serial over USB"
+        return
     fi
     RTL_TCP_PORT="$(dongle_port "$serial")"
     # rds and acars label their rows with the dongle; follow the chosen one.
@@ -175,8 +181,14 @@ cmd_rotate() {
         *) echo "[pipeline] unknown pipe '$target' (valid: $VALID_PIPES)" >&2; exit 1 ;;
     esac
     preflight
-    claim_dongle "$target" "$serial"
     local cur; cur="$(current_up_pipe)"
+    # adsb holds the dongle with rtl_tcp stopped; the rtl_tcp pipes need it
+    # running, and only 'down' (rf-mode scan) starts it again.
+    if [ "$cur" = "adsb" ] && [ "$target" != "adsb" ]; then
+        echo "[pipeline] adsb holds $serial over USB: run '$0 down adsb $serial', then '$0 up $target $serial'" >&2
+        exit 1
+    fi
+    claim_dongle "$target" "$serial"
     if [ -n "$cur" ] && [ "$cur" != "$target" ]; then
         echo "[pipeline] rotating: $cur -> $target"
         compose_pipe "$cur" down

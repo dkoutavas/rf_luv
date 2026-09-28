@@ -59,13 +59,13 @@ reads, accept the loss and continue.
 
 ```bash
 # openSUSE Tumbleweed (the reference host)
-sudo zypper install rtl-sdr docker docker-compose python3-numpy
+sudo zypper install rtl-sdr docker docker-compose python3-numpy gcc patch
 # Debian / Ubuntu
-sudo apt install rtl-sdr docker.io docker-compose-v2 python3-numpy
+sudo apt install rtl-sdr docker.io docker-compose-v2 python3-numpy gcc patch
 # Fedora
-sudo dnf install rtl-sdr docker docker-compose python3-numpy
+sudo dnf install rtl-sdr docker docker-compose python3-numpy gcc patch
 # Arch
-sudo pacman -S rtl-sdr docker docker-compose python-numpy
+sudo pacman -S rtl-sdr docker docker-compose python-numpy gcc patch
 
 sudo systemctl enable --now docker
 sudo usermod -aG docker "$USER"      # log out and in again
@@ -125,8 +125,10 @@ known-frequencies seed.
 ## Step 5: run the host installer
 
 One command does the DVB blacklist, the udev rule (with a group that exists
-on your distro), the rtl_tcp wrapper and watchdog, the per-dongle env files
-with the live USB index, the systemd units, and the backup timer:
+on your distro), the patched rtl_tcp build in `/usr/local/bin` (gcc and patch
+from step 1), the rtl_tcp wrapper and watchdog, the per-dongle env files, the
+systemd units (each scanner holds a sleep inhibitor while it runs), and the
+backup timer:
 
 ```bash
 # Two dongles (the reference layout):
@@ -140,7 +142,7 @@ bash ops/install-host.sh --scanner v4-01 --backup-dir /data/rf-clickhouse-backup
 Flags:
 - `--scanner SERIAL` the dongle for the spectrum scanner (rtl_tcp :1234). Required.
 - `--ghost SERIAL` the second dongle for the ghost pipeline (rtl_tcp :1235).
-- `--gain N` `SCAN_GAIN` for new env files. Default 12. Gain 20 clips on Athens FM and airband.
+- `--gain N` `SCAN_GAIN` for new env files. Default 12, for indoors or with the bandstop. On an outdoor antenna without a bandstop use about 7.7. Gain 20 clips on Athens FM and airband.
 - `--backup-dir DIR` daily ClickHouse snapshots go here. Put it on a different physical disk. On the Omen that is the second NVMe at `/data`.
 - `--dry-run` print every command that would change the host, change nothing.
 - `--verify-only` skip install, run the PASS/FAIL checks only.
@@ -221,7 +223,8 @@ Recreate the rest by hand:
 # A decoder on a dongle: pipeline.sh pauses that dongle's scanner and resumes
 # it on 'down'. RDS needs the notch-free dongle (the V3 since 2026-09-26):
 bash pipeline.sh up rds v3-01        # BEST 92.6 by default; 'down rds v3-01' to stop
-cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars v4-01
+# ACARS decodes only on the V3 while the V4's VHF input is damaged:
+cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars v3-01
 
 bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffold)
 ```
@@ -230,11 +233,10 @@ bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffo
 
 ## Known transients
 
-- **Handing a dongle back to the scanner takes up to ~100 s.** After SDR++ or a
-  decoder disconnects, `rtl_tcp` finishes closing that session before it
-  accepts the scanner; the scanner retries every 10 s. (The per-sweep
-  reconnect churn that crashed `rtl_tcp` with SIGABRT is gone since the
-  scanner keeps one connection per run.)
+- **A plug-in logs one `Connection refused`.** The scanner starts a moment
+  before `rtl_tcp` listens and connects on its 10 s retry. Handing a dongle
+  back after SDR++ or a decoder takes well under a second with the patched
+  `rtl_tcp`; stock `rtl_tcp` could crash or hang there.
 - **`udevadm trigger` re-attaches the DVB driver** on a live host. Both
   installers now run `modprobe -r dvb_usb_rtl28xxu` after the trigger.
 - **A loose dongle vanishes from `lsusb`.** Before debugging software, check
@@ -247,6 +249,7 @@ bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffo
 - [ ] Grafana at :3000 renders the Spectrum folder with fresh scans
 - [ ] `ls <backup-dir>/spectrum/latest` exists and `MANIFEST.tsv` has non-zero rows
 - [ ] ntfy topic rotated (or unset for a desktop-only setup)
+- [ ] `systemd-inhibit --list` shows one `rf_luv` row per running scanner
 - [ ] ghost (if `--ghost`): `python3 ghost/spiritbox.py --mode forward --dwell-ms 150` writes a labelled WAV
 
 ## Reference

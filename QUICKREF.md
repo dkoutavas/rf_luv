@@ -11,9 +11,15 @@ Both run as `rtl-tcp@<serial>.service` under systemd with a watchdog. The
 scanner writes to ClickHouse continuously. The V3 is free for live listening
 or the ghost pipeline.
 
+Since 2026-09-26 the roles are swapped: the bare V3 scans on the patio antenna
+and the V4 is secondary (water damage on its VHF input) until the V4 and the
+bandstop are replaced. Each dongle keeps its own port.
+
 ## Live listening with SDR++ (the primary path)
 
 SDR++ connects to the V3 over TCP while the scanner keeps running on the V4.
+rtl_tcp serves one client at a time, so while the V3 is the scanner, run
+`rf-mode pause v3-01` before SDR++ and `rf-mode scan v3-01` afterwards.
 
 1. Open SDR++ (`sdrpp`)
 2. Source dropdown → **RTL-TCP**
@@ -32,7 +38,7 @@ findings via the form at http://localhost:8084 (writes to
 ## First boot checklist
 
 1. Plug in dongles
-2. Native Linux: `bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups`
+2. Native Linux: `bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups` (it also builds the patched rtl_tcp)
 3. `docker network create rf_luv_net && bash infra/up.sh`
 4. Open Grafana at http://localhost:3000 (admin/admin), Spectrum folder
 5. Open SDR++ on V3 :1235, tune FM → confirm audio

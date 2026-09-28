@@ -74,7 +74,7 @@ install chromaprint-fpcalc`; every other forensic tool is numpy + stdlib.
 ```bash
 python3 ghost/tests/test_spiritbox.py     # demod, sweep planner, WAV, RDS pre-pass
 python3 ghost/tests/test_forensics.py     # slapback delay, bandwidth, ffmpeg decode
-python3 ghost/migrate.py --dry-run        # schema (needs the shared ClickHouse up)
+python3 infra/migrate.py ghost --dry-run  # schema (needs the shared ClickHouse up)
 ```
 
 ## Status

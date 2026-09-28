@@ -66,12 +66,12 @@ string and the healthcheck + bootstrap fail loudly rather than booting blank.
    grants). This is load-bearing: the acars and noaa migrators do **not** create
    their own database, and every per-db user must exist before its schema runs.
 2. **PHASE 2**, each schema applied as its own per-db user:
-   - `adsb` -> `adsb/clickhouse/init.sql`
-   - `ism` -> `ism/clickhouse/init.sql`
-   - `ais` -> `ais/clickhouse/bootstrap.sql` (the consolidated idempotent file)
+   - `adsb`, `ism`, `ais`, `noaa`, `ghost` -> numbered migrations in
+     `<pipe>/clickhouse/migrations/` through the shared runner
+     `infra/migrate.py <pipe>`
    - `spectrum` -> `init.sql`, **then** the Athens seed, **then** `migrate.py`
-   - `acars` -> `migrate.py`
-   - `noaa` -> `migrate.py`
+   - `acars`, `rds` -> their own `migrate.py` (their ingest images also run it
+     at start-up, so it has to live in the pipeline directory)
 
 The spectrum sub-order matters. The 27-row Athens `known_frequencies` catalog
 (`spectrum/clickhouse/seeds/known_frequencies_athens.sql`) is guarded by

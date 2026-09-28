@@ -166,6 +166,7 @@ def extract_fields(data: dict) -> dict | None:
         "freq_mhz":      _float_or_zero(data.get("freq")),
         "channel":       int(data.get("channel") or 0),
         "level_db":      _float_or_zero(data.get("level")),
+        "noise_db":      _float_or_zero(data.get("noise")),
         "err_count":     int(data.get("error") or 0),
         "mode":          _str_or_empty(data.get("mode")),
         "label":         _str_or_empty(data.get("label")),

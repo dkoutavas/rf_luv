@@ -298,6 +298,12 @@ def sweep(client: RTLTCPClient, freq_start: int, freq_end: int) -> tuple[list[di
     center = freq_start + SAMPLE_RATE // 2
 
     while center < freq_end + SAMPLE_RATE // 2:
+        if not running:
+            # A stop arrived mid-sweep. Drop the partial sweep rather than
+            # store half a spectrum (a short sweep_health row, and missing
+            # bins that look like signals disappearing); the caller ends the
+            # run. A full sweep takes ~37 s, one hop ~0.25 s.
+            return None, None
         client.set_frequency(center)
         # Wait for samples from the new frequency (see SETTLE_BYTES). Reading
         # them also covers the PLL settle time, so no separate sleep.
@@ -541,6 +547,8 @@ def main():
             t0 = time.monotonic()
 
             bins, clipping = sweep(client, preset["start"], preset["end"])
+            if bins is None:   # stopped mid-sweep
+                break
             elapsed = time.monotonic() - t0
 
             last_run[preset["name"]] = time.monotonic()

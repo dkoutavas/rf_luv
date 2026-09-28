@@ -75,7 +75,9 @@ db_user() { echo "$1"; }
 # minute), and restore-drill.sh checks restored counts against these exactly.
 # An empty table dumps to an empty file, which clickhouse-local cannot read.
 dump_rows() {
-    if [ -z "$(gunzip -c "$1" | head -c 1)" ]; then echo 0; return; fi
+    # Count bytes, not text: a Native dump starts with its column count, and 10
+    # columns is 0x0A, a newline that $( ) would strip ("empty", 0 rows).
+    if [ "$(gunzip -c "$1" | head -c 1 | wc -c)" -eq 0 ]; then echo 0; return; fi
     gunzip -c "$1" | docker exec -i "$CONTAINER" clickhouse local \
         --input-format Native --query "SELECT count() FROM table"
 }

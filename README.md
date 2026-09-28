@@ -29,7 +29,9 @@ lab, not the debunk.
 
 One laptop in Athens (HP Omen, openSUSE Tumbleweed). Two RTL-SDR Blog USB
 dongles: a V4 with an FM bandstop filter for the scanner, and a V3 without one
-for FM-band work. Docker runs ClickHouse and Grafana on localhost. The radios
+for FM-band work. Since 2026-09-26 the roles are swapped: water damaged the
+V4's VHF input and broke the filter's socket, so the bare V3 scans on the
+outdoor patio antenna until both are replaced. Docker runs ClickHouse and Grafana on localhost. The radios
 run as systemd user services with a watchdog. Daily backups land on a second
 internal disk. Nothing is on the internet. GitHub hosts the code and sample
 captures only.
@@ -55,6 +57,7 @@ dongle on the bus at a time, physical replug after each write). Then:
 git clone https://github.com/dkoutavas/rf_luv.git && cd rf_luv
 docker network create rf_luv_net && bash infra/up.sh
 bash ops/install-host.sh --scanner v4-01 --gain 12 --backup-dir /data/rf-clickhouse-backups
+# --gain: 12 indoors or with the bandstop; about 7.7 on an outdoor antenna without one.
 # Two dongles:
 # bash ops/install-host.sh --scanner v4-01 --ghost v3-01 --gain 12 --backup-dir /data/rf-clickhouse-backups
 ```
@@ -129,16 +132,20 @@ Full write-up: [ghost/REPORT.md](ghost/REPORT.md) (English),
                                                                               Grafana :3000
 ```
 
-The scanner reconnects to rtl_tcp on every sweep to flush stale TCP buffers.
-Each dongle is single-client, so only one consumer holds it at a time. On the
-V4, rotating decoders (ACARS, ADS-B, AIS, ISM, RDS) time-share with the scanner
-through a flock-based coordinator. The V3 is held by the ghost pipeline for the
-length of a session.
+The scanner holds one rtl_tcp connection per run and drains it between
+sweeps. Each dongle is single-client, so only one consumer holds it at a time.
+Docker decoders (ACARS, AIS, ISM, RDS) run on either dongle through
+`pipeline.sh up <pipe> <serial>`, which pauses that dongle's scanner and
+resumes it on `down`. ADS-B is not usable yet: readsb cannot read rtl_tcp.
+rtl_tcp itself runs from a patched build (`ops/rtl-tcp/build-rtl-tcp.sh`):
+stock rtl_tcp crashes or hangs when a client closes during a retune.
 
 A layered reliability stack keeps the scanner running unattended: a 30-second
 watchdog, a root-level escalator past the circuit breaker (USB reset, xHCI
-bounce), ClickHouse freshness and signal-quality probes, and ntfy.sh phone
-alerts. Details: [CLAUDE.md](CLAUDE.md) → Reliability Stack.
+bounce), ClickHouse freshness and signal-quality probes, and alerts as
+desktop popups (ntfy.sh phone alerts when a topic is set). While a scanner runs
+it holds a systemd sleep inhibitor, so the laptop cannot auto-suspend during a
+collection session. Details: [CLAUDE.md](CLAUDE.md) → Reliability Stack.
 
 ## Antenna quick reference
 

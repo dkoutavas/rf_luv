@@ -37,6 +37,15 @@ apply_sql() {
         --multiquery < "$file"
 }
 
+# migrate_pipeline DIR: numbered migrations through the shared runner
+# (infra/migrate.py). The database, user and password follow the directory
+# name, and HTTP carries the queries. It does NOT create the database; PHASE 1 did.
+migrate_pipeline() {
+    log "$1 migrations (infra/migrate.py)"
+    CLICKHOUSE_HOST="$CH_HOST" CLICKHOUSE_PORT="$CH_HTTP_PORT" \
+        python3 "$REPO/infra/migrate.py" "$REPO/$1"
+}
+
 # ─── PHASE 1: identities (as the built-in 'default' admin) ──────────────────
 # Must run first: the acars/noaa migrators do NOT create their own database,
 # and every per-db user below must already exist before its schema is applied.
@@ -47,18 +56,16 @@ apply_sql default "$CH_ADMIN_PASSWORD" "$REPO/infra/clickhouse/bootstrap.sql"
 # The six pipelines are independent of one another, but each has the internal
 # ordering enforced below.
 
-# adsb: single idempotent init.sql (tables + MVs, no seeds).
+# adsb, ism, ais: numbered migrations. Each 001_init.sql is the former single
+# idempotent schema file (ais: init + the ship_latest fix, seeds count-guarded).
 log "PHASE 2a: adsb"
-apply_sql adsb adsb_local "$REPO/adsb/clickhouse/init.sql"
+migrate_pipeline adsb
 
-# ism: single idempotent init.sql (tables + MVs, no seeds).
 log "PHASE 2b: ism"
-apply_sql ism ism_local "$REPO/ism/clickhouse/init.sql"
+migrate_pipeline ism
 
-# ais: consolidated idempotent schema (init + ship_latest migration folded in,
-# seeds count-guarded). The old init.sql / migrate_ship_latest.sql are retired.
 log "PHASE 2c: ais"
-apply_sql ais ais_local "$REPO/ais/clickhouse/bootstrap.sql"
+migrate_pipeline ais
 
 # spectrum: init.sql -> Athens seed -> migrate.py, IN THAT ORDER.
 #   The Athens 27-row known_frequencies catalog MUST load before migrate.py,
@@ -92,15 +99,8 @@ log "PHASE 2e: acars migrate.py"
   CLICKHOUSE_PASSWORD=acars_local \
   python3 migrate.py )
 
-# noaa: migrate.py only (same pattern as acars; does NOT create the database).
-log "PHASE 2f: noaa migrate.py"
-( cd "$REPO/noaa" && \
-  CLICKHOUSE_HOST="$CH_HOST" \
-  CLICKHOUSE_PORT="$CH_HTTP_PORT" \
-  CLICKHOUSE_DB=noaa \
-  CLICKHOUSE_USER=noaa \
-  CLICKHOUSE_PASSWORD=noaa_local \
-  python3 migrate.py )
+log "PHASE 2f: noaa"
+migrate_pipeline noaa
 
 # rds: migrate.py only (same pattern as acars/noaa; does NOT create the database).
 log "PHASE 2g: rds migrate.py"
@@ -112,14 +112,7 @@ log "PHASE 2g: rds migrate.py"
   CLICKHOUSE_PASSWORD=rds_local \
   python3 migrate.py )
 
-# ghost: migrate.py only (same pattern as rds; does NOT create the database).
-log "PHASE 2h: ghost migrate.py"
-( cd "$REPO/ghost" && \
-  CLICKHOUSE_HOST="$CH_HOST" \
-  CLICKHOUSE_PORT="$CH_HTTP_PORT" \
-  CLICKHOUSE_DB=ghost \
-  CLICKHOUSE_USER=ghost \
-  CLICKHOUSE_PASSWORD=ghost_local \
-  python3 migrate.py )
+log "PHASE 2h: ghost"
+migrate_pipeline ghost
 
 log "bootstrap complete"

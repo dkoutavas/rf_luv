@@ -26,7 +26,7 @@ def test_real_message():
     assert row["libacars_app"] == "acarsdec"          # from app.name when no libacars block
     assert row["station_id"] == "rf_luv-v3-01"
     assert row["dongle_id"] == ai.DONGLE_ID
-    assert json.loads(row["raw_json"])["noise"] == -65.5  # fields without a column survive in raw_json
+    assert row["noise_db"] == -65.5                        # level_db - noise_db = 10.5 dB SNR
 
 
 def test_no_payload_is_dropped():

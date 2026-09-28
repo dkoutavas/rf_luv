@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """
-ClickHouse schema migration runner for the ghost pipeline.
+Shared ClickHouse schema migration runner for the pipelines whose schema only
+the infra bootstrap applies (noaa, ghost, adsb, ais, ism).
 
-Scans clickhouse/migrations/ for numbered SQL files (NNN_description.sql),
-tracks which have been applied in a schema_migrations table, and runs
-any pending migrations in order.
+Scans <pipeline>/clickhouse/migrations/ for numbered SQL files
+(NNN_description.sql), tracks which have been applied in
+<db>.schema_migrations, and runs any pending migrations in order. The
+database defaults to the pipeline directory's name; CLICKHOUSE_DB, _USER and
+_PASSWORD override it (the bootstrap sets them).
+
+acars and rds keep their own copy of this file because their ingest images
+run it at startup and can only copy files from their own directory.
 
 Stdlib-only — uses urllib for ClickHouse HTTP. Mirrors spectrum/migrate.py
 in behaviour (including its SQL splitter that handles `;` inside comments,
 discovered while applying spectrum migrations 003 and 004 on 2026-04-18).
-
-Designed to run at container startup before the reader/ingest start.
 Safe to run repeatedly — already-applied migrations are skipped.
 
 Usage:
-    python3 migrate.py                 # run pending migrations
-    python3 migrate.py --status        # show migration status
-    python3 migrate.py --dry-run       # show what would run without applying
+    python3 infra/migrate.py <pipeline-dir>              # run pending migrations
+    python3 infra/migrate.py <pipeline-dir> --status     # show migration status
+    python3 infra/migrate.py <pipeline-dir> --dry-run    # show what would run
 """
 
 import os
@@ -37,15 +41,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stderr,
 )
-log = logging.getLogger("ghost-migrate")
+log = logging.getLogger("migrate")
+
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+if len(_args) != 1:
+    sys.exit("usage: migrate.py <pipeline-dir> [--status|--dry-run]")
+PIPELINE_DIR = Path(_args[0]).resolve()
 
 CH_HOST = os.environ.get("CLICKHOUSE_HOST", "clickhouse")
 CH_PORT = os.environ.get("CLICKHOUSE_PORT", "8123")
-CH_DB = os.environ.get("CLICKHOUSE_DB", "ghost")
-CH_USER = os.environ.get("CLICKHOUSE_USER", "ghost")
-CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "ghost_local")
+CH_DB = os.environ.get("CLICKHOUSE_DB", PIPELINE_DIR.name)
+CH_USER = os.environ.get("CLICKHOUSE_USER", CH_DB)
+CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", f"{CH_DB}_local")
 
-MIGRATIONS_DIR = Path(__file__).parent / "clickhouse" / "migrations"
+MIGRATIONS_DIR = PIPELINE_DIR / "clickhouse" / "migrations"
 MIGRATION_PATTERN = re.compile(r"^(\d{3})_.+\.sql$")
 CH_URL = f"http://{CH_HOST}:{CH_PORT}/"
 
@@ -91,8 +100,8 @@ def wait_for_clickhouse(max_retries: int = 30, delay: int = 2) -> bool:
 
 def ensure_migrations_table() -> None:
     ch_query(
-        """
-        CREATE TABLE IF NOT EXISTS ghost.schema_migrations (
+        f"""
+        CREATE TABLE IF NOT EXISTS {CH_DB}.schema_migrations (
             version     String,
             name        String,
             applied_at  DateTime64(3) DEFAULT now64(3),
@@ -106,7 +115,7 @@ def ensure_migrations_table() -> None:
 def get_applied_versions() -> set[str]:
     try:
         result = ch_query(
-            "SELECT version FROM ghost.schema_migrations FORMAT TabSeparated"
+            f"SELECT version FROM {CH_DB}.schema_migrations FORMAT TabSeparated"
         )
         if not result.strip():
             return set()
@@ -216,7 +225,7 @@ def apply_migration(version: str, name: str, path: Path) -> None:
     checksum = compute_checksum(path)
     payload = json.dumps({"version": version, "name": name, "checksum": checksum})
     ch_query(
-        "INSERT INTO ghost.schema_migrations FORMAT JSONEachRow",
+        f"INSERT INTO {CH_DB}.schema_migrations FORMAT JSONEachRow",
         data=payload,
     )
     log.info(f"Migration {version} applied successfully")

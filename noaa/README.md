@@ -57,7 +57,7 @@ path is still a scaffold, so the scanner has never actually seen a held lock
 | File | Status | Notes |
 |---|---|---|
 | `clickhouse/migrations/001_init.sql` | ✅ Production-ready | passes table + pass_latest + monthly_summary |
-| `migrate.py` | ✅ Production-ready | Cloned from `acars/migrate.py` with database name swap |
+| migrations | ✅ Production-ready | Applied by the shared runner `infra/migrate.py noaa` from the infra bootstrap |
 | `scheduler.py` | 🟡 Scaffold | TLE reading, orbit-predictor integration, INSERT logic all in place. **NOAA_DRY_RUN=1 by default** so it doesn't fire systemd-run yet. |
 | `recorder.py` | 🟡 Scaffold | CLI parsing, status updates, lock-acquisition stub all in place. **rtl-tcp service stop/start orchestration is intentionally NOT implemented** - needs operator review. Current behaviour: marks the pass as `failed` with a clear scaffold note. |
 | schema (`clickhouse/migrations/`) | ✅ Production-ready | Applied into the shared ClickHouse (`noaa` database) by the infra ch-bootstrap; no per-pipeline ClickHouse or Grafana anymore. |

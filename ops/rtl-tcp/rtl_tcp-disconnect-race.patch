@@ -1,6 +1,6 @@
 --- a/src/rtl_tcp.c
 +++ b/src/rtl_tcp.c
-@@ -91,6 +91,15 @@
+@@ -91,6 +91,22 @@
  
  static volatile int do_exit = 0;
  
@@ -13,10 +13,23 @@
 + * before the stream is cancelled, or is skipped after it. */
 +static pthread_mutex_t dev_lock = PTHREAD_MUTEX_INITIALIZER;
 +
++/* rf_luv: set by SIGINT/SIGTERM. The handler only sets this flag (locking in a
++ * signal handler could deadlock); command_worker turns it into request_exit()
++ * within its 1 s select loop, and the listen loop quits on it. Unlike do_exit it
++ * is never reset, so a stop during a session ends the process, not just the
++ * session. */
++static volatile sig_atomic_t exit_requested = 0;
++
  
  void usage(void)
  {
-@@ -152,6 +161,19 @@
+@@ -147,11 +163,29 @@
+ {
+ 	signal(SIGPIPE, SIG_IGN);
+ 	fprintf(stderr, "Signal caught, exiting!\n");
+-	rtlsdr_cancel_async(dev);
+-	do_exit = 1;
++	exit_requested = 1;
  }
  #endif
  
@@ -31,12 +44,29 @@
 +		rtlsdr_cancel_async(dev);
 +	}
 +	pthread_mutex_unlock(&dev_lock);
++	/* Wake tcp_worker: once do_exit is set no more samples arrive, and it
++	 * would otherwise sleep out its 5 s cond timeout before the next client
++	 * could connect. It checks do_exit under ll_mutex, so this cannot be lost. */
++	pthread_mutex_lock(&ll_mutex);
++	pthread_cond_signal(&cond);
++	pthread_mutex_unlock(&ll_mutex);
 +}
 +
  void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
  {
  	if(!do_exit) {
-@@ -219,7 +241,7 @@
+@@ -212,6 +246,10 @@
+ 			pthread_exit(0);
+ 
+ 		pthread_mutex_lock(&ll_mutex);
++		if(do_exit) {
++			pthread_mutex_unlock(&ll_mutex);
++			pthread_exit(0);
++		}
+ 		gettimeofday(&tp, NULL);
+ 		ts.tv_sec  = tp.tv_sec+5;
+ 		ts.tv_nsec = tp.tv_usec * 1000;
+@@ -219,7 +257,7 @@
  		if(r == ETIMEDOUT) {
  			pthread_mutex_unlock(&ll_mutex);
  			printf("worker cond timeout\n");
@@ -45,7 +75,7 @@
  			pthread_exit(NULL);
  		}
  
-@@ -244,7 +266,7 @@
+@@ -244,7 +282,7 @@
  				}
  				if(bytessent == SOCKET_ERROR || do_exit) {
  						printf("worker socket bye\n");
@@ -54,7 +84,21 @@
  						pthread_exit(NULL);
  				}
  			}
-@@ -308,10 +330,16 @@
+@@ -302,16 +340,28 @@
+ 			tv.tv_sec = 1;
+ 			tv.tv_usec = 0;
+ 			r = select(s+1, &readfds, NULL, NULL, &tv);
+-			if(r) {
++			if(exit_requested)
++				request_exit();
++			/* r > 0 only: -1 (EINTR) is not "readable" and would block in recv */
++			if(r > 0) {
+ 				received = recv(s, (char*)&cmd+(sizeof(cmd)-left), left, 0);
+-				left -= received;
++				if(received == 0)	/* orderly close by the client */
++					received = SOCKET_ERROR;
++				else if(received > 0)
++					left -= received;
  			}
  			if(received == SOCKET_ERROR || do_exit) {
  				printf("comm recv bye\n");
@@ -72,11 +116,31 @@
  		switch(cmd.cmd) {
  		case 0x01:
  			printf("set freq %d\n", ntohl(cmd.param));
-@@ -373,6 +401,7 @@
+@@ -373,6 +423,7 @@
  		default:
  			break;
  		}
 +		pthread_mutex_unlock(&dev_lock);
  		cmd.cmd = 0xff;
  	}
+ }
+@@ -599,9 +650,9 @@
+ 			tv.tv_sec = 1;
+ 			tv.tv_usec = 0;
+ 			r = select(listensocket+1, &readfds, NULL, NULL, &tv);
+-			if(do_exit) {
++			if(do_exit || exit_requested) {
+ 				goto out;
+-			} else if(r) {
++			} else if(r > 0) {
+ 				rlen = sizeof(remote);
+ 				s = accept(listensocket,(struct sockaddr *)&remote, &rlen);
+ 				break;
+@@ -666,5 +717,7 @@
+ 	WSACleanup();
+ #endif
+ 	printf("bye!\n");
++	if(exit_requested)
++		return 0;
+ 	return r >= 0 ? r : -r;
  }

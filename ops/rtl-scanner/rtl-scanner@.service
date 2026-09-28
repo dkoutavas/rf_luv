@@ -4,6 +4,8 @@ Description=rf_luv wideband scanner (instance %i)
 # localhost port at startup. Requires= ensures rtl-tcp@%i comes up first.
 After=rtl-tcp@%i.service network-online.target
 Requires=rtl-tcp@%i.service
+# Hold a sleep inhibitor for as long as this scanner runs (see that unit).
+Wants=rf-soak-inhibit@%i.service
 
 [Service]
 Type=simple

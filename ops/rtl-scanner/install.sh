@@ -51,6 +51,7 @@ fi
 step "Install template unit"
 mkdir -p "$USER_UNIT_DIR"
 install -m 0644 "$SRC_DIR/rtl-scanner@.service" "$USER_UNIT_DIR/"
+install -m 0644 "$SRC_DIR/rf-soak-inhibit@.service" "$USER_UNIT_DIR/"
 systemctl --user daemon-reload
 info "$USER_UNIT_DIR/rtl-scanner@.service"
 

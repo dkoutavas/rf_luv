@@ -1,0 +1,13 @@
+[Unit]
+Description=Keep the laptop awake while rtl-scanner@%i collects
+# Pulled in by rtl-scanner@%i (Wants=). BindsTo= stops it with the scanner,
+# so unplugging the dongle releases the lock and normal power saving returns.
+BindsTo=rtl-scanner@%i.service
+After=rtl-scanner@%i.service
+
+[Service]
+# A logind block inhibitor: automatic suspend (KDE powerdevil idle sleep) is
+# refused while it is held. 2026-09-28: powerdevil suspended the laptop on AC
+# mid-soak despite AutoSuspendAction=0, losing 3 h 15 min on both dongles.
+# A manual suspend from the menu still asks to override it.
+ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=rf_luv --why="rtl-scanner@%i is collecting" --mode=block sleep infinity

@@ -1,5 +1,9 @@
 # NOAA / Meteor weather satellite pipeline (Tier 2 #6) - SCAFFOLD
 
+> NOAA 15, 18 and 19 were decommissioned between June and August 2025, so
+> there is no APT left to record. The scheduler still predicts their passes.
+> The pipeline needs a re-scope to Meteor-M LRPT (a separate plan).
+
 > ⚠️ This is a **scaffold**, not a deployable pipeline. The schema, the
 > directory structure, the scheduler skeleton, and the recorder skeleton
 > are in place; key orchestration pieces are intentionally stubbed and

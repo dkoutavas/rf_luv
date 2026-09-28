@@ -225,6 +225,9 @@ Recreate the rest by hand:
 bash pipeline.sh up rds v3-01        # BEST 92.6 by default; 'down rds v3-01' to stop
 # ACARS decodes only on the V3 while the V4's VHF input is damaged:
 cd acars && cp env.v4-01.example .env && cd .. && bash pipeline.sh up acars v3-01
+# ADS-B: readsb opens the dongle over USB, so 'up' stops that dongle's rtl_tcp
+# and scanner. The V4's UHF path works at 1090 MHz. Map on :8080.
+bash pipeline.sh up adsb v4-01       # 'down adsb v4-01' to stop
 
 bash ops/noaa-pass-scheduler/install.sh   # NOAA scheduler (recorder is a scaffold)
 ```

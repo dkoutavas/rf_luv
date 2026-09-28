@@ -17,7 +17,8 @@ set -euo pipefail
 #
 #   --scanner SERIAL   the dongle that runs the spectrum scanner (rtl_tcp :1234)
 #   --ghost   SERIAL   optional second dongle for the ghost pipeline (rtl_tcp :1235)
-#   --gain    N        SCAN_GAIN for new env files (default 12; 20 clips in Athens)
+#   --gain    N        SCAN_GAIN for new env files (default 12 indoors; about 7.7 on an
+#                      outdoor antenna without a bandstop; 20 clips in Athens)
 #   --backup-dir DIR   enable daily ClickHouse backups to DIR (put it on another disk)
 #   --dry-run          print the mutating commands instead of running them
 #   --verify-only      skip install, just run the PASS/FAIL checks
@@ -67,17 +68,17 @@ run() {
 # systemd + udev. The udev group is chosen inside ops/rtl-tcp/install.sh.
 DISTRO_ID="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")"
 case "$DISTRO_ID" in
-    opensuse*|sles) PKG_HINT="sudo zypper install rtl-sdr docker docker-compose python3-numpy" ;;
-    debian|ubuntu)  PKG_HINT="sudo apt install rtl-sdr docker.io docker-compose-v2 python3-numpy" ;;
-    fedora)         PKG_HINT="sudo dnf install rtl-sdr docker docker-compose python3-numpy" ;;
-    arch)           PKG_HINT="sudo pacman -S rtl-sdr docker docker-compose python-numpy" ;;
-    *)              PKG_HINT="install: rtl-sdr (rtl_tcp/rtl_eeprom), docker + compose, python3 numpy" ;;
+    opensuse*|sles) PKG_HINT="sudo zypper install rtl-sdr docker docker-compose python3-numpy gcc patch" ;;
+    debian|ubuntu)  PKG_HINT="sudo apt install rtl-sdr docker.io docker-compose-v2 python3-numpy gcc patch" ;;
+    fedora)         PKG_HINT="sudo dnf install rtl-sdr docker docker-compose python3-numpy gcc patch" ;;
+    arch)           PKG_HINT="sudo pacman -S rtl-sdr docker docker-compose python-numpy gcc patch" ;;
+    *)              PKG_HINT="install: rtl-sdr (rtl_tcp/rtl_eeprom), docker + compose, python3 numpy, gcc, patch" ;;
 esac
 
 preflight() {
     step "Preflight ($DISTRO_ID)"
     local missing=0
-    for t in rtl_tcp rtl_eeprom rtl_test docker python3; do
+    for t in rtl_tcp rtl_eeprom rtl_test docker python3 gcc patch curl; do
         if command -v "$t" >/dev/null; then info "$t: $(command -v "$t")"; else err "$t missing"; missing=1; fi
     done
     if python3 -c 'import numpy' 2>/dev/null; then info "python3 numpy present"; else err "python3 numpy missing"; missing=1; fi
@@ -120,6 +121,15 @@ dvb_blacklist() {
 component_installers() {
     step "ops/rtl-tcp/install.sh (units, wrapper, watchdog, udev, sudoers, linger)"
     run bash "$REPO/ops/rtl-tcp/install.sh"
+    # Stock rtl_tcp aborts or hangs when a client closes mid-retune, and ignores
+    # SIGTERM during a session. The patched build in /usr/local/bin wins over
+    # the packaged /usr/bin/rtl_tcp by PATH order. Running units switch to it
+    # on their next restart or plug-in.
+    step "patched rtl_tcp (ops/rtl-tcp/build-rtl-tcp.sh -> /usr/local/bin/rtl_tcp)"
+    local build="${XDG_CACHE_HOME:-$HOME/.cache}/rf_luv/rtl_tcp-build"
+    run rm -rf "$build"
+    run env BUILD_DIR="$build" bash "$REPO/ops/rtl-tcp/build-rtl-tcp.sh"
+    run sudo install -m 0755 "$build/rtl_tcp" /usr/local/bin/rtl_tcp
     step "ops/rtl-scanner/install.sh (scanner template unit)"
     run bash "$REPO/ops/rtl-scanner/install.sh"
     step "rf-mode (dongle mode switcher)"
@@ -227,7 +237,10 @@ check() { if eval "$2" >/dev/null 2>&1; then info "PASS $1"; else err "FAIL $1";
 verify() {
     step "Verify"
     for s in $SCANNER $GHOST; do
-        local port; [ "$s" = "$SCANNER" ] && port=$SCANNER_PORT || port=$GHOST_PORT
+        # The port belongs to the dongle (its env file), not to the role: the V3
+        # keeps :1235 while it stands in as the scanner.
+        local port; port="$(sed -n 's/^RTL_TCP_PORT=//p' "$ENV_DIR/$s.env" 2>/dev/null | tail -1)"
+        [ -n "$port" ] || { [ "$s" = "$SCANNER" ] && port=$SCANNER_PORT || port=$GHOST_PORT; }
         check "BindsTo drop-in for $s"        "grep -q BindsTo $HOME/.config/systemd/user/rtl-tcp@$s.service.d/10-device.conf"
         if [ ! -e "/dev/rtl_sdr_$s" ]; then
             # Plug and play: an absent dongle must leave its unit stopped, not looping.
@@ -246,6 +259,7 @@ verify() {
         check "$SCANNER absent: rtl-scanner@$SCANNER inactive" "! systemctl --user is-active --quiet rtl-scanner@$SCANNER"
     fi
     check "DVB driver not loaded"       "! lsmod | grep -q dvb_usb_rtl28xxu"
+    check "patched rtl_tcp in /usr/local/bin" "test -x /usr/local/bin/rtl_tcp"
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx clickhouse; then
         check "spectrum.scans rows from $SCANNER in last 10 min" \
           "[ \"\$(docker exec clickhouse clickhouse-client --user spectrum --password spectrum_local --query \"SELECT count() FROM spectrum.scans WHERE dongle_id='$SCANNER' AND timestamp > now() - INTERVAL 10 MINUTE\")\" -gt 0 ]"

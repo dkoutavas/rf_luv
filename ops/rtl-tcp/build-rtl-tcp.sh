@@ -7,7 +7,9 @@ set -euo pipefail
 # connection while a retune is still being applied: the USB teardown in
 # rtlsdr_read_async() races the command thread's control transfer (libusb
 # "usbi_mutex_destroy: Assertion ... failed"). Upstream osmocom and the
-# RTL-SDR Blog fork have the same code, so the fix is carried here.
+# RTL-SDR Blog fork have the same code, so the fix is carried here. The patch
+# also wakes the sender when a session ends (the next client no longer waits
+# out a 5 s timeout) and makes SIGTERM end the process cleanly with status 0.
 #
 # The build fetches rtl_tcp.c and its helpers at RTL_SDR_TAG and links them
 # against the system librtlsdr, so the tag must match the installed package

@@ -1,0 +1,140 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active Pagers",
+      "description": "Unique capcodes seen in the last hour",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(capcode) AS count FROM pocsag.messages WHERE timestamp > now() - INTERVAL 1 HOUR",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Pages / min",
+      "description": "Pages per minute over the last 5 minutes",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() / 5 AS pages_per_min FROM pocsag.messages WHERE timestamp > now() - INTERVAL 5 MINUTE",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Pages Today",
+      "description": "Total pages since local midnight",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT count() AS total FROM pocsag.messages WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Unique Pagers Today",
+      "description": "Distinct capcodes since local midnight",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT uniq(capcode) AS count FROM pocsag.messages WHERE timestamp > today()",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pages Over Time",
+      "description": "Pages per minute",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toStartOfMinute(timestamp) AS time, count() AS pages FROM pocsag.messages WHERE timestamp >= $__fromTime AND timestamp <= $__toTime GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Protocol Split",
+      "description": "Pages by baud rate in the last hour",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT protocol, count() AS pages FROM pocsag.messages WHERE timestamp > now() - INTERVAL 1 HOUR GROUP BY protocol ORDER BY pages DESC",
+          "format": 1
+        }
+      ],
+      "options": { "orientation": "horizontal" }
+    },
+    {
+      "type": "barchart",
+      "title": "Message Types",
+      "description": "Alpha vs numeric vs tone-only pages in the last hour",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT msg_type, count() AS pages FROM pocsag.messages WHERE timestamp > now() - INTERVAL 1 HOUR GROUP BY msg_type ORDER BY pages DESC",
+          "format": 1
+        }
+      ],
+      "options": { "orientation": "horizontal" }
+    },
+    {
+      "type": "table",
+      "title": "Top Pagers (last hour)",
+      "description": "Busiest capcodes and their latest message",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT capcode, count() AS pages, anyLast(msg_type) AS last_type, argMax(message, timestamp) AS last_message, max(timestamp) AS last_seen FROM pocsag.messages WHERE timestamp > now() - INTERVAL 1 HOUR GROUP BY capcode ORDER BY pages DESC LIMIT 25",
+          "format": 1
+        }
+      ],
+      "options": { "showHeader": true }
+    },
+    {
+      "type": "table",
+      "title": "Recent Pages",
+      "description": "Last 50 decoded pages. This shows message text and is for local viewing only; do not screenshot or share it (see pocsag/README.md).",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_POCSAG_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, protocol, capcode, function, msg_type, message FROM pocsag.messages ORDER BY timestamp DESC LIMIT 50",
+          "format": 1
+        }
+      ],
+      "options": { "showHeader": true }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["pocsag", "paging", "rtl-sdr", "rf_luv"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "POCSAG Paging Overview",
+  "uid": "pocsag-overview"
+}

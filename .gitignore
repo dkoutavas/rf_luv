@@ -53,3 +53,6 @@ graphify-out/
 
 # Claude Code config (stored in private context repo)
 CLAUDE.md
+
+# POCSAG local captures never leave the host (see pocsag/README.md)
+pocsag/captures/

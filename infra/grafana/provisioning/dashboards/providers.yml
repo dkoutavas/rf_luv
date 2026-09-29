@@ -103,3 +103,15 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards/json/ghost
       foldersFromFilesStructure: false
+
+  - name: POCSAG Dashboards
+    orgId: 1
+    type: file
+    folder: POCSAG
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json/pocsag
+      foldersFromFilesStructure: false

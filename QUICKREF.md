@@ -11,8 +11,8 @@ Both run as `rtl-tcp@<serial>.service` under systemd with a watchdog. The
 scanner writes to ClickHouse continuously. The V3 is free for live listening
 or the ghost pipeline.
 
-Since 2026-09-26 the roles are swapped: the bare V3 scans on the patio antenna
-and the V4 is secondary (water damage on its VHF input) until the V4 and the
+Since 2026-09-26 the roles are swapped. The bare V3 scans on the patio antenna.
+The V4 is secondary, because water damaged its VHF input, until the V4 and the
 bandstop are replaced. Each dongle keeps its own port.
 
 ## Live listening with SDR++ (the primary path)
@@ -93,6 +93,14 @@ rf-mode scan v3-01                            # give it back when done
 bash pipeline.sh up adsb v4-01                # stops rtl_tcp and the scanner on v4-01
 # map: http://localhost:8080   Grafana: ADS-B folder   antenna: 6.5 cm arms, vertical
 bash pipeline.sh down adsb v4-01              # rtl_tcp and the scanner come back
+```
+
+### AIS ships (V3 session, pauses the scanner)
+```bash
+bash pipeline.sh up ais v3-01                 # pauses the V3 scanner, AIS-catcher takes rtl_tcp
+# Grafana: AIS folder   antenna: ~44 cm arms, vertical, SW toward Piraeus
+# AIS_GAIN=auto by default; AIS_GAIN=30 bash pipeline.sh up ais v3-01 to pin gain
+bash pipeline.sh down ais v3-01               # scanner comes back
 ```
 
 ### Decode pagers (POCSAG, stop rtl_tcp first)

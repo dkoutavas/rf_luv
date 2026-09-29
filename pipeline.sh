@@ -99,7 +99,9 @@ claim_dongle() {
     RDS_DONGLE_ID="$serial"
     ACARS_DONGLE_ID="$serial"
     ACARS_FEED_ID="rf_luv-$serial"
-    export RTL_TCP_PORT RDS_DONGLE_ID ACARS_DONGLE_ID ACARS_FEED_ID
+    # AIS tuner gain: honor an operator override, else AIS-catcher AGC (auto).
+    AIS_GAIN="${AIS_GAIN:-auto}"
+    export RTL_TCP_PORT RDS_DONGLE_ID ACARS_DONGLE_ID ACARS_FEED_ID AIS_GAIN
     if systemctl --user is-active --quiet "rtl-scanner@${serial}.service"; then
         "$RF_MODE" pause "$serial"
     fi

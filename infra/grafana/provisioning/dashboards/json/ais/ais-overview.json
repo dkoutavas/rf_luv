@@ -255,6 +255,20 @@
       "options": {
         "orientation": "horizontal"
       }
+    },
+    {
+      "type": "table",
+      "title": "Integrity Anomalies (spoofing indicators)",
+      "description": "AIS has no authentication: any station can claim any MMSI, name, or position. These are the receive-only tells of a faked or malfunctioning transmitter, over the last hour. impossible_speed: reported SOG > 60 kn. position_jump: two reports of one MMSI imply > 100 kn ground speed. conflicting_name: one MMSI broadcasting more than one ship name. Empty is the normal, healthy case.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_AIS_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT anomaly, mmsi, detail, last_seen FROM (SELECT 'impossible_speed' AS anomaly, toString(mmsi) AS mmsi, concat(toString(round(max(speed), 1)), ' kn') AS detail, max(timestamp) AS last_seen FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND speed > 60 GROUP BY mmsi UNION ALL SELECT 'conflicting_name', toString(mmsi), arrayStringConcat(groupUniqArray(ship_name), ' | '), max(timestamp) FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND ship_name != '' GROUP BY mmsi HAVING uniqExact(ship_name) > 1 UNION ALL SELECT 'position_jump', toString(mmsi), concat(toString(round(max(nm_moved / dt_s * 3600), 0)), ' kn implied'), max(ts) FROM (SELECT mmsi, timestamp AS ts, greatCircleDistance(lagInFrame(lon) OVER w, lagInFrame(lat) OVER w, lon, lat) / 1852 AS nm_moved, dateDiff('second', lagInFrame(timestamp) OVER w, timestamp) AS dt_s FROM ais.positions WHERE timestamp > now() - INTERVAL 1 HOUR AND lat IS NOT NULL AND lon IS NOT NULL WINDOW w AS (PARTITION BY mmsi ORDER BY timestamp)) WHERE dt_s > 0 AND nm_moved / dt_s * 3600 > 100 GROUP BY mmsi) ORDER BY last_seen DESC LIMIT 100",
+          "format": 1
+        }
+      ],
+      "options": { "showHeader": true }
     }
   ],
   "refresh": "30s",

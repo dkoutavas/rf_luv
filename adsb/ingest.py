@@ -235,13 +235,17 @@ def main():
         try:
             log.info(f"Connecting to readsb SBS at {SBS_HOST}:{SBS_PORT}...")
             sock = socket.create_connection((SBS_HOST, SBS_PORT), timeout=10)
-            sock.settimeout(1.0)  # non-blocking reads for graceful shutdown
-            sbs_file = sock.makefile("r", encoding="utf-8", errors="replace")
+            sock.settimeout(1.0)  # wake every second to flush and check for shutdown
             log.info("Connected to readsb SBS output")
+            pending = b""  # a partial line, completed by the next recv
 
             while running:
+                # recv on the raw socket, not a makefile() reader: after one
+                # timeout, a makefile() reader raises "cannot read from timed
+                # out object" on every later read, so each quiet second (few
+                # aircraft) dropped the connection and lost 5 s of messages.
                 try:
-                    line = sbs_file.readline()
+                    chunk = sock.recv(65536)
                 except socket.timeout:
                     # Check if it's time to flush
                     elapsed = time.monotonic() - last_flush
@@ -254,22 +258,24 @@ def main():
                         last_flush = time.monotonic()
                     continue
 
-                if not line:
+                if not chunk:
                     log.warning("SBS connection closed")
                     break
 
-                row = parse_sbs_line(line)
-                if row:
-                    batch.append(row)
+                *lines, pending = (pending + chunk).split(b"\n")
+                for line in lines:
+                    row = parse_sbs_line(line.decode("utf-8", errors="replace"))
+                    if row:
+                        batch.append(row)
 
-                # Flush on batch size
-                if len(batch) >= BATCH_SIZE:
-                    count = insert_batch(batch)
-                    total_inserted += count
-                    if count > 0:
-                        log.info(f"Flushed {count} rows (batch) | total: {total_inserted}")
-                    batch.clear()
-                    last_flush = time.monotonic()
+                    # Flush on batch size
+                    if len(batch) >= BATCH_SIZE:
+                        count = insert_batch(batch)
+                        total_inserted += count
+                        if count > 0:
+                            log.info(f"Flushed {count} rows (batch) | total: {total_inserted}")
+                        batch.clear()
+                        last_flush = time.monotonic()
 
                 # Flush on timer
                 elapsed = time.monotonic() - last_flush

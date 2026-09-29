@@ -56,8 +56,29 @@ def test_type24_parts_a_and_b():
                  "dim_stern": 15, "dim_starboard": 5}
 
 
+def test_type4_base_station():
+    # A base station broadcasts its fixed position.
+    m = decode("!AIVDM,1,1,,A,403OviQuMGCqWrRO9>E6fE700@GO,0*4D")
+    assert m == {"mmsi": 3669702, "msg_type": 4, "lon": -76.352362, "lat": 36.883767}
+
+
+def test_type21_aid_to_navigation():
+    # A navigation aid (buoy/lighthouse); its name goes into ship_name.
+    m = decode("!AIVDM,1,1,,B,E>k`b9J610V60@2ab@0b@@@@@@@0h;Ow?WdMh088i<h1<@P00,4*0F")
+    assert m == {"mmsi": 993667621, "msg_type": 21, "ship_name": "LBALL@ EST AT",
+                 "lon": 21.050025, "lat": 54.596663,
+                 "dim_stern": 65, "dim_port": 6, "dim_starboard": 9}
+
+
+def test_type27_long_range():
+    # Coarse long-range position: 1/10-minute lat/lon, whole-unit speed/course.
+    m = decode("!AIVDM,1,1,,B,KC5E2b@U19PFdLbMuc5=ROv62<7m,0*16")
+    assert m == {"mmsi": 206914217, "msg_type": 27, "nav_status": 2,
+                 "lon": 137.023333, "lat": 4.84, "speed": 57.0, "course": 167.0}
+
+
 def test_garbage_and_unsupported_return_none():
     assert decode("not an nmea sentence") is None
     assert decode("!AIVDM,1,1,,A,,0*00") is None
-    # type 4 (base station report) is not decoded
-    assert decode("!AIVDM,1,1,,A,403OviQuMGCqWrRO9>E6fE700@GO,0*4D") is None
+    # type 9 (SAR aircraft) is still not decoded
+    assert decode("!AIVDM,1,1,,A,900048wwTcw29TR1jHDGSC7`0`1b,0*4A") is None

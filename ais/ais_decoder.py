@@ -2,8 +2,9 @@
 AIVDM/AIVDO NMEA Decoder — stdlib only
 
 Decodes AIS messages from 6-bit ASCII armored NMEA sentences.
-Supports message types 1-3 (position), 5 (static/voyage),
-18 (Class B position), and 24 (Class B static).
+Supports message types 1-3 (position), 4 (base station), 5 (static/voyage),
+18 (Class B position), 21 (aid to navigation), 24 (Class B static),
+and 27 (long-range position).
 
 Reference: ITU-R M.1371-5, gpsd AIVDM documentation.
 
@@ -288,6 +289,115 @@ def decode_msg_24(bits: list[int]) -> dict | None:
     return result
 
 
+def decode_msg_4(bits: list[int]) -> dict:
+    """
+    Base Station Report — a shore station broadcasting its fixed position
+    and UTC time. 168 bits. Useful here as the map's ground truth: a base
+    station's position never moves, so it marks the receiver's shore fix.
+    """
+    if len(bits) < 168:
+        return {}
+
+    result = {
+        "mmsi": get_uint(bits, 8, 30),
+        "msg_type": get_uint(bits, 0, 6),
+    }
+
+    lon = get_int(bits, 79, 28) / 600000.0
+    if abs(lon) <= 180.0:
+        result["lon"] = round(lon, 6)
+
+    lat = get_int(bits, 107, 27) / 600000.0
+    if abs(lat) <= 90.0:
+        result["lat"] = round(lat, 6)
+
+    return result
+
+
+def decode_msg_21(bits: list[int]) -> dict:
+    """
+    Aid-to-Navigation Report — buoys, lighthouses, beacons. 272-360 bits
+    (an optional name extension follows the fixed part). The name goes into
+    ship_name so aids appear on the map and in the ships table alongside vessels.
+    """
+    if len(bits) < 272:
+        return {}
+
+    result = {
+        "mmsi": get_uint(bits, 8, 30),
+        "msg_type": 21,
+    }
+
+    # Name: 120-bit fixed field (20 chars). The optional 6-bit-aligned
+    # extension only applies when that field is completely full; otherwise the
+    # trailing bits are spare and must be ignored (get_text rstrips padding, so
+    # a length of 20 means no padding was present).
+    name = get_text(bits, 43, 120)
+    if len(name) == 20:
+        ext_len = ((len(bits) - 272) // 6) * 6
+        if ext_len > 0:
+            name = (name + get_text(bits, 272, ext_len)).rstrip("@ ")
+    if name:
+        result["ship_name"] = name
+
+    lon = get_int(bits, 164, 28) / 600000.0
+    if abs(lon) <= 180.0:
+        result["lon"] = round(lon, 6)
+
+    lat = get_int(bits, 192, 27) / 600000.0
+    if abs(lat) <= 90.0:
+        result["lat"] = round(lat, 6)
+
+    for offset, width, key in (
+        (219, 9, "dim_bow"), (228, 9, "dim_stern"),
+        (237, 6, "dim_port"), (243, 6, "dim_starboard"),
+    ):
+        val = get_uint(bits, offset, width)
+        if val > 0:
+            result[key] = val
+
+    return result
+
+
+def decode_msg_27(bits: list[int]) -> dict:
+    """
+    Long-Range AIS Broadcast — coarse position for satellite / long-range
+    reception. 96 bits. Position is 1/10-minute resolution (not 1/10000), and
+    speed and course are whole units, so this extends coverage past the normal
+    horizon at low precision.
+    """
+    if len(bits) < 96:
+        return {}
+
+    nav_status = get_uint(bits, 40, 4)
+    result = {
+        "mmsi": get_uint(bits, 8, 30),
+        "msg_type": 27,
+        "nav_status": nav_status if nav_status != 15 else None,
+    }
+
+    # Coarse position: 1/10 minute = 1/600 degree.
+    lon = get_int(bits, 44, 18) / 600.0
+    if abs(lon) <= 180.0:
+        result["lon"] = round(lon, 6)
+
+    lat = get_int(bits, 62, 17) / 600.0
+    if abs(lat) <= 90.0:
+        result["lat"] = round(lat, 6)
+
+    # Speed over ground: whole knots, 63 = not available.
+    sog = get_uint(bits, 79, 6)
+    if sog < 63:
+        result["speed"] = float(sog)
+
+    # Course over ground: whole degrees, 511 = not available.
+    cog = get_uint(bits, 85, 9)
+    if cog < 511:
+        result["course"] = float(cog)
+
+    return result
+
+
 # ─── NMEA sentence parsing & multi-sentence assembly ────
 
 # Decoder dispatch table
@@ -295,9 +405,12 @@ _DECODERS = {
     1: decode_msg_1_2_3,
     2: decode_msg_1_2_3,
     3: decode_msg_1_2_3,
+    4: decode_msg_4,
     5: decode_msg_5,
     18: decode_msg_18,
+    21: decode_msg_21,
     24: decode_msg_24,
+    27: decode_msg_27,
 }
 
 

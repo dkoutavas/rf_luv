@@ -37,11 +37,22 @@ MHz), vertical. 169 MHz wants ~42 cm arms, and 466 MHz wants ~15 cm.
 
 ## Finding the channel
 
-Athens paging frequency is not confirmed yet. The two candidates are 169 MHz
-(the ERMES paging band) and 466.075 MHz (on-site paging). Bring the pipeline up
-on one, watch `docker logs pocsag` for `POCSAG` decode lines, and switch
-`POCSAG_FREQ` until pages appear. Then record the working channel in the
-spectrum `known_frequencies` seed.
+Athens paging frequency is not confirmed. Bring the pipeline up on a candidate,
+watch `docker logs pocsag` for `POCSAG` decode lines, and switch `POCSAG_FREQ`
+until pages appear. Then record the working channel in the spectrum
+`known_frequencies` seed.
+
+Hunt result 2026-09-29 (V3, 44 cm dipole): a power sweep of 148-174 and
+440-470 MHz found strong carriers at 460.007, 461.264, 151.453, 170.852,
+172.009 and 160.025 MHz. Each was tested with the POCSAG decoder, and the two
+strongest UHF and VHF carriers were also tested with FLEX. None decoded as
+paging, so those carriers are voice or other data, not POCSAG or FLEX. No live
+paging was decodable at this location and time. The pipeline itself is proven
+end to end: rtl_fm opened the V3 by serial, tuned, multimon-ng 1.6.2 ran, and
+the ClickHouse schema and ingest were ready. Commercial paging is largely
+retired, so a decode here likely needs an active on-site system (for example a
+hospital pager) within range. FLEX support is a small follow-up: add `-a FLEX
+-a FLEX_NEXT` in `entrypoint.sh` and a FLEX line parser in `pocsag_ingest.py`.
 
 ## Schema
 

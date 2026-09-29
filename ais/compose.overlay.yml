@@ -3,15 +3,18 @@
 #
 # This is a ROTATING pipeline overlay. The always-on data layer
 # (shared ClickHouse + Grafana) lives in infra/compose.yml as the
-# rf_luv_infra project. Bring infra up first, then this overlay:
-#   docker compose -f infra/compose.yml up -d
-#   docker compose -f ais/compose.overlay.yml up -d
+# rf_luv_infra project. Bring infra up first, then use pipeline.sh:
+#   bash infra/up.sh
+#   bash pipeline.sh up ais v3-01      # pauses the V3 scanner for the session
 #   open http://localhost:3000 for Grafana dashboards (shared)
+#   bash pipeline.sh down ais v3-01    # restores the V3 scanner
 #
-# Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1234 — the same V4 the native systemd spectrum
-# scanner owns; these rotating decoders time-share it via the coordinator.
-#   Native Omen host: rtl_tcp runs as rtl-tcp@v4-01.service on :1234.
+# Dongle: marine AIS is VHF (161.975 + 162.025 MHz), so it runs on the V3
+# (the good VHF dongle) whose rtl_tcp the spectrum scanner normally holds.
+# `pipeline.sh up ais v3-01` pauses rtl-scanner@v3-01 for the session and
+# hands rtl_tcp on host.docker.internal:${RTL_TCP_PORT} to AIS-catcher; ADS-B
+# on the V4 keeps running. The water-damaged V4 is 16.5 dB down at VHF, so it
+# is not the AIS dongle.
 #
 # AIS-catcher auto-tunes to 161.975 + 162.025 MHz (dual-channel).
 # Point dipole antenna SW toward Piraeus, arms ~44 cm, vertical.
@@ -35,9 +38,12 @@ services:
     networks: [rf_luv_net]
     depends_on:
       - ais-ingest
+    # AIS_GAIN defaults to tuner AGC (auto): the bare V3 sits next to strong
+    # Athens FM, so a fixed 40 dB overloads the front end. Set AIS_GAIN to a
+    # number (dB) to pin it while comparing antennas.
     command: >
-      -t rtltcp host.docker.internal ${RTL_TCP_PORT:-1234}
-      -gt tuner 40.0
+      -t rtltcp host.docker.internal ${RTL_TCP_PORT:-1235}
+      -gt tuner ${AIS_GAIN:-auto}
       -u ais-ingest 10110
     extra_hosts:
       - "host.docker.internal:host-gateway"

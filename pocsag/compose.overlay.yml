@@ -1,0 +1,60 @@
+# POCSAG Paging Pipeline (overlay)
+# rtl_fm | multimon-ng (decoder) -> pocsag_ingest (text -> ClickHouse), one container.
+#
+# Bring it up with pipeline.sh, not docker compose directly:
+#   bash infra/up.sh
+#   bash pipeline.sh up pocsag v3-01      # frees the dongle over USB (rf-mode listen)
+#   open http://localhost:3000 for Grafana (POCSAG folder)
+#   bash pipeline.sh down pocsag v3-01    # rtl_tcp and the scanner come back
+#
+# Dongle: USB mode, not rtl_tcp. rtl_fm cannot read rtl_tcp on this hardware,
+# so POCSAG opens the dongle directly, exactly like ADS-B. `pipeline.sh up
+# pocsag <serial>` runs `rf-mode listen <serial> --force` (stops rtl_tcp and,
+# on the scanner serial, the scanner) and exports the serial/freq/gain.
+#
+# Frequency: POCSAG_FREQ is the paging channel to tune (default 169.6 MHz).
+# Set it on the command line while hunting, e.g.
+#   POCSAG_FREQ=466.075M bash pipeline.sh up pocsag v3-01
+#
+# ClickHouse is reached over the shared rf_luv_net network at the alias
+# `clickhouse` on HTTP port 8123.
+
+networks:
+  rf_luv_net:
+    external: true
+
+services:
+
+  pocsag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pocsag
+    # on-failure, not unless-stopped: after a reboot udev hands the dongle back
+    # to rtl_tcp and the scanner, and a restarted rtl_fm would fight them for
+    # it. Run `pipeline.sh up pocsag` again to resume.
+    restart: on-failure
+    networks: [rf_luv_net]
+    # USB passthrough, as for ADS-B: the whole bus plus a cgroup rule for USB
+    # character devices (major 189). label=disable because Tumbleweed runs
+    # SELinux enforcing and container_t cannot otherwise open usb_device_t.
+    security_opt:
+      - label=disable
+    device_cgroup_rules:
+      - "c 189:* rwm"
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb:rw
+    environment:
+      POCSAG_FREQ: ${POCSAG_FREQ:-169.6M}
+      POCSAG_GAIN: ${POCSAG_GAIN:-40}
+      POCSAG_PPM: ${POCSAG_PPM:-0}
+      POCSAG_SERIAL: ${POCSAG_SERIAL:-v3-01}
+      POCSAG_FREQ_HZ: ${POCSAG_FREQ_HZ:-0}
+      POCSAG_DONGLE_ID: ${POCSAG_SERIAL:-v3-01}
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: pocsag
+      CLICKHOUSE_USER: pocsag
+      CLICKHOUSE_PASSWORD: pocsag_local
+      BATCH_SIZE: "50"
+      FLUSH_INTERVAL_SECONDS: "10"

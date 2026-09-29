@@ -67,6 +67,9 @@ migrate_pipeline ism
 log "PHASE 2c: ais"
 migrate_pipeline ais
 
+log "PHASE 2c2: pocsag"
+migrate_pipeline pocsag
+
 # spectrum: init.sql -> Athens seed -> migrate.py, IN THAT ORDER.
 #   The Athens 27-row known_frequencies catalog MUST load before migrate.py,
 #   because spectrum migration 021 inserts HF rows into known_frequencies and

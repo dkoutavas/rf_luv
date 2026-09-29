@@ -125,3 +125,18 @@ datasources:
     secureJsonData:
       password: ghost_local
     editable: true
+
+  - name: ClickHouse pocsag
+    uid: P_POCSAG_CLICKHOUSE
+    type: grafana-clickhouse-datasource
+    access: proxy
+    isDefault: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      defaultDatabase: pocsag
+      username: pocsag
+    secureJsonData:
+      password: pocsag_local
+    editable: true

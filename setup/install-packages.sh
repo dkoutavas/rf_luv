@@ -134,7 +134,7 @@ try_zypper gnuradio "GNU Radio" || true
 step "Decoders and signal processing tools"
 
 try_zypper multimon-ng "multimon-ng (POCSAG, FLEX, EAS, DTMF decoder)" || \
-    build_from_source multimon-ng "https://github.com/EliasOeworka/multimon-ng"
+    build_from_source multimon-ng "https://github.com/EliasOenal/multimon-ng"
 
 try_zypper sox "SoX (audio processing - useful for piping/converting SDR audio)" || true
 try_zypper ffmpeg-8 "FFmpeg (media processing, format conversion)" || \

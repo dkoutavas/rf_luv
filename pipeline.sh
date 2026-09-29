@@ -28,7 +28,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NET=rf_luv_net
 CH_PING_URL="http://127.0.0.1:8123/ping"
-VALID_PIPES="acars adsb ais ism rds"
+VALID_PIPES="acars adsb ais ism rds pocsag"
+# USB-mode pipes open the dongle directly (their decoder cannot read rtl_tcp),
+# so 'up' frees it with `rf-mode listen` instead of taking the rtl_tcp path.
+USB_PIPES="adsb pocsag"
 
 DEFAULT_SERIAL=v4-01
 RF_MODE="$SCRIPT_DIR/ops/rf-mode"
@@ -84,16 +87,19 @@ dongle_port() {
 # scanner must let go of rtl_tcp first.
 claim_dongle() {
     local pipe="$1" serial="$2"
-    if [ "$pipe" = "adsb" ]; then
-        # readsb opens the dongle over USB, so rtl_tcp must let go of it
+    case " $USB_PIPES " in *" $pipe "*)
+        # The decoder opens the dongle over USB, so rtl_tcp must let go of it
         # entirely. --force: the serial may be the scanner's, and taking the
         # dongle from the scanner is what 'up' does for every pipe.
         ADSB_SERIAL="$serial"
-        export ADSB_SERIAL
+        POCSAG_SERIAL="$serial"
+        # Stamp the tuned POCSAG channel (env, e.g. 169.6M) as Hz for the row.
+        POCSAG_FREQ_HZ="$(awk -v f="${POCSAG_FREQ:-169.6M}" 'BEGIN{s=toupper(f);u=substr(s,length(s),1);v=substr(s,1,length(s)-1);if(u=="M")print int(v*1e6);else if(u=="K")print int(v*1e3);else print int(s)}')"
+        export ADSB_SERIAL POCSAG_SERIAL POCSAG_FREQ POCSAG_FREQ_HZ POCSAG_GAIN
         "$RF_MODE" listen "$serial" --force
-        echo "[pipeline] adsb uses $serial over USB"
+        echo "[pipeline] $pipe uses $serial over USB"
         return
-    fi
+    ;; esac
     RTL_TCP_PORT="$(dongle_port "$serial")"
     # rds and acars label their rows with the dongle; follow the chosen one.
     RDS_DONGLE_ID="$serial"
@@ -184,11 +190,14 @@ cmd_rotate() {
     esac
     preflight
     local cur; cur="$(current_up_pipe)"
-    # adsb holds the dongle with rtl_tcp stopped; the rtl_tcp pipes need it
-    # running, and only 'down' (rf-mode scan) starts it again.
-    if [ "$cur" = "adsb" ] && [ "$target" != "adsb" ]; then
-        echo "[pipeline] adsb holds $serial over USB: run '$0 down adsb $serial', then '$0 up $target $serial'" >&2
-        exit 1
+    # A USB-mode pipe (adsb, pocsag) holds the dongle with rtl_tcp stopped; the
+    # rtl_tcp pipes need it running, and only 'down' (rf-mode scan) starts it
+    # again. So refuse rotating out of a USB pipe.
+    if [ -n "$cur" ] && [ "$cur" != "$target" ]; then
+        case " $USB_PIPES " in *" $cur "*)
+            echo "[pipeline] $cur holds $serial over USB: run '$0 down $cur $serial', then '$0 up $target $serial'" >&2
+            exit 1
+        ;; esac
     fi
     claim_dongle "$target" "$serial"
     if [ -n "$cur" ] && [ "$cur" != "$target" ]; then

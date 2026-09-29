@@ -43,6 +43,10 @@ CREATE DATABASE IF NOT EXISTS ghost;
 CREATE USER IF NOT EXISTS ghost IDENTIFIED BY 'ghost_local';
 GRANT ALL ON ghost.* TO ghost;
 
+CREATE DATABASE IF NOT EXISTS pocsag;
+CREATE USER IF NOT EXISTS pocsag IDENTIFIED BY 'pocsag_local';
+GRANT ALL ON pocsag.* TO pocsag;
+
 -- Cross-grant: the spectrum-acars feedback path (spectrum/acars_feedback.py)
 -- now runs against ONE server, so it can read acars.messages directly as the
 -- spectrum user instead of the old cross-instance HTTP hop. Read-only.

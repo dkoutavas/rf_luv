@@ -20,6 +20,7 @@ import time
 import socket
 import signal
 import logging
+import threading
 from io import StringIO
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -37,6 +38,11 @@ CH_USER = os.environ.get("CLICKHOUSE_USER", "adsb")
 CH_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "adsb_local")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "500"))
 FLUSH_INTERVAL = int(os.environ.get("FLUSH_INTERVAL_SECONDS", "5"))
+# readsb's tar1090 serves an enriched aircraft.json (registration, type, desc)
+# when TAR1090_ENABLE_AC_DB=true. META_URL points at that server; the meta
+# poller upserts adsb.aircraft_meta so we never copy the aircraft database here.
+META_URL = os.environ.get("META_URL", "http://ultrafeeder/data/aircraft.json")
+META_POLL_SECONDS = int(os.environ.get("META_POLL_SECONDS", "15"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -210,6 +216,58 @@ def parse_sbs_line(line: str) -> dict | None:
 
 # ─── Main loop ───────────────────────────────────────────
 
+def extract_meta(aircraft: list[dict]) -> list[dict]:
+    """Turn readsb aircraft.json entries into aircraft_meta rows.
+
+    Keeps only aircraft that carry at least one identity field (registration,
+    type, or description). `dbFlags` bit 0 is the military flag in readsb.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for a in aircraft:
+        hex_ident = (a.get("hex") or "").strip().upper()
+        if not hex_ident:
+            continue
+        reg = (a.get("r") or "").strip()
+        type_code = (a.get("t") or "").strip()
+        desc = (a.get("desc") or "").strip()
+        if not (reg or type_code or desc):
+            continue
+        rows.append({
+            "hex_ident": hex_ident,
+            "registration": reg,
+            "type_code": type_code,
+            "description": desc,
+            "category": (a.get("category") or "").strip(),
+            "mil": 1 if (a.get("dbFlags") or 0) & 1 else 0,
+            "last_seen": now,
+        })
+    return rows
+
+
+def poll_aircraft_meta():
+    """Poll readsb's aircraft.json over HTTP and upsert aircraft_meta.
+
+    Runs as a daemon thread so a slow or missing meta server never blocks the
+    SBS position ingest. ReplacingMergeTree(last_seen) collapses repeat rows.
+    """
+    while running:
+        try:
+            with urlopen(META_URL, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            rows = extract_meta(data.get("aircraft", []))
+            if rows:
+                payload = "\n".join(json.dumps(r) for r in rows)
+                clickhouse_query("INSERT INTO aircraft_meta FORMAT JSONEachRow", payload)
+        except Exception as e:
+            log.warning(f"aircraft_meta poll failed: {e}")
+        # Sleep in short slices so shutdown is prompt.
+        for _ in range(META_POLL_SECONDS):
+            if not running:
+                break
+            time.sleep(1)
+
+
 def wait_for_clickhouse(max_retries: int = 30, delay: int = 2):
     """Wait for ClickHouse to be ready."""
     for i in range(max_retries):
@@ -226,6 +284,10 @@ def main():
     global running
 
     wait_for_clickhouse()
+
+    # Enriched-metadata poller runs alongside the SBS position ingest.
+    meta_thread = threading.Thread(target=poll_aircraft_meta, daemon=True)
+    meta_thread.start()
 
     total_inserted = 0
     batch: list[dict] = []

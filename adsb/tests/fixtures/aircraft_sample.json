@@ -1,0 +1,35 @@
+{
+  "now": 1790000000.0,
+  "aircraft": [
+    {
+      "hex": "AAA111",
+      "flight": "AEE123 ",
+      "r": "SX-TEST",
+      "t": "A320",
+      "desc": "AIRBUS A-320",
+      "category": "A3",
+      "dbFlags": 0
+    },
+    {
+      "hex": "BBB222",
+      "flight": "RYR9AB ",
+      "t": "B738",
+      "desc": "BOEING 737-800"
+    },
+    {
+      "hex": "CCC333",
+      "flight": "",
+      "dbFlags": 1,
+      "r": "RS-MIL",
+      "t": "C130"
+    },
+    {
+      "hex": "DDD444",
+      "flight": "NOMETA1"
+    },
+    {
+      "lat": 1,
+      "lon": 2
+    }
+  ]
+}

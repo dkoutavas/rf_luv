@@ -101,6 +101,9 @@ services:
     environment:
       SBS_HOST: ultrafeeder
       SBS_PORT: "30003"
+      # Enriched aircraft.json (registration/type) served by tar1090 on :80.
+      META_URL: "http://ultrafeeder/data/aircraft.json"
+      META_POLL_SECONDS: "15"
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
       CLICKHOUSE_DB: adsb

@@ -141,7 +141,7 @@
       "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
       "targets": [
         {
-          "rawSql": "SELECT hex_ident, argMaxIf(callsign, timestamp, callsign != '') AS last_callsign, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions WHERE timestamp > now() - INTERVAL 30 MINUTE GROUP BY hex_ident HAVING last_callsign != '' ORDER BY last_seen DESC LIMIT 20",
+          "rawSql": "SELECT p.hex_ident, argMaxIf(callsign, timestamp, callsign != '') AS last_callsign, any(m.registration) AS registration, any(m.type_code) AS type, max(altitude) AS max_alt_ft, round(avg(ground_speed), 0) AS avg_speed_kts, count() AS msgs, max(timestamp) AS last_seen FROM adsb.positions p LEFT JOIN (SELECT hex_ident, registration, type_code FROM adsb.aircraft_meta FINAL) m ON p.hex_ident = m.hex_ident WHERE p.timestamp > now() - INTERVAL 30 MINUTE GROUP BY p.hex_ident HAVING last_callsign != '' ORDER BY last_seen DESC LIMIT 20",
           "format": 1
         }
       ]
@@ -216,6 +216,33 @@
           }
         ]
       }
+    },
+    {
+      "type": "barchart",
+      "title": "Airlines Today",
+      "description": "Unique aircraft per operator today, from the callsign's ICAO prefix (adsb.airlines lookup). '(?)' means the prefix is not in the lookup.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
+      "targets": [ { "rawSql": "SELECT coalesce(al.name, concat(substring(callsign, 1, 3), ' (?)')) AS airline, uniq(hex_ident) AS aircraft FROM adsb.positions LEFT JOIN adsb.airlines al ON substring(callsign, 1, 3) = al.icao3 WHERE timestamp > today() AND match(callsign, '^[A-Za-z]{3}') GROUP BY airline ORDER BY aircraft DESC LIMIT 20", "format": 1 } ],
+      "options": { "orientation": "horizontal" }
+    },
+    {
+      "type": "barchart",
+      "title": "Coverage by Bearing (max nm today)",
+      "description": "Farthest aircraft heard today per compass sector from the station. Shows which directions have clear sky; SW is toward Piraeus and the sea.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
+      "targets": [ { "rawSql": "SELECT multiIf(b < 22.5 OR b >= 337.5, 'N', b < 67.5, 'NE', b < 112.5, 'E', b < 157.5, 'SE', b < 202.5, 'S', b < 247.5, 'SW', b < 292.5, 'W', 'NW') AS sector, round(max(nm), 1) AS max_nm FROM (SELECT greatCircleDistance(23.736, 37.989, lon, lat) / 1852 AS nm, (degrees(atan2(lon - 23.736, lat - 37.989)) + 360) % 360 AS b FROM adsb.positions WHERE timestamp > today() AND lat IS NOT NULL) GROUP BY sector ORDER BY max_nm DESC", "format": 1 } ],
+      "fieldConfig": { "defaults": { "unit": "nmi" }, "overrides": [] }
+    },
+    {
+      "type": "table",
+      "title": "Notable Today (military / emergency squawk)",
+      "description": "Aircraft today flagged military in the readsb database, or squawking 7500 (hijack), 7600 (radio failure) or 7700 (emergency). Empty is the normal case.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 50 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_ADSB_CLICKHOUSE" },
+      "targets": [ { "rawSql": "SELECT p.hex_ident, anyLast(callsign) AS callsign, any(m.registration) AS registration, anyLast(squawk) AS squawk_code, max(m.mil) AS mil, max(timestamp) AS last_seen FROM adsb.positions p LEFT JOIN (SELECT hex_ident, registration, mil FROM adsb.aircraft_meta FINAL) m ON p.hex_ident = m.hex_ident WHERE p.timestamp > today() AND (squawk IN ('7500', '7600', '7700') OR m.mil = 1) GROUP BY p.hex_ident ORDER BY last_seen DESC LIMIT 50", "format": 1 } ],
+      "options": { "showHeader": true }
     }
   ],
   "refresh": "30s",

@@ -87,3 +87,22 @@ def test_quiet_gap_keeps_the_connection(monkeypatch):
     assert len(accepts) == 1
     assert [r["lat"] for r in inserted] == [37.9364, 37.9364]
 
+
+
+def test_extract_meta_from_aircraft_json():
+    import json as _json
+    fix = _json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "aircraft_sample.json")))
+    rows = ingest.extract_meta(fix["aircraft"])
+    by_hex = {r["hex_ident"]: r for r in rows}
+    # AAA111 has full identity
+    assert by_hex["AAA111"]["registration"] == "SX-TEST"
+    assert by_hex["AAA111"]["type_code"] == "A320"
+    assert by_hex["AAA111"]["description"] == "AIRBUS A-320"
+    assert by_hex["AAA111"]["category"] == "A3" and by_hex["AAA111"]["mil"] == 0
+    # BBB222 has type/desc but no registration
+    assert by_hex["BBB222"]["registration"] == "" and by_hex["BBB222"]["type_code"] == "B738"
+    # CCC333 dbFlags bit 0 -> military
+    assert by_hex["CCC333"]["mil"] == 1
+    # DDD444 (flight only, no r/t/desc) and the position-only entry are dropped
+    assert "DDD444" not in by_hex
+    assert len(rows) == 3

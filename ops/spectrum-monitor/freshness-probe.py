@@ -16,6 +16,8 @@ and notifies on state transitions:
     unplugged dongle → ABSENT, no alert (collection is session-based)
     rtl_tcp held by another client (SDR++) → IN_USE, no alert
     rtl_tcp stopped by `rf-mode listen` (readsb, rtl_fm over USB) → LISTEN, no alert
+    ClickHouse unreachable → one CRITICAL per outage (none while every
+        dongle is unplugged), one INFO when it answers again
 
 State persisted at /var/lib/spectrum-monitor/freshness.json so transitions
 are detected across runs.
@@ -231,14 +233,24 @@ def main():
         log_action(cfg, "ch_query_failed", error=fresh["_error"])
         # Treat ClickHouse-unreachable as a CRITICAL itself — the alerting
         # path doesn't go through ClickHouse so this still reaches the user.
-        notify(cfg, "CRITICAL", "rf_luv: ClickHouse unreachable",
-               message=f"freshness probe: {fresh['_error']}")
+        # Once per outage, like the transitions below, and only while a
+        # dongle is plugged in: with every dongle unplugged nothing collects,
+        # so a stopped ClickHouse loses no data.
+        plugged = any(os.path.lexists(os.path.join(cfg["DEV_DIR"], f"rtl_sdr_{d}"))
+                      for d in expected)
+        if plugged and not state.get("ch_alerted"):
+            notify(cfg, "CRITICAL", "rf_luv: ClickHouse unreachable",
+                   message=f"freshness probe: {fresh['_error']}")
+            state["ch_alerted"] = True
         state.setdefault("dongles", {})
         state["last_check_ts"] = now
         state["last_error"] = fresh["_error"]
         save_state(cfg, state)
         return
 
+    if state.pop("ch_alerted", False):
+        notify(cfg, "INFO", "rf_luv: ClickHouse recovered",
+               message=f"freshness probe query works again (was: {state.get('last_error')})")
     state["last_error"] = ""
 
     # Walk expected dongles even if missing from query (no rows in 6h = stale).

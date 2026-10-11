@@ -28,7 +28,8 @@ def _run(plugged_seconds_ago, stale_sec, ticks=((),)):
     """Run main() for dongle v4-01, once per entry in `ticks`, sharing one
     state file. Each tick is the list of foreign rtl_tcp clients seen then
     (empty = only our own scanner, or nobody), or a number: an `rf-mode
-    listen` marker written that many seconds ago, with no clients.
+    listen` marker written that many seconds ago, with no clients, or None:
+    ClickHouse is unreachable that tick.
     plugged_seconds_ago=None means the dongle is unplugged.
     Returns (last level in state, alert levels sent)."""
     alerts = []
@@ -50,10 +51,13 @@ def _run(plugged_seconds_ago, stale_sec, ticks=((),)):
                    STATE_FILE=str(Path(tmp, "state.json")),
                    ACTION_LOG=str(Path(tmp, "actions.log")))
         probe.load_env = lambda: cfg
-        probe.query_freshness = lambda cfg: {"v4-01": stale_sec}
         probe.notify = lambda cfg, level, title, message="": alerts.append(level)
         for tick in ticks:
-            clients = tick
+            if tick is None:
+                probe.query_freshness = lambda cfg: {"_error": "Connection refused"}
+            else:
+                probe.query_freshness = lambda cfg: {"v4-01": stale_sec}
+            clients = tick or []
             if isinstance(tick, (int, float)):
                 marker.touch()
                 t = time.time() - tick
@@ -136,6 +140,23 @@ def test_first_tick_after_usb_listen_starts_ok():
     level, alerts = _run(plugged_seconds_ago=3600, stale_sec=SIX_HOURS,
                          ticks=[60, []])
     assert level == "OK"
+    assert alerts == []
+
+
+def test_clickhouse_down_alerts_once_then_recovers():
+    # ClickHouse stopped mid-session: one CRITICAL, not one per 5 min tick,
+    # then one INFO when it answers again
+    level, alerts = _run(plugged_seconds_ago=3600, stale_sec=30,
+                         ticks=[None, None, None, []])
+    assert level == "OK"
+    assert alerts == ["CRITICAL", "INFO"]
+
+
+def test_clickhouse_down_while_unplugged_does_not_alert():
+    # No session running, so nothing is lost while ClickHouse is down
+    level, alerts = _run(plugged_seconds_ago=None, stale_sec=30,
+                         ticks=[None, None, []])
+    assert level == "ABSENT"
     assert alerts == []
 
 

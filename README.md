@@ -166,6 +166,13 @@ overload the dongle above gain 12 indoors, and above about 3.7 on an outdoor
 antenna. Use the FM bandstop filter on the scanner dongle and start with low
 gain; the scanner also steps its gain down by itself when a sweep clips.
 
+## Tests
+
+`bash scripts/run-tests.sh` runs every suite in the repo. The suites use fakes,
+so they need only pytest and numpy. No dongle, Docker or ClickHouse is
+involved. GitHub Actions runs the same script on Python 3.12 and 3.13 for every
+pull request and every push to `main` ([tests.yml](.github/workflows/tests.yml)).
+
 ## Reference
 
 | Document | What it covers |

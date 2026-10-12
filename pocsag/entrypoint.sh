@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eo pipefail
+set -euo pipefail
 # POCSAG runs USB-mode, like ADS-B: rtl_fm cannot read rtl_tcp on this
 # hardware, so pipeline.sh frees the dongle with `rf-mode listen` first and
 # this container opens it directly over USB.

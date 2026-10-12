@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eo pipefail
+set -euo pipefail
 # ACARS ingest entrypoint:
 #   1. wait for ClickHouse + apply numbered migrations (idempotent)
 #   2. exec the UDP listener

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eo pipefail
+set -euo pipefail
 # Apply schema migrations, then run the reader piped into the ingest worker.
 # pipefail ensures we exit if the reader crashes (not just if ingest fails),
 # mirroring ism's rtl_433 pipe: reader exit tears down the container.

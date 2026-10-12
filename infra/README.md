@@ -45,7 +45,7 @@ From another machine, use an SSH tunnel:
 One server hosts nine databases. Each pipeline keeps its own database and its own
 least-privilege user, created by `clickhouse/bootstrap.sql` (PHASE 1):
 
-- nine databases + nine users; **user name == db name**, **password ==
+- nine databases + nine users. **user name == db name**, **password ==
   `<db>_local`**, `GRANT ALL ON <db>.*`. This is the same credential convention
   every pipeline's config already defaults to, so nothing downstream changes.
 - one extra cross-grant: `GRANT SELECT ON acars.* TO spectrum`, so the

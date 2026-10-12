@@ -18,7 +18,7 @@ The lock file path is the rendezvous point. Every consumer that wants exclusive 
 
 ## When you actually need this
 
-Most decoders DON'T. The two-dongle layout already gives parallelism (V3 + V4); a decoder that holds a dongle for a whole session (ACARS, AIS, RDS, ISM through `pipeline.sh`) runs without ever touching the coordinator.
+Most decoders DON'T. The two-dongle layout already gives parallelism (V3 + V4). A decoder that holds a dongle for a whole session (ACARS, AIS, RDS, ISM through `pipeline.sh`) runs without ever touching the coordinator.
 
 You need the coordinator when:
 

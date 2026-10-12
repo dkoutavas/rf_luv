@@ -17,7 +17,9 @@ if ! "$PY" -m pytest --version >/dev/null 2>&1; then
     exit 2
 fi
 
+# .venv: a pipeline venv holds numpy's own test dirs, which need hypothesis.
 mapfile -t suites < <(find . -path ./graphify-out -prune -o -path ./docs -prune -o \
+                           -path '*/.venv' -prune -o \
                            -type d -name tests -print | sort)
 echo "suites: ${suites[*]}"
 exec "$PY" -m pytest -q -p no:cacheprovider "${suites[@]}" "$@"

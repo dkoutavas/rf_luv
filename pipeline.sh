@@ -7,7 +7,7 @@
 #   ./pipeline.sh logs <pipe>             tail the pipeline's container logs (no follow)
 #   ./pipeline.sh ps <pipe>               show the pipeline's container status
 #
-# Valid pipes: acars adsb ais ism rds.  (Plus:  ./pipeline.sh demo)
+# Valid pipes: acars adsb ais ism rds pocsag.  (Plus:  ./pipeline.sh demo)
 #   - [serial] picks the dongle (default v4-01). Its rtl_tcp port comes from
 #     /etc/rtl-scanner/<serial>.env and reaches the overlay as RTL_TCP_PORT.
 #   - rtl_tcp serves one client at a time and the scanner holds its connection,
@@ -15,9 +15,10 @@
 #     resumes it (ops/rf-mode scan). Pass the same serial to up and down.
 #   - rds decodes the 57 kHz RDS subcarrier and needs a dongle with no FM notch:
 #     since 2026-09-26 that is the V3, so: ./pipeline.sh up rds v3-01
-#   - adsb opens the dongle over USB: readsb has no rtl_tcp input. 'up' stops
-#     rtl_tcp for that serial (ops/rf-mode listen --force, which also stops the
-#     scanner) and 'down' starts it again (ops/rf-mode scan).
+#   - adsb and pocsag open the dongle over USB: readsb has no rtl_tcp input,
+#     and rtl_fm cannot read rtl_tcp. 'up' stops rtl_tcp for that serial
+#     (ops/rf-mode listen --force, which also stops the scanner) and 'down'
+#     starts it again (ops/rf-mode scan).
 #   - The spectrum scanner is not a pipe: it runs natively under systemd
 #     (rtl-scanner@<serial>, ops/rtl-scanner).
 #

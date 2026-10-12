@@ -10,7 +10,7 @@ set -euo pipefail
 #   $BACKUP_DIR                                                 (snapshot target)
 #
 # Prerequisites:
-#   - The pipeline ClickHouse stacks running (docker compose up -d per pipeline)
+#   - The shared ClickHouse running (bash infra/up.sh)
 #   - The invoking user in the `docker` group (the timer runs `docker exec`)
 #   - `rf-notify` installed (ops/install-trip-hardening.sh) for failure alerts
 #     [optional: backup still runs without it]

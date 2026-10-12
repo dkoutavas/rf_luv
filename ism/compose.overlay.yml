@@ -1,17 +1,20 @@
 # ISM Band Device Monitoring Pipeline (overlay)
-# rtl_433 (decoder) -> ism_ingest.py (JSON->ClickHouse)
+# rtl_433 (decoder) -> ism_ingest.py (JSON->ClickHouse), one container.
 #
 # This is a ROTATING pipeline overlay. The always-on data layer
 # (shared ClickHouse + Grafana) lives in infra/compose.yml as the
-# rf_luv_infra project. Bring infra up first, then this overlay:
-#   docker compose -f infra/compose.yml up -d
-#   docker compose -f ism/compose.overlay.yml up -d
+# rf_luv_infra project. Bring it up with pipeline.sh, not docker compose:
+#   bash infra/up.sh
+#   bash pipeline.sh up ism <serial>     # pauses that dongle's scanner
 #   open http://localhost:3000 for Grafana dashboards (shared)
+#   bash pipeline.sh down ism <serial>   # resumes that dongle's scanner
 #
-# Dongle: rotating decoders point at the V4 dongle on
-# host.docker.internal:1234 — the same V4 the native systemd spectrum
-# scanner owns; these rotating decoders time-share it via the coordinator.
-#   Native Omen host: rtl_tcp runs as rtl-tcp@v4-01.service on :1234.
+# Dongle: rtl_433 is an rtl_tcp client on host.docker.internal:${RTL_TCP_PORT}.
+# pipeline.sh reads the port from /etc/rtl-scanner/<serial>.env. rtl_tcp serves
+# one client at a time, so pipeline.sh pauses rtl-scanner@<serial> for the
+# session. The decoder does not take the rtl-coordinator lock.
+# 433.92 MHz is UHF, so the water-damaged V4 works too. readsb holds the V4
+# over USB while ADS-B is up, so take ADS-B down first.
 #
 # Decodes weather stations, tire sensors, doorbells, remotes, etc.
 # at 433.92 MHz. Dipole arms ~16.4 cm, vertical, at window.

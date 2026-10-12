@@ -3,10 +3,11 @@
 #
 # This is a ROTATING pipeline overlay. The always-on data layer
 # (shared ClickHouse + Grafana) lives in infra/compose.yml as the
-# rf_luv_infra project. Bring infra up first, then this overlay:
-#   docker compose -f infra/compose.yml up -d
-#   docker compose -f rds/compose.overlay.yml up -d
+# rf_luv_infra project. Bring it up with pipeline.sh, not docker compose:
+#   bash infra/up.sh
+#   bash pipeline.sh up rds v3-01      # pauses the V3 scanner
 #   open http://localhost:3000 for Grafana dashboards (shared)
+#   bash pipeline.sh down rds v3-01    # resumes the V3 scanner
 #
 # Dongle: start it with `./pipeline.sh up rds <serial>`, which exports
 # RTL_TCP_PORT and RDS_DONGLE_ID for that dongle and pauses its scanner. RDS

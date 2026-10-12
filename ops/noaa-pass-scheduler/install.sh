@@ -10,7 +10,7 @@ set -euo pipefail
 #   /var/lib/noaa/                                               state dir
 #
 # Prerequisites:
-#   - noaa/ pipeline ClickHouse stack running (docker compose up -d in noaa/)
+#   - the shared data layer up (bash infra/up.sh), which creates the noaa db
 #   - python3 + orbit-predictor pip package installed:
 #       pip install --user --break-system-packages orbit-predictor==1.15.2
 #     (--break-system-packages: Tumbleweed marks the system Python as

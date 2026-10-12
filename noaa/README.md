@@ -60,16 +60,15 @@ path is still a scaffold, so the scanner has never actually seen a held lock
 
 | File | Status | Notes |
 |---|---|---|
-| `clickhouse/migrations/001_init.sql` | ✅ Production-ready | passes table + pass_latest + monthly_summary |
-| migrations | ✅ Production-ready | Applied by the shared runner `infra/migrate.py noaa` from the infra bootstrap |
+| `clickhouse/migrations/001_init.sql` | ✅ Production-ready | `passes`, `pass_latest` and `monthly_summary`. The infra bootstrap applies it into the shared ClickHouse (`noaa` database) through `infra/migrate.py noaa`. |
 | `scheduler.py` | 🟡 Scaffold | TLE reading, orbit-predictor integration, INSERT logic all in place. **NOAA_DRY_RUN=1 by default** so it doesn't fire systemd-run yet. |
 | `recorder.py` | 🟡 Scaffold | CLI parsing, status updates, lock-acquisition stub all in place. **rtl-tcp service stop/start orchestration is intentionally NOT implemented** - needs operator review. Current behaviour: marks the pass as `failed` with a clear scaffold note. |
-| schema (`clickhouse/migrations/`) | ✅ Production-ready | Applied into the shared ClickHouse (`noaa` database) by the infra ch-bootstrap; no per-pipeline ClickHouse or Grafana anymore. |
-| `grafana/provisioning/` | ✅ Production-ready | NOAA Overview dashboard (passes table, daily count, by-satellite bar chart, decode rate), provisioned from `infra/grafana/` into the shared Grafana NOAA folder. |
-| `tle_refresh.sh` | ❌ TODO | Should pull NOAA + METEOR TLEs from celestrak weekly. |
-| `env.v4-01.example` | ❌ TODO | Per-host overrides (RX lat/lon, gain, decoder choice). |
-| `DEPLOY.md` | ❌ TODO | The V4 takeover dance is more delicate than ACARS - has to coordinate with the running scanner. |
-| `../ops/noaa-pass-scheduler/` | ❌ TODO | Hourly systemd timer that runs `scheduler.py`. |
+| `tle_refresh.sh` | ✅ Built | Fetches TLEs from celestrak by NORAD catalog number into `/var/lib/noaa/tles.txt`: NOAA 15, 18 and 19 and METEOR-M2 3 and 4. Keeps the old file when every fetch fails. |
+| `../ops/noaa-pass-scheduler/` | ✅ Built | `install.sh` and four user units. `noaa-pass-scheduler.timer` runs `scheduler.py` hourly at :05. `noaa-tle-refresh.timer` runs `tle_refresh.sh` on Mondays at 03:00 UTC and 2 min after boot. The service sets `NOAA_DRY_RUN=1`. A value in `/etc/rtl-scanner/noaa-scheduler.env` overrides it. |
+| `tests/test_scheduler.py` | ✅ | Pass de-duplication (`already_scheduled`). Runs in `scripts/run-tests.sh`. |
+| Dashboard | ✅ Production-ready | NOAA Overview (passes table, daily count, by-satellite bar chart, decode rate) in `infra/grafana/provisioning/dashboards/json/noaa/`, provisioned into the shared Grafana NOAA folder. |
+| `env.v4-01.example` | ❌ TODO | Per-host overrides (RX lat/lon, gain, decoder choice). The scheduler unit already reads `/etc/rtl-scanner/noaa-scheduler.env` when it exists. |
+| `DEPLOY.md` | ❌ TODO | The dongle takeover is more delicate than ACARS because it has to coordinate with the running scanner. |
 
 ## Status (lifecycle of a pass row)
 
@@ -89,8 +88,10 @@ shows the truth, even if the scheduler/recorder restart mid-pass.
 
 In rough dependency order:
 
-1. **`tle_refresh.sh`** - weekly cron pulling fresh TLEs from
-   `celestrak.org/NORAD/elements/weather.txt` to `/var/lib/noaa/tles.txt`.
+Done since the scaffold: `tle_refresh.sh` and the hourly and weekly timers in
+`ops/noaa-pass-scheduler/`.
+
+1. **Re-scope to Meteor-M LRPT.** NOAA APT is gone (see the note at the top).
 2. **rtl-tcp orchestration** in `recorder.py` - the actual
    `systemctl stop rtl-tcp@v4-01.service` / `rtl_fm` / `systemctl start`
    sequence. Needs operator review of the failure modes (what if rtl_fm
@@ -104,9 +105,8 @@ In rough dependency order:
    non-blocking or timeout lock mode here, not `mode="wait"` — a pass is a
    hard AOS/LOS window, and blocking forever on a stuck holder would miss it
    silently.
-4. **`tle_refresh.sh` + `noaa-pass-scheduler.{service,timer}`** under
-   `ops/noaa-pass-scheduler/` - hourly invocation of `scheduler.py` with
-   `NOAA_DRY_RUN=0`.
+4. **Flip `NOAA_DRY_RUN=0`** in `/etc/rtl-scanner/noaa-scheduler.env`, once
+   items 1 to 3 are done. The timers already run hourly and weekly.
 5. **`scheduler.py`'s systemd-run** - currently prints intended commands
    in dry-run mode; flip to actually invoking `systemd-run --user
    --on-calendar=...` so passes auto-fire at AOS-30s.

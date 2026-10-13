@@ -19,6 +19,11 @@ git, put in a shared screenshot, pushed off-host, or published in any form.
 Every test in this directory uses synthetic capcodes and made-up text. Treat
 the captured content as private data that stays on the machine.
 
+The daily ClickHouse backup (`ops/clickhouse-backup/`) includes the `pocsag`
+database. That holds only while `BACKUP_DIR` is a disk inside this host, as it
+is on the Omen. If the backup target ever moves off-host, remove `pocsag` from
+`DATABASES` in `/etc/rtl-scanner/clickhouse-backup.env` first.
+
 ## How it runs
 
 USB mode, like ADS-B. `rtl_fm` cannot read rtl_tcp on this hardware, so the

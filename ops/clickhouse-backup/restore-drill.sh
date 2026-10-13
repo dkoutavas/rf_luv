@@ -25,7 +25,7 @@ ENV_FILE="${CLICKHOUSE_BACKUP_ENV:-/etc/rtl-scanner/clickhouse-backup.env}"
 # shellcheck disable=SC1090
 [ -r "$ENV_FILE" ] && . "$ENV_FILE"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rf-clickhouse}"
-DATABASES="${*:-${DATABASES:-spectrum acars adsb ais ism noaa rds ghost}}"
+DATABASES="${*:-${DATABASES:-spectrum acars adsb ais ism noaa rds ghost pocsag}}"
 
 # CH_ADMIN_PASSWORD for the drill server's default user, from the infra env.
 # shellcheck disable=SC1091

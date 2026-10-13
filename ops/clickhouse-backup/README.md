@@ -65,7 +65,7 @@ Defaults (all overridable in the env file):
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `BACKUP_DIR` | `/var/backups/rf-clickhouse` | snapshot target (set off-host) |
-| `DATABASES` | all eight | space-separated db list |
+| `DATABASES` | all nine | space-separated db list. Drop `pocsag` for an off-host `BACKUP_DIR` |
 | `RETENTION_DAYS` | `14` | prune snapshots older than this |
 | `<DB>_PASSWORD` | `<db>_local` | per-db password override |
 
@@ -116,8 +116,13 @@ topic is set, else a desktop popup.
 
 - Logical (per-table) backup, not physical. Fine for this scale (<5 GB);
   restore time is an insert, not a file copy.
-- All eight databases live in the one shared ClickHouse (`infra/`), so the
+- All nine databases live in the one shared ClickHouse (`infra/`), so the
   default `DATABASES` list covers every pipeline, including ones with no data
   yet.
+- `pocsag` holds decoded pager text, which must never leave this host (see
+  `pocsag/README.md`). It is in the default list because the Omen backs up to
+  an internal disk (`/data/rf-clickhouse-backups`). Before pointing
+  `BACKUP_DIR` at a NAS, an external drive that travels, or a cloud bucket,
+  remove `pocsag` from `DATABASES` in the env file.
 - This is disaster recovery, not point-in-time: granularity is one snapshot per
   day (per `OnCalendar`).

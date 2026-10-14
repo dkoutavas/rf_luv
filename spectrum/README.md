@@ -135,6 +135,10 @@ They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{servi
 
 **TETRA network map.** Every emitter with TETRA evidence (the classifier says `tetra`, it sits in a TETRA allocation, or `listening_log` or `known_frequencies` names it TETRA) gets a network: `public_safety` (380-400 MHz), `civil` (410-430 MHz) or `other`. An `other` carrier is a finding, kept and marked. `tetra_carriers` lists them with continuous or bursty mode, duty by hour of day and hours observed. `tetra_networks` and `tetra_network_hourly` summarize per network. The primary dongle (`dongle_roles`, the V3) is the source of truth, artifact suspects stay off the map, and no view shows a level. This is occupancy from sweep data only. Nothing captures, demodulates or decodes TETRA.
 
+**Occupancy atlas (M1).** `occupancy_hourly` gives, per dongle, 1 MHz band and hour, the share of the sweeps that measured the band in which the peak detector fired there. Two materialized views on `scans` and `peaks` fill `occupancy_hourly_cells` at insert time, and `sweep_health` supplies the sweep counts, so only swept time counts and a session gap has no cells at all. Peaks are counted raw, so spurs add some false occupancy.
+
+**Dashboard.** The Listening Playbook (Grafana, Spectrum folder) has panels for the signal of the day, active emitters, today's anomalies, the TETRA networks and carriers, TETRA activity by hour of day, and the occupancy atlas as a band-by-hour heatmap.
+
 A fourth, `analysis/detect_compression.py`, is a one-shot/backfill tool - runnable manually for archaeology, no production timer.
 
 ## Helper Scripts

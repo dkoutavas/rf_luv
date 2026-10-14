@@ -31,6 +31,7 @@ import anomalies
 import db
 import emitters
 import migrate
+import sweep_grid
 from tests import ch_twin
 from tests import emitter_world as world
 from tests import synth_sweeps as synth
@@ -196,3 +197,36 @@ def test_the_job_sends_no_digest_when_nothing_was_swept(monkeypatch):
     assert anomalies.run(send=True) == []
     assert sent == []
     assert db.query_scalar("SELECT count() FROM spectrum.anomalies") == before
+
+
+def _occupancy_rows():
+    return db.query_rows("SELECT dongle_id, band_mhz, toUnixTimestamp(hour) AS hour, swept_sweeps, "
+                         "active_sweeps, active_pct FROM spectrum.occupancy_hourly "
+                         "ORDER BY dongle_id, band_mhz, hour")
+
+
+def test_occupancy_atlas_from_the_views_and_from_the_backfill():
+    # The fixture has no scans. Write every bin of every sweep, the way the
+    # scanner does, so the swept-side view fires on real inserts.
+    for preset, labels in ((p, sweep_grid.bin_labels(p)) for p in sweep_grid.PRESETS):
+        db.query("INSERT INTO spectrum.scans (timestamp, freq_hz, power_dbfs, sweep_id, run_id, dongle_id) "
+                 f"SELECT timestamp, arrayJoin([{','.join(map(str, labels))}]), toFloat32(-60), sweep_id, "
+                 f"run_id, dongle_id FROM spectrum.sweep_health WHERE preset = '{preset}'", timeout=300)
+    expected = ch_twin.occupancy(FIXTURE.peaks, FIXTURE.sweep_health)
+    from_views = _occupancy_rows()
+    assert len(from_views) == len(expected)
+    for got, want in zip(from_views, expected):
+        assert _close(got, want), (got, want)
+    # The gap day has no cells at all, not cells at 0 %.
+    gap = int(synth.START.timestamp()) + synth.GAP_DAY * 86400
+    assert not [r for r in from_views if gap <= int(r["hour"]) < gap + 86400]
+
+    # Rebuild from history with the migration's own backfill statements.
+    db.query("TRUNCATE TABLE spectrum.occupancy_hourly_cells")
+    sql = (SPECTRUM / "clickhouse" / "migrations" / "029_occupancy_hourly.sql").read_text()
+    backfill = [st for st in migrate.split_sql_statements(sql)
+                if "INSERT INTO spectrum.occupancy_hourly_cells" in st]
+    assert len(backfill) == 2
+    for st in backfill:
+        db.query(st, timeout=300)
+    assert _occupancy_rows() == from_views

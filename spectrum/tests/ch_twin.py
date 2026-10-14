@@ -121,3 +121,20 @@ def levels(peaks: list[dict], sweep_health: list[dict],
             "last_at": max(c["ts"] for c in cells),
         })
     return out
+
+
+def occupancy(peaks: list[dict], sweep_health: list[dict]) -> list[dict]:
+    """The occupancy_hourly view (migration 029), when every sweep wrote all of its preset's bins."""
+    import sweep_grid
+    bands = {p: sorted({f // 1_000_000 for f in sweep_grid.bin_labels(p)}) for p in sweep_grid.PRESETS}
+    swept = defaultdict(int)
+    for h in sweep_health:
+        hour = emitters.floor_hour(_ts(h["timestamp"]))
+        for band in bands[h["preset"]]:
+            swept[(h["dongle_id"], band, hour)] += 1
+    active = defaultdict(set)
+    for p in peaks:
+        active[(p["dongle_id"], p["freq_hz"] // 1_000_000, emitters.floor_hour(_ts(p["timestamp"])))].add(p["sweep_id"])
+    return [{"dongle_id": d, "band_mhz": b, "hour": hour, "swept_sweeps": s,
+             "active_sweeps": len(active[(d, b, hour)]), "active_pct": round(100 * len(active[(d, b, hour)]) / s, 1)}
+            for (d, b, hour), s in sorted(swept.items())]

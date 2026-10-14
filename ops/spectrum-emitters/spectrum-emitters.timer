@@ -1,0 +1,17 @@
+[Unit]
+Description=Run rf_luv emitter clustering every 15 minutes, after the classifier
+
+[Timer]
+# Every 15 min at 50 s past the quarter hour. The classifier fires at :30 s
+# and its health check at :45 s of minutes 0/5/10/..., so this run reads
+# fresh classifications. Why not every 5 min like them: a bin needs peaks in
+# 3 sweeps to seed an emitter, and a full sweep comes every 280 s, so a new
+# transmitter takes about 14 minutes to qualify. A faster run would mostly
+# rewrite the same list. `rf.py now` reads fresh peaks itself, so the
+# 15-minute lag never hides what is on air.
+OnCalendar=*:0/15:50
+Unit=spectrum-emitters.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

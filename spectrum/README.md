@@ -113,8 +113,11 @@ Three Python scripts run on a 5-minute cadence as systemd user timers - they rea
 | `feature_extractor.py` | `peaks`, `scans`, `sweep_health`, `allocations` | `peak_features` | 5 min |
 | `classifier.py` | `peak_features`, `known_frequencies`, `allocations`, `signal_classes`, `listening_log` | `signal_classifications` | 5 min |
 | `classifier_health.py` | `signal_classifications`, baselines | `classifier_health` | 5 min |
+| `emitters.py` | `peaks`, `sweep_health`, `signal_classifications`, the naming tables | `emitters` | 15 min |
 
-They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/<file>.py` (Tumbleweed's `python3` is 3.13). Status: `systemctl --user list-timers | grep spectrum-`.
+They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}` and `spectrum-emitters.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/<file>.py` (Tumbleweed's `python3` is 3.13). Status: `systemctl --user list-timers | grep spectrum-`.
+
+`emitters.py` turns per-bin peaks into emitters: one transmitter as one dongle sees it, a cluster of adjacent bins that peaks across many sweeps. Each emitter has a stable ID, duty cycles over swept time only, a name (operator log first, then known frequencies, the classifier, the allocation) and an `artifact_suspect` flag for the dongle's own spurs. Read `emitters_current` for the latest list and `emitters_merged` for both dongles side by side, primary first. `python3 spectrum/emitters.py --dry-run` prints the list without writing.
 
 A fourth, `analysis/detect_compression.py`, is a one-shot/backfill tool - runnable manually for archaeology, no production timer.
 

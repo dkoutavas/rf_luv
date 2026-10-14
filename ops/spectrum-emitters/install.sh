@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# spectrum-emitters installer: user-systemd timer that clusters persistent
+# peaks into named emitters every 15 minutes (spectrum/emitters.py).
+#
+# Idempotent. Mirrors ops/spectrum-classifier/install.sh. Needs migration 026,
+# so run `bash infra/up.sh` first.
+#
+# Run on the host after `git pull`:
+#   bash ops/spectrum-emitters/install.sh
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+info() { echo -e "${GREEN}[✓]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+err()  { echo -e "${RED}[✗]${NC} $*"; }
+step() { echo -e "\n${GREEN}===${NC} $* ${GREEN}===${NC}"; }
+
+SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+USER_UNIT_DIR="$HOME/.config/systemd/user"
+REPO_DIR="$(cd "$SRC_DIR/../.." && pwd)"
+SCRIPT="$REPO_DIR/spectrum/emitters.py"
+
+if [ ! -f "$SCRIPT" ]; then
+    err "emitters.py not found at $SCRIPT"
+    exit 1
+fi
+
+step "Install user systemd units"
+mkdir -p "$USER_UNIT_DIR"
+install -m 0644 "$SRC_DIR/spectrum-emitters.service" "$USER_UNIT_DIR/"
+install -m 0644 "$SRC_DIR/spectrum-emitters.timer"   "$USER_UNIT_DIR/"
+systemctl --user daemon-reload
+info "$USER_UNIT_DIR"
+
+step "Enable + start timer"
+systemctl --user enable --now spectrum-emitters.timer
+info "spectrum-emitters.timer active"
+
+step "Smoke test: run the emitter job once, now"
+if systemctl --user start --wait spectrum-emitters.service; then
+    info "one-shot run completed"
+else
+    warn "one-shot run failed, check the logs:"
+    warn "  journalctl --user -u spectrum-emitters -n 50"
+fi
+
+step "Status"
+systemctl --user list-timers --no-pager spectrum-emitters.timer || true
+echo
+systemctl --user --no-pager status spectrum-emitters.service | head -10 || true
+
+echo
+echo "Logs:    journalctl --user -u spectrum-emitters -f"
+echo "Preview: /usr/bin/python3 $SCRIPT --dry-run"

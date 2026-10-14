@@ -184,8 +184,8 @@ def gone_quiet(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]], win
                now: int) -> Anomaly | None:
     """Silent through GONE_QUIET_SWEPT_HOURS swept hours, the Nth of them inside the window.
 
-    Only hours with covering sweeps count. Reported once: at the moment the
-    Nth silent swept hour completes. Longer silence later does not report
+    Only complete hours with covering sweeps count. Reported once: at the
+    moment the Nth silent swept hour completes. Longer silence later does not report
     again.
 
     The expected number of peaks follows the emitter's own hour-of-day
@@ -193,11 +193,12 @@ def gone_quiet(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]], win
     night. Hours of day it was never swept at predict nothing.
     """
     first_hour, last_hour = floor_hour(act.first_seen), floor_hour(act.last_seen)
-    silent = sorted(h for h, (s, _) in hours.items() if h > last_hour and s > 0)
+    # Complete hours only: the emitter may still peak later in the current hour.
+    silent = sorted(h for h, (s, _) in hours.items() if last_hour < h < floor_hour(now) and s > 0)
     if len(silent) < GONE_QUIET_SWEPT_HOURS:
         return None
     nth = silent[:GONE_QUIET_SWEPT_HOURS]
-    onset = min(nth[-1] + 3600, now)
+    onset = nth[-1] + 3600
     if onset < window_start:
         return None
     hod_sweeps = [0] * 24
@@ -543,7 +544,8 @@ def run(send: bool = False, dry_run: bool = False) -> list[Anomaly]:
     roles = {r["dongle_id"]: Role(bool(r["is_primary"]), bool(r["levels_trusted"]))
              for r in db.query_rows(ROLES_SQL)}
     coverage_rows = [emitters.CoverageRow(r["dongle_id"], r["preset"], int(r["hour"]),
-                                          int(r["sweeps"]), int(r["clipped_sweeps"]))
+                                          int(r["gain_tenths"]), int(r["sweeps"]),
+                                          int(r["clipped_sweeps"]))
                      for r in db.query_rows(emitters.coverage_sql())]
     found: list[Anomaly] = []
     pick = None

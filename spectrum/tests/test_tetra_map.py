@@ -20,19 +20,25 @@ def _refs(**kw):
 
 def test_each_kind_of_evidence_on_its_own():
     f = 405_990_000
-    assert emitters.tetra_evidence("tetra", f, f, f, _refs()) == ["class"]
-    assert emitters.tetra_evidence("", 391_454_000, 391_454_000, 391_454_000, _refs()) == ["allocation"]
+    assert emitters.tetra_evidence(frozenset({"tetra"}), f, f, f, _refs()) == ["class"]
+    assert emitters.tetra_evidence(frozenset(), 391_454_000, 391_454_000, 391_454_000, _refs()) == ["allocation"]
     named = _refs(known_frequencies=[{"freq_hz": 406_000_000, "name": "x", "class_id": "tetra"}])
-    assert emitters.tetra_evidence("", f, f, f, named) == ["named"]
+    assert emitters.tetra_evidence(frozenset(), f, f, f, named) == ["named"]
     logged = _refs(listening_log=[{"freq_hz": 406_050_000, "ts": 0, "label": "x", "class_id": "tetra"}])
-    assert emitters.tetra_evidence("", f, f, f, logged) == ["named"]
-    assert emitters.tetra_evidence("nfm_voice_repeater", 300_000_000, 300_000_000, 300_000_000, _refs()) == []
+    assert emitters.tetra_evidence(frozenset(), f, f, f, logged) == ["named"]
+    assert emitters.tetra_evidence(frozenset({"nfm_voice_repeater"}), 300_000_000, 300_000_000, 300_000_000, _refs()) == []
+
+
+def test_any_tetra_label_among_the_bins_is_evidence():
+    # The top label is unknown_continuous, a weaker bin says tetra: still TETRA.
+    labels = frozenset({"unknown_continuous", "tetra"})
+    assert emitters.tetra_evidence(labels, 405_990_000, 405_990_000, 406_090_000, _refs()) == ["class"]
 
 
 def test_a_name_more_than_one_bin_away_is_not_evidence():
     f = 405_990_000
     far = _refs(known_frequencies=[{"freq_hz": 406_100_000, "name": "x", "class_id": "tetra"}])
-    assert emitters.tetra_evidence("", f, f, f, far) == []
+    assert emitters.tetra_evidence(frozenset(), f, f, f, far) == []
 
 
 def test_networks_by_band():

@@ -235,10 +235,11 @@ def assign_ids(dongle_id: str, clusters: list[Cluster], previous: list[Previous]
 
 @dataclass(frozen=True)
 class CoverageRow:
-    """Sweeps one dongle made of one preset in one clock hour."""
+    """Sweeps one dongle made of one preset in one clock hour at one gain."""
     dongle_id: str
     preset: str
     hour: int            # unix seconds, start of the hour
+    gain_tenths: int     # tuner gain in tenths of a dB, as sweep_health stores it
     sweeps: int
     clipped_sweeps: int
 
@@ -269,6 +270,18 @@ class Coverage:
             self._cache[key] = out
         return self._cache[key]
 
+    def by_gain(self, dongle_id: str, freq_hz: int, first_hour: int,
+                last_hour: int) -> dict[int, tuple[int, int]]:
+        """{gain: (sweeps, clipped sweeps)} covering freq_hz from first_hour to last_hour."""
+        presets = set(sweep_grid.presets_covering(freq_hz))
+        out: dict[int, tuple[int, int]] = {}
+        for r in self._rows:
+            if (r.dongle_id == dongle_id and r.preset in presets and r.sweeps > 0
+                    and first_hour <= r.hour <= last_hour):
+                sweeps, clipped = out.get(r.gain_tenths, (0, 0))
+                out[r.gain_tenths] = (sweeps + r.sweeps, clipped + r.clipped_sweeps)
+        return out
+
 
 # ─── Activity (the numerators) ──────────────────────────────
 
@@ -278,7 +291,6 @@ class Activity:
     """Peaks that fell inside one emitter's footprint, summed over the cube."""
     hits: int = 0                 # sweeps with a peak in the footprint
     hits_recent: int = 0
-    hits_clipped: int = 0
     first_seen: int | None = None
     last_seen: int | None = None
     power_max: float = float("-inf")
@@ -287,14 +299,15 @@ class Activity:
     hod_hits: list[int] = field(default_factory=lambda: [0] * 24)
     hod_hits_recent: list[int] = field(default_factory=lambda: [0] * 24)
     hod_first_recent: list[int | None] = field(default_factory=lambda: [None] * 24)
+    gain_hits: dict[int, list[int]] = field(default_factory=dict)   # gain -> [clipped, clean]
 
 
 def summarize_activity(cube_rows: list[dict]) -> dict[int, Activity]:
     """Fold the activity cube (see activity_sql) into one Activity per emitter index.
 
     The cube's cells partition the sweeps: a sweep has one timestamp, so one
-    hour of day, one clipped flag and one side of the recent split. So hit
-    counts add up across cells without counting a sweep twice.
+    hour of day, one gain, one clipped flag and one side of the recent split.
+    So hit counts add up across cells without counting a sweep twice.
     """
     out: dict[int, Activity] = {}
     for r in cube_rows:
@@ -309,8 +322,8 @@ def summarize_activity(cube_rows: list[dict]) -> dict[int, Activity]:
             first_recent = a.hod_first_recent[hod]
             a.hod_first_recent[hod] = (int(r["first_seen"]) if first_recent is None
                                        else min(first_recent, int(r["first_seen"])))
-        if int(r["clipped"]):
-            a.hits_clipped += hits
+        per_gain = a.gain_hits.setdefault(int(r["gain_tenths"]), [0, 0])
+        per_gain[0 if int(r["clipped"]) else 1] += hits
         first, last = int(r["first_seen"]), int(r["last_seen"])
         a.first_seen = first if a.first_seen is None else min(a.first_seen, first)
         a.last_seen = last if a.last_seen is None else max(a.last_seen, last)
@@ -325,8 +338,6 @@ class Numbers:
     duty_overall: float          # hits / covering sweeps since first seen
     duty_24h: float | None       # same over the recent window, None if not swept
     hours_observed: int          # clock hours with covering sweeps since first seen
-    sweeps_clipped: int          # covering sweeps from first to last seen, clipped
-    sweeps_unclipped: int        # ... and not clipped
     diurnal_sweeps: list[int]    # covering sweeps since first seen, by local hour of day
 
 
@@ -339,12 +350,9 @@ def duty_numbers(act: Activity, hours: dict[int, tuple[int, int]], split_at: int
     hours exactly.
     """
     first_hour = floor_hour(act.first_seen)
-    last_hour = floor_hour(act.last_seen)
     swept = {h: sc for h, sc in hours.items() if h >= first_hour}
     total = sum(s for s, _ in swept.values())
     recent = sum(s for h, (s, _) in swept.items() if h >= split_at)
-    window = [(s, c) for h, (s, c) in swept.items() if h <= last_hour]
-    clipped = sum(c for _, c in window)
     diurnal = [0] * 24
     for h, (s, _) in swept.items():
         diurnal[local_hour(h)] += s
@@ -352,8 +360,6 @@ def duty_numbers(act: Activity, hours: dict[int, tuple[int, int]], split_at: int
         duty_overall=act.hits / total if total else 0.0,
         duty_24h=act.hits_recent / recent if recent else None,
         hours_observed=len(swept),
-        sweeps_clipped=clipped,
-        sweeps_unclipped=sum(s for s, _ in window) - clipped,
         diurnal_sweeps=diurnal,
     )
 
@@ -361,18 +367,27 @@ def duty_numbers(act: Activity, hours: dict[int, tuple[int, int]], split_at: int
 # ─── Artifact suspects ──────────────────────────────────────
 
 
-def artifact_reasons(member_freqs: list[int], lo_hz: int, hi_hz: int, hits_clipped: int,
-                     hits_unclipped: int, sweeps_clipped: int, sweeps_unclipped: int) -> list[str]:
+def artifact_reasons(member_freqs: list[int], lo_hz: int, hi_hz: int,
+                     per_gain: dict[int, tuple[int, int, int, int]]) -> list[str]:
     """Why this emitter is probably the receiver and not a transmitter.
 
     tile_grid     Every bin is a tile's LO (DC) bin. The DC spike of the
                   RTL-SDR shows up there in every tile, 2.048 MHz apart.
     clipped_only  It peaks in clipped sweeps at least ten times as often as in
-                  clean ones. Clipping makes distortion products, the way a
-                  clipped guitar DI grows harmonics that the amp never played.
-                  Compared as rates, because on a V3 without an FM bandstop
-                  many sweeps clip, and real carriers show up in those too.
-    intermod      Within one bin of a known intermodulation product.
+                  clean ones at the same gain. Clipping makes distortion
+                  products, the way a clipped guitar DI grows harmonics that
+                  the amp never played. Compared as rates, because on a V3
+                  without an FM bandstop many sweeps clip, and real carriers
+                  show up in those too. Compared at the same gain, because the
+                  scanner lowers its gain right after a clip: clipped sweeps
+                  are mostly high-gain sweeps, where a weak real carrier is
+                  easier to see anyway.
+    intermod      Inside the emitter's own bins: a known intermodulation
+                  product. Not one bin further, where a real carrier (a VOR
+                  channel next to 116.82 MHz) must stay visible.
+
+    per_gain: {gain: (hits clipped, hits clean, sweeps clipped, sweeps clean)}
+    over the emitter's life. Only gains that had clipped sweeps take part.
 
     The documented compression spurs at -174 and +526 kHz from the tile
     center are not tested by offset. The +526 kHz bin of the 424.896 MHz
@@ -383,13 +398,15 @@ def artifact_reasons(member_freqs: list[int], lo_hz: int, hi_hz: int, hits_clipp
     reasons = []
     if member_freqs and all(sweep_grid.is_dc_bin(f) for f in member_freqs):
         reasons.append("tile_grid")
-    if (hits_clipped >= MIN_CLIPPED_HITS and sweeps_clipped > 0
-            and sweeps_unclipped >= MIN_UNCLIPPED_SWEEPS):
-        rate_clipped = hits_clipped / sweeps_clipped
-        rate_unclipped = hits_unclipped / sweeps_unclipped
-        if rate_unclipped <= CLIP_RATE_RATIO * rate_clipped:
+    clipping = [g for g in per_gain.values() if g[2] > 0]
+    hits_clipped = sum(g[0] for g in clipping)
+    hits_clean = sum(g[1] for g in clipping)
+    sweeps_clipped = sum(g[2] for g in clipping)
+    sweeps_clean = sum(g[3] for g in clipping)
+    if hits_clipped >= MIN_CLIPPED_HITS and sweeps_clean >= MIN_UNCLIPPED_SWEEPS:
+        if hits_clean / sweeps_clean <= CLIP_RATE_RATIO * hits_clipped / sweeps_clipped:
             reasons.append("clipped_only")
-    if any(within_one_bin(f, lo_hz, hi_hz) for f in KNOWN_INTERMOD_HZ):
+    if any(distance_to_span(f, lo_hz, hi_hz) <= HALF_BIN_HZ for f in KNOWN_INTERMOD_HZ):
         reasons.append("intermod")
     return reasons
 
@@ -414,6 +431,7 @@ class Naming:
     note: str            # other names within one bin, when the bins cannot tell them apart
     class_id: str
     service: str         # narrowest allocation or catalog service at the center
+    classes: frozenset[str] = frozenset()   # every class any of its bins carries
 
 
 def operator_label(heard: str, notes: str, class_id: str) -> str:
@@ -457,9 +475,14 @@ def name_emitter(dongle_id: str, lo_hz: int, hi_hz: int, center_hz: int,
        that contains the center.
     5. "unnamed".
 
-    When one bin holds two named things, as 144.775 MHz voice and 144.800 MHz
-    APRS do, the higher source wins and the others go into the note. The
-    scanner cannot tell them apart, and the note says so.
+    Matching within one bin means a reference frequency can name the bin
+    next to its own. 144.775 MHz voice falls in bin 144.746 and 144.800 MHz
+    APRS in bin 144.846, so both match an emitter at 144.846. The higher
+    source wins and the others go into the note, which says the scanner
+    cannot tell them apart.
+
+    class_id is the best identifying class among the emitter's bins, and an
+    unknown_* class only when no bin has a better one.
     """
     ops = sorted((r for r in refs.listening_log if within_one_bin(r["freq_hz"], lo_hz, hi_hz)),
                  key=lambda r: (distance_to_span(r["freq_hz"], lo_hz, hi_hz), -r["ts"], r["freq_hz"]))
@@ -492,20 +515,22 @@ def name_emitter(dongle_id: str, lo_hz: int, hi_hz: int, center_hz: int,
     note = ("also within one bin: " + " | ".join(others[:3])) if others else ""
 
     if classified:
-        class_id = classified[0]["class_id"]
+        class_id = (identifying or classified)[0]["class_id"]
     else:
         class_id = labelled[0][2] if labelled else ""
-    return Naming(name, source, note, class_id, service)
+    return Naming(name, source, note, class_id, service,
+                  frozenset(c["class_id"] for c in classified))
 
 
 # ─── TETRA map ──────────────────────────────────────────────
 
 
-def tetra_evidence(class_id: str, center_hz: int, lo_hz: int, hi_hz: int,
+def tetra_evidence(classes: frozenset[str], center_hz: int, lo_hz: int, hi_hz: int,
                    refs: References) -> list[str]:
     """Why this emitter counts as a TETRA carrier. Empty if it does not.
 
-    class       the classifier says tetra
+    class       the classifier says tetra for any of its bins, even when
+                another bin carries a more confident label
     allocation  the center lies in a TETRA range of allocations or signal_catalog
     named       a listening_log or known_frequencies entry within one bin says tetra
 
@@ -514,7 +539,7 @@ def tetra_evidence(class_id: str, center_hz: int, lo_hz: int, hi_hz: int,
     nothing that reads this, captures, demodulates or decodes it.
     """
     evidence = []
-    if class_id == "tetra":
+    if "tetra" in classes:
         evidence.append("class")
     if any(lo <= center_hz <= hi for lo, hi, service, _ in refs.ranges if service.startswith("tetra")):
         evidence.append("allocation")
@@ -566,10 +591,11 @@ def bin_stats_sql() -> str:
 def coverage_sql() -> str:
     return (
         "SELECT dongle_id, preset, toUnixTimestamp(toStartOfHour(timestamp)) AS hour, "
+        "toInt32(round(gain_db * 10)) AS gain_tenths, "
         "count() AS sweeps, countIf(clipped) AS clipped_sweeps "
         "FROM spectrum.sweep_health "
-        "GROUP BY dongle_id, preset, hour "
-        "ORDER BY dongle_id, preset, hour"
+        "GROUP BY dongle_id, preset, hour, gain_tenths "
+        "ORDER BY dongle_id, preset, hour, gain_tenths"
     )
 
 
@@ -578,21 +604,22 @@ def _sql_str(value: str) -> str:
 
 
 def activity_sql(footprints: list[tuple[str, int, int]], split_at: int) -> str:
-    """Hits per emitter, by local hour of day, clipped flag and recent flag.
+    """Hits per emitter, by local hour of day, gain, clipped flag and recent flag.
 
     footprints: (dongle, lo Hz, hi Hz) per emitter, in index order (1-based in
     the result, as arrayFirstIndex counts). Every peak is mapped onto the first
     footprint that contains it. A sweep counts once per emitter even when
     several of the emitter's bins peaked in it: hits is uniqExact(sweep_id).
 
-    Joined to sweep_health on (dongle, sweep_id) for the clipped flag. The
-    two dongles share sweep_id strings, so the dongle is part of the key.
+    Joined to sweep_health on (dongle, sweep_id) for the gain and the clipped
+    flag. The two dongles share sweep_id strings, so the dongle is part of
+    the key.
     """
     dongles = ",".join(f"'{_sql_str(d)}'" for d, _, _ in footprints)
     los = ",".join(str(lo) for _, lo, _ in footprints)
     his = ",".join(str(hi) for _, _, hi in footprints)
     return f"""
-SELECT idx, hod, clipped, recent,
+SELECT idx, hod, gain_tenths, clipped, recent,
        uniqExact(sweep_id) AS hits,
        toUnixTimestamp(min(timestamp)) AS first_seen,
        toUnixTimestamp(max(timestamp)) AS last_seen,
@@ -603,16 +630,17 @@ FROM (
     SELECT arrayFirstIndex((d, lo, hi) -> d = p.dongle_id AND p.freq_hz >= lo AND p.freq_hz <= hi,
                            [{dongles}], [{los}], [{his}]) AS idx,
            toHour(p.timestamp, '{LOCAL_TZ}') AS hod,
+           toInt32(round(h.gain_db * 10)) AS gain_tenths,
            toUInt8(h.clipped) AS clipped,
            toUInt8(toUnixTimestamp(p.timestamp) >= {split_at}) AS recent,
            p.sweep_id AS sweep_id, p.timestamp AS timestamp, p.power_dbfs AS power_dbfs
     FROM spectrum.peaks AS p
-    INNER JOIN (SELECT dongle_id, sweep_id, clipped FROM spectrum.sweep_health) AS h
+    INNER JOIN (SELECT dongle_id, sweep_id, gain_db, clipped FROM spectrum.sweep_health) AS h
         ON h.dongle_id = p.dongle_id AND h.sweep_id = p.sweep_id
 )
 WHERE idx > 0
-GROUP BY idx, hod, clipped, recent
-ORDER BY idx, hod, clipped, recent"""
+GROUP BY idx, hod, gain_tenths, clipped, recent
+ORDER BY idx, hod, gain_tenths, clipped, recent"""
 
 
 # ─── Building the rows ──────────────────────────────────────
@@ -652,10 +680,11 @@ def build_rows(planned: list[Planned], activity: dict[int, Activity], coverage: 
         nums = duty_numbers(act, coverage.hours(c.dongle_id, center), split_at)
         naming = name_emitter(c.dongle_id, c.lo_hz, c.hi_hz, center,
                               {b.freq_hz: b.hits for b in c.members}, refs)
-        reasons = artifact_reasons([b.freq_hz for b in c.members], c.lo_hz, c.hi_hz,
-                                   act.hits_clipped, act.hits - act.hits_clipped,
-                                   nums.sweeps_clipped, nums.sweeps_unclipped)
-        evidence = tetra_evidence(naming.class_id, center, c.lo_hz, c.hi_hz, refs)
+        sweeps = coverage.by_gain(c.dongle_id, center, floor_hour(act.first_seen), floor_hour(act.last_seen))
+        per_gain = {g: (*act.gain_hits.get(g, (0, 0)), clipped, total - clipped)
+                    for g, (total, clipped) in sweeps.items()}
+        reasons = artifact_reasons([b.freq_hz for b in c.members], c.lo_hz, c.hi_hz, per_gain)
+        evidence = tetra_evidence(naming.classes, center, c.lo_hz, c.hi_hz, refs)
         rows.append({
             "emitter_id": p.emitter_id,
             "dongle_id": c.dongle_id,
@@ -727,8 +756,9 @@ def load_previous() -> dict[str, list[Previous]]:
 
 
 def load_coverage() -> Coverage:
-    return Coverage([CoverageRow(r["dongle_id"], r["preset"], int(r["hour"]), int(r["sweeps"]),
-                                 int(r["clipped_sweeps"])) for r in db.query_rows(coverage_sql())])
+    return Coverage([CoverageRow(r["dongle_id"], r["preset"], int(r["hour"]), int(r["gain_tenths"]),
+                                 int(r["sweeps"]), int(r["clipped_sweeps"]))
+                     for r in db.query_rows(coverage_sql())])
 
 
 def recent_split(now: datetime) -> int:

@@ -158,6 +158,15 @@ def test_names_match_within_one_bin_only():
     assert got.name == "Near"
 
 
+def test_class_prefers_an_identifying_label_and_keeps_every_label():
+    cls = {"v3-01": [{"freq_hz": 405_990_000, "class_id": "unknown_continuous", "confidence": 0.5},
+                     {"freq_hz": 406_090_000, "class_id": "tetra", "confidence": 0.4}]}
+    got = emitters.name_emitter("v3-01", 405_990_000, 406_090_000, 406_040_000, {},
+                                _refs(classifications=cls, class_names={"tetra": "TETRA (encrypted)"}))
+    assert (got.name, got.class_id) == ("TETRA (encrypted)", "tetra")
+    assert got.classes == {"unknown_continuous", "tetra"}
+
+
 def test_classifier_name_ignores_other_dongles():
     cls = {"v4-01": [{"freq_hz": 150_000_000, "class_id": "tetra", "confidence": 0.8}]}
     got = emitters.name_emitter("v3-01", 150_000_000, 150_000_000, 150_000_000, {},
@@ -168,24 +177,40 @@ def test_classifier_name_ignores_other_dongles():
 # ─── Artifact suspects ──────────────────────────────────────
 
 
+def _reasons(freq, per_gain):
+    return emitters.artifact_reasons([freq], freq, freq, per_gain)
+
+
 def test_tile_grid_needs_every_bin_on_a_dc_bin():
-    assert "tile_grid" in emitters.artifact_reasons([383_962_000], 383_962_000, 383_962_000, 0, 50, 0, 50)
-    assert not emitters.artifact_reasons([383_962_000, 384_062_000], 383_962_000, 384_062_000, 0, 50, 0, 50)
+    assert "tile_grid" in _reasons(383_962_000, {})
+    assert not emitters.artifact_reasons([383_962_000, 384_062_000], 383_962_000, 384_062_000, {})
 
 
 def test_clipped_only_compares_rates_not_counts():
+    # per gain: (hits clipped, hits clean, sweeps clipped, sweeps clean)
     # A real carrier on a dongle that clips most of the time: many clipped hits, but
     # the same rate when clean.
-    assert "clipped_only" not in emitters.artifact_reasons([200_000_000], 0, 0, 900, 95, 950, 100)
+    assert "clipped_only" not in _reasons(200_000_000, {77: (900, 95, 950, 100)})
     # A product that is there when the ADC clips and gone when it does not.
-    assert "clipped_only" in emitters.artifact_reasons([200_000_000], 0, 0, 300, 2, 400, 600)
+    assert "clipped_only" in _reasons(200_000_000, {77: (300, 2, 400, 600)})
     # Too few clean sweeps to judge.
-    assert "clipped_only" not in emitters.artifact_reasons([200_000_000], 0, 0, 300, 0, 400, 5)
+    assert "clipped_only" not in _reasons(200_000_000, {77: (300, 0, 400, 5)})
 
 
-def test_intermod_matches_within_one_bin():
-    assert "intermod" in emitters.artifact_reasons([116_822_000], 116_822_000, 116_822_000, 0, 9, 0, 9)
-    assert "intermod" not in emitters.artifact_reasons([117_022_000], 117_022_000, 117_022_000, 0, 9, 0, 9)
+def test_clipped_only_compares_at_the_same_gain():
+    # Day 0 at 7.7 dB, 40 % of sweeps clipped. Then 10 days at 3.7 dB, none
+    # clipped. A weak real carrier shows in half the 7.7 dB sweeps, clipped or
+    # not, and in 2 % at 3.7 dB. Pooled over gains it looks clipped-only.
+    per_gain = {77: (60, 90, 120, 180), 37: (0, 68, 0, 3400)}
+    assert "clipped_only" not in _reasons(200_000_000, per_gain)
+    pooled = (60 + 0) / 120, (90 + 68) / (180 + 3400)
+    assert pooled[1] <= emitters.CLIP_RATE_RATIO * pooled[0]   # what pooling would have said
+
+
+def test_intermod_matches_its_own_bin_only():
+    assert "intermod" in _reasons(116_822_000, {})
+    # A VOR channel one bin below must stay a transmitter.
+    assert "intermod" not in _reasons(116_722_000, {})
 
 
 # ─── Duty cycles over swept time ────────────────────────────

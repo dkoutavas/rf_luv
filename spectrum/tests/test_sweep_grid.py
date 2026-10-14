@@ -58,3 +58,17 @@ def test_presets_covering():
     assert sweep_grid.presets_covering(99_590_000) == ["full"]
     assert sweep_grid.presets_covering(118_550_000) == ["full", "airband"]
     assert sweep_grid.presets_covering(500_000_000) == []
+
+
+def test_sweep_edges_where_no_peak_can_fire_are_not_covered():
+    # detect_peaks skips the first and last PEAK_NEIGHBOR_BINS bins of a sweep.
+    bins = [{"freq_hz": f, "power_dbfs": -80.0} for f in sweep_grid.bin_labels("airband")]
+    for i in (0, 4, 5, len(bins) - 6, len(bins) - 5, len(bins) - 1):
+        spiked = [dict(b) for b in bins]
+        spiked[i]["power_dbfs"] = -20.0
+        found = [p["freq_hz"] for p in scanner.detect_peaks(spiked)]
+        covered = "airband" in sweep_grid.presets_covering(bins[i]["freq_hz"])
+        assert covered == bool(found), (i, bins[i]["freq_hz"])
+    # Athens Tower and VDL2 sit in the airband sweep's blind edges. Only the full sweep sees them.
+    assert sweep_grid.presets_covering(118_100_000) == ["full"]
+    assert sweep_grid.presets_covering(136_975_000) == ["full"]

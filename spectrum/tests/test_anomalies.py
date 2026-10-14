@@ -65,6 +65,19 @@ def test_gone_quiet_counts_swept_hours_across_a_gap():
     assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
 
 
+def test_the_unfinished_current_hour_does_not_count_as_silence():
+    hours = _hours(T0, 72)
+    act = _always_on(T0, T0 + 72 * H - 60, hours)
+    hours.update(_hours(T0 + 72 * H, 5))          # 5 full silent hours
+    hours[T0 + 77 * H] = (1, 0)                   # and 2 minutes of the current one
+    now = T0 + 77 * H + 120
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
+    later = T0 + 78 * H + 120                     # once that hour is over, it counts
+    hours[T0 + 77 * H] = (13, 0)
+    found = anomalies.gone_quiet(_emitter(), act, hours, later - DAY, later)
+    assert found and found.event_at == T0 + 78 * H
+
+
 def test_a_rare_emitter_is_not_quiet_after_a_few_hours():
     hours = _hours(T0, 30)
     act = Activity(hits=8, first_seen=T0, last_seen=T0 + 3 * H)

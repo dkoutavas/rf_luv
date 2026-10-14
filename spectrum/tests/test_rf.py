@@ -101,11 +101,20 @@ def test_blocked_band_is_refused_before_any_io(monkeypatch, capsys):
         assert f"blocked band ({band})" in capsys.readouterr().out
 
 
-def test_blocked_refusal_asks_iq_capture(monkeypatch):
+def test_blocked_refusal_asks_iq_capture_across_the_window(monkeypatch):
     seen = []
-    monkeypatch.setattr(rf.iq_capture, "freq_blocked", lambda f, src: seen.append((f, src)) or "TEST")
-    assert "TEST" in rf.blocked_refusal(100_000_000)
-    assert seen == [(100_000_000, "operator:rf-autopsy")]
+    monkeypatch.setattr(rf.iq_capture, "freq_blocked", lambda f, src: seen.append((f, src)))
+    assert rf.blocked_refusal(100_000_000, 2_048_000) is None
+    assert seen[0] == (98_976_000, "operator:rf-autopsy") and seen[-1] == (101_024_000, "operator:rf-autopsy")
+    assert all(b - a <= 100_000 for (a, _), (b, _) in zip(seen, seen[1:]))
+
+
+@pytest.mark.parametrize("mhz", ["379.5", "400.9"])
+def test_a_window_reaching_into_a_blocked_band_is_refused(tools, capsys, mhz):
+    # The center is outside 380-400 MHz, the 2.048 MHz window is not.
+    assert rf.main(["autopsy", mhz]) == 2
+    assert "reaches into a blocked band (TETRA)" in capsys.readouterr().out
+    assert tools.calls == []
 
 
 @pytest.mark.parametrize("mhz, carrier", [
@@ -174,7 +183,7 @@ def test_autopsy_runs_capture_then_analysis(tools, capsys):
     assert blind_argv[1:] == ["--file", "/var/lib/spectrum/iq_captures/x_144800_5s.cs8", "--json"]
     out = capsys.readouterr().out
     assert "Greek ham radio 2m band [listening_log]" in out
-    assert "same bin       : APRS (IARU Region 1) [known_frequencies]" in out
+    assert "within one bin : APRS (IARU Region 1) [known_frequencies]" in out
     assert "modulation     : NFM (confidence 0.62)" in out
     assert "2. frequency wanders: FM" in out
 

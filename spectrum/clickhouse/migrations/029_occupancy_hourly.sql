@@ -19,7 +19,9 @@
 --
 -- Peaks are counted raw. A tile-grid DC spike or the 116.82 MHz
 -- intermodulation product makes its band look busier than it is. The
--- emitters table, not this atlas, is where artifacts are told apart.
+-- emitters table, not this atlas, is where artifacts are told apart. And the
+-- peak detector needs 5 bins on each side, so the first and last 5 bins of a
+-- sweep never peak: the bands at 88, 118, 136 and 469 MHz read a little low.
 --
 -- Backfill: the views are created first, then the history is inserted.
 -- A scans or peaks row that lands in between can reach the table twice.

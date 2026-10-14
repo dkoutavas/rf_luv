@@ -46,15 +46,16 @@ def coverage(sweep_health: list[dict]) -> list[dict]:
     groups = defaultdict(lambda: [0, 0])
     for h in sweep_health:
         hour = emitters.floor_hour(_ts(h["timestamp"]))
-        cell = groups[(h["dongle_id"], h["preset"], hour)]
+        cell = groups[(h["dongle_id"], h["preset"], hour, int(round(h["gain_db"] * 10)))]
         cell[0] += 1
         cell[1] += int(h["clipped"])
-    return [{"dongle_id": d, "preset": p, "hour": hour, "sweeps": s, "clipped_sweeps": c}
-            for (d, p, hour), (s, c) in sorted(groups.items())]
+    return [{"dongle_id": d, "preset": p, "hour": hour, "gain_tenths": g, "sweeps": s, "clipped_sweeps": c}
+            for (d, p, hour, g), (s, c) in sorted(groups.items())]
 
 
-def _clipped_by_sweep(sweep_health: list[dict]) -> dict:
-    return {(h["dongle_id"], h["sweep_id"]): int(h["clipped"]) for h in sweep_health}
+def _sweep_meta(sweep_health: list[dict]) -> dict:
+    return {(h["dongle_id"], h["sweep_id"]): (int(round(h["gain_db"] * 10)), int(h["clipped"]))
+            for h in sweep_health}
 
 
 def _index(p: dict, footprints: list[tuple[str, int, int]]) -> int:
@@ -67,20 +68,21 @@ def _index(p: dict, footprints: list[tuple[str, int, int]]) -> int:
 def activity(peaks: list[dict], sweep_health: list[dict],
              footprints: list[tuple[str, int, int]], split_at: int) -> list[dict]:
     """emitters.activity_sql()"""
-    clipped = _clipped_by_sweep(sweep_health)
+    meta = _sweep_meta(sweep_health)
     groups = defaultdict(list)
     for p in peaks:
         key = (p["dongle_id"], p["sweep_id"])
         idx = _index(p, footprints)
-        if idx == 0 or key not in clipped:
+        if idx == 0 or key not in meta:
             continue
         ts = _ts(p["timestamp"])
-        cell = (idx, p["timestamp"].astimezone(ATHENS).hour, clipped[key], int(ts >= split_at))
+        gain, clip = meta[key]
+        cell = (idx, p["timestamp"].astimezone(ATHENS).hour, gain, clip, int(ts >= split_at))
         groups[cell].append(p)
     out = []
-    for (idx, hod, clip, recent), rows in sorted(groups.items()):
+    for (idx, hod, gain, clip, recent), rows in sorted(groups.items()):
         out.append({
-            "idx": idx, "hod": hod, "clipped": clip, "recent": recent,
+            "idx": idx, "hod": hod, "gain_tenths": gain, "clipped": clip, "recent": recent,
             "hits": len({r["sweep_id"] for r in rows}),
             "first_seen": min(_ts(r["timestamp"]) for r in rows),
             "last_seen": max(_ts(r["timestamp"]) for r in rows),

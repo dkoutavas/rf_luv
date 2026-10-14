@@ -15,9 +15,9 @@ rf_luv: two commands to look closer.
 autopsy is glue. It shells out to the existing tools and re-implements
 neither capture nor analysis. It refuses before it touches the dongle when:
 
-  * iq_capture.freq_blocked() blocks the frequency. That is the one legal
-    blocklist (TETRA 380-400 MHz and three cellular bands). This file does
-    not keep a copy.
+  * iq_capture.freq_blocked() blocks any part of the capture window, 2.048
+    MHz wide around the frequency. That is the one legal blocklist (TETRA
+    380-400 MHz and three cellular bands). This file does not keep a copy.
   * the capture window, 2.048 MHz wide around the frequency, would include
     a TETRA emitter from spectrum.emitters, on any dongle, wherever it is.
     That covers the civil carriers at 424-426 MHz, which the blocklist does
@@ -213,12 +213,21 @@ def cmd_now(args) -> int:
 # ─── rf.py autopsy ──────────────────────────────────────────
 
 
-def blocked_refusal(freq_hz: int) -> str | None:
-    """iq_capture's own blocklist, asked the way an operator capture would be."""
-    band = iq_capture.freq_blocked(freq_hz, AUTOPSY_SOURCE)
-    if band:
-        return (f"Refused: {freq_hz / 1e6:.3f} MHz is in a blocked band ({band}). Capturing it is out "
-                f"of scope. Encrypted traffic is never decoded here.")
+def blocked_refusal(freq_hz: int, span_hz: int) -> str | None:
+    """iq_capture's own blocklist, asked for every bin of the capture window.
+
+    freq_blocked() tests one frequency, but a capture records the whole
+    window around it: 379.5 MHz would bring in half a megahertz of the TETRA
+    band. So ask it every 100 kHz from edge to edge, the way an operator
+    capture would be asked, without keeping a copy of the list here.
+    """
+    lo, hi = freq_hz - span_hz // 2, freq_hz + span_hz // 2
+    for f in [*range(lo, hi, emitters.BIN_HZ), hi]:
+        band = iq_capture.freq_blocked(f, AUTOPSY_SOURCE)
+        if band:
+            return (f"Refused: the {span_hz / 1e6:.3f} MHz capture window {lo / 1e6:.3f}-{hi / 1e6:.3f} MHz "
+                    f"reaches into a blocked band ({band}) at {f / 1e6:.3f} MHz. Capturing it is out "
+                    f"of scope. Encrypted traffic is never decoded here.")
     return None
 
 
@@ -294,7 +303,7 @@ def format_card(freq_hz: int, dongle: str, emitter: dict | None, verdict: dict, 
         e = emitter
         lines.append(f"  │ emitter        : {e['emitter_id']}, {e['name']} [{e['name_source']}]")
         if e.get("name_note"):
-            lines.append(f"  │ same bin       : {e['name_note'].removeprefix('also within one bin: ')}")
+            lines.append(f"  │ within one bin : {e['name_note'].removeprefix('also within one bin: ')}")
         lines.append(f"  │ class          : {e['class_id'] or '-'}")
         lines.append(f"  │ history        : first seen {_local(int(e['first_seen']))}, last "
                      f"{_local(int(e['last_seen']))}, in {float(e['duty_overall']):.1%} of sweeps "
@@ -331,7 +340,7 @@ def latest_gain(dongle: str) -> float | None:
 
 def cmd_autopsy(args) -> int:
     freq = args.mhz
-    refusal = blocked_refusal(freq)
+    refusal = blocked_refusal(freq, iq_capture.DEFAULT_SAMPLE_RATE)
     if refusal:
         print(refusal)
         return 2

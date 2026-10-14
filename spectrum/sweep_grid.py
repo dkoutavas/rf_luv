@@ -87,6 +87,21 @@ def is_dc_bin(freq_hz: int) -> bool:
     return False
 
 
+def detectable_range(preset: str) -> tuple[int, int]:
+    """The frequencies where this preset's sweeps can produce a peak.
+
+    The peak detector compares each bin with PEAK_NEIGHBOR_BINS neighbors on
+    each side, so the first and last few bins of a sweep can never peak. For
+    the airband preset that is 118.05-118.45 and 136.58-136.98 MHz, where
+    Athens Tower (118.100) lives. A sweep that cannot see a frequency must
+    not count as a look at it.
+    """
+    labels = bin_labels(preset)
+    n = config.PEAK_NEIGHBOR_BINS
+    half = BIN_WIDTH_HZ // 2
+    return labels[n] - half, labels[-n - 1] + half
+
+
 def presets_covering(freq_hz: int) -> list[str]:
-    """Presets whose sweeps measure freq_hz. Each such sweep could have seen it."""
-    return [p for p, (start, end) in PRESETS.items() if start <= freq_hz <= end]
+    """Presets whose sweeps could have peaked at freq_hz: the denominators of a duty cycle."""
+    return [p for p in PRESETS if detectable_range(p)[0] <= freq_hz <= detectable_range(p)[1]]

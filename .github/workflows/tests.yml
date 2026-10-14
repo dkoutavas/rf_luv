@@ -1,0 +1,44 @@
+# Runs every suite in the repo (scripts/run-tests.sh) on each push to main and
+# on every pull request. The suites use fakes: no dongle, Docker or ClickHouse.
+#
+# 3.13 is what the Omen runs. 3.12 is the bootstrap image (python:3.12-slim)
+# and the oldest Python that numpy 2.5 supports.
+#
+# Actions are pinned by commit SHA, like the images are pinned by digest.
+# The tag each SHA resolved to is in the trailing comment.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    # The scanner traps SIGTERM at import, so a hung test ignores a plain
+    # kill. Cap the job well above the ~35 s a full run takes.
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies
+        run: python -m pip install pytest==9.1.1 numpy==2.5.4
+      - name: Run all suites
+        run: bash scripts/run-tests.sh

@@ -85,8 +85,14 @@ bandstop confirmed). Session findings and the manual bring-up commands are in
 
 ## Scope
 
-Built now: the spirit box, RDS labels, and the full forensics suite (slapback delay,
+Built: the spirit box, RDS labels, and the full forensics suite (slapback delay,
 audio bandlimit, chromaprint reuse, spectrogram, RT60 reverb match, EMF/RF sync).
-Designed but not yet built: the K-II EMF replication (module 3,
-hardware-gated), the Grafana Ghost dashboards, the perception blind test, and
-`REPORT.md`. See the plan for the full design.
+The write-up is [`REPORT.md`](REPORT.md), with a Greek version in
+[`REPORT_GR.md`](REPORT_GR.md). The perception blind test is
+[`blindtest/`](blindtest/): 20 sweep fragments, 10 of them primed with a
+suggested word. The page fetches `clips.json`, so serve it rather than opening
+the file: `python3 -m http.server --bind 127.0.0.1 -d ghost/blindtest 8000`,
+then <http://localhost:8000>. The Grafana dashboard is Ghost Overview
+(`infra/grafana/provisioning/dashboards/json/ghost/`).
+
+Not built: the K-II EMF replication (module 3). It needs the meter itself.

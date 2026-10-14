@@ -1,11 +1,11 @@
 #!/bin/bash
-set -eo pipefail
+set -euo pipefail
 # Pipe rtl_433 JSON output directly into the Python ingest script.
 # pipefail ensures we exit if rtl_433 crashes (not just if ingest fails).
-# rtl_433 connects to rtl_tcp on Windows, decodes ISM band devices,
+# rtl_433 connects to the dongle's rtl_tcp on the host, decodes ISM band devices,
 # and outputs one JSON line per transmission to stdout.
 #
-# -d rtl_tcp:...   connect to rtl_tcp server (Windows)
+# -d rtl_tcp:...   connect to rtl_tcp (port from pipeline.sh)
 # -f 433.92M       ISM band center frequency
 # -g 40            tuner gain (dB)
 # -M time:utc:usec timestamps in UTC with microseconds

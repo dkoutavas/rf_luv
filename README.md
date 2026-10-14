@@ -22,6 +22,7 @@ lab, not the debunk.
   refresh (recorder still a scaffold).
 - **Monitor IoT sensors.** ISM 433 MHz devices: weather stations, tire sensors,
   doorbells.
+- **Decode pagers.** Receive-only POCSAG. The decoded text stays on the host.
 - **Replicate a spirit box.** Sweep the FM band, label every fragment with its
   source station via RDS, and run forensic audio analysis on published video.
 
@@ -84,9 +85,10 @@ has its own database, its own Grafana folder, and its own README.
 | [rds/](rds/) | built | RDS station metadata decoder (PS, PI, RadioText) |
 | [noaa/](noaa/) | partial | Weather-sat pass scheduler (recorder is a scaffold). NOAA 15/18/19 were decommissioned in 2025, so it needs a Meteor-M LRPT re-scope |
 | [adsb/](adsb/) | validated | ADS-B aircraft tracking with a live map (readsb owns the dongle over USB) |
-| [ais/](ais/) | companion | AIS ship tracking (Piraeus / Saronic Gulf) |
+| [ais/](ais/) | validated | AIS ship tracking (Piraeus / Saronic Gulf) with an integrity-anomalies panel |
 | [ism/](ism/) | companion | ISM 433 MHz sensor and device decoding |
 | [ghost/](ghost/) | validated | Spirit-box replica, RDS labels, forensic audio tools |
+| [pocsag/](pocsag/) | proven, no signal | Receive-only POCSAG pager decoding over USB. Works end to end, but no live paging decodes in Athens yet |
 
 ## ghost/ — the paranormal-equipment pipeline
 
@@ -124,7 +126,7 @@ Full write-up: [ghost/REPORT.md](ghost/REPORT.md) (English),
  USB dongles          rtl_tcp (systemd)         Python (numpy + stdlib)       Docker
 ┌───────────┐        ┌────────────────┐        ┌─────────────────────┐      ┌────────────┐
 │ V4 dongle │──USB──▶│ :1234 (scanner)│──TCP──▶│ scanner.py → ingest │─HTTP─▶│ ClickHouse │
-│ (notch on)│        └────────────────┘        └─────────────────────┘      │ (8 dbs)    │
+│ (notch on)│        └────────────────┘        └─────────────────────┘      │ (9 dbs)    │
 │           │                                                                │            │
 │ V3 dongle │──USB──▶│ :1235 (ghost)  │──TCP──▶│ spiritbox.py → WAV  │─HTTP─▶│            │
 │ (no notch)│        └────────────────┘        └─────────────────────┘      └─────┬──────┘
@@ -165,6 +167,13 @@ Athens note: FM transmitters on Lycabettus and Hymettus are strong enough to
 overload the dongle above gain 12 indoors, and above about 3.7 on an outdoor
 antenna. Use the FM bandstop filter on the scanner dongle and start with low
 gain; the scanner also steps its gain down by itself when a sweep clips.
+
+## Tests
+
+`bash scripts/run-tests.sh` runs every suite in the repo. The suites use fakes,
+so they need only pytest and numpy. No dongle, Docker or ClickHouse is
+involved. GitHub Actions runs the same script on Python 3.12 and 3.13 for every
+pull request and every push to `main` ([tests.yml](.github/workflows/tests.yml)).
 
 ## Reference
 

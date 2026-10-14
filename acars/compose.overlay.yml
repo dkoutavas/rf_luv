@@ -3,19 +3,25 @@
 #
 # This is a ROTATING pipeline overlay. The always-on data layer
 # (shared ClickHouse + Grafana) lives in infra/compose.yml as the
-# rf_luv_infra project. Bring infra up first, then this overlay:
-#   docker compose -f infra/compose.yml up -d
-#   cp env.v4-01.example .env   # optional overrides
-#   docker compose -f acars/compose.overlay.yml up -d
+# rf_luv_infra project. Bring it up with pipeline.sh, not docker compose:
+#   bash infra/up.sh
+#   cp acars/env.v4-01.example acars/.env   # optional overrides
+#   bash pipeline.sh up acars v3-01          # pauses the V3 scanner
 #   open http://localhost:3000 for Grafana dashboards (shared)
+#   bash pipeline.sh down acars v3-01        # resumes the V3 scanner
 #
 # Local smoke testing (no real radio): bring up just the ingest and
-# synthesize ACARS messages with:
-#   docker compose -f acars/compose.overlay.yml up -d acars-ingest
-#   echo '{"timestamp":1764691234.0,"freq":"131.525","level":"-25",...}' | nc -u -w1 localhost 5550
+# synthesize ACARS messages. -p keeps the project name pipeline.sh uses, so a
+# later `pipeline.sh down acars` removes it.
+#   docker compose -p rf_luv_acars -f acars/compose.overlay.yml up -d acars-ingest
+# acars-ingest publishes no host port, so send the datagram from inside it:
+#   docker exec acars-ingest python3 -c "import json, socket, time; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'timestamp': time.time(), 'freq': 131.525, 'level': -40, 'label': 'H1', 'flight': 'TEST01', 'text': 'smoke test'}).encode(), ('127.0.0.1', 5550))"
 #
-# Dongle: ACARS owns the V4 dongle on host.docker.internal:1234.
-# The spectrum scanner stays on V3 (:1234).
+# Dongle: ACARS is VHF airband (131.525 to 131.825 MHz). Since 2026-09-26 the
+# V4's VHF input is water-damaged, so ACARS runs on the V3 and pauses the
+# spectrum scanner for the whole session. pipeline.sh exports RTL_TCP_PORT,
+# ACARS_DONGLE_ID and ACARS_FEED_ID for the chosen serial. Exported values win
+# over acars/.env. When the V4 is replaced, ACARS moves back to it.
 #
 # Pipeline pattern: decoder image emits JSON UDP datagrams; the ingest
 # sidecar listens on UDP :5550, batches rows, and INSERTs to the shared

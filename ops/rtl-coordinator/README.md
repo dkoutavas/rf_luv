@@ -18,7 +18,7 @@ The lock file path is the rendezvous point. Every consumer that wants exclusive 
 
 ## When you actually need this
 
-Most decoders DON'T. The two-dongle layout already gives parallelism (V3 + V4); a decoder that owns a dongle exclusively (like ACARS owning V4) just runs continuously without ever touching the coordinator.
+Most decoders DON'T. The two-dongle layout already gives parallelism (V3 + V4). A decoder that holds a dongle for a whole session (ACARS, AIS, RDS, ISM through `pipeline.sh`) runs without ever touching the coordinator.
 
 You need the coordinator when:
 
@@ -26,7 +26,7 @@ You need the coordinator when:
 2. **Two decoders share a dongle by time-division.** E.g., POCSAG sweep and marine voice activity logging both want V4 but on different schedules.
 3. **A maintenance task needs the dongle.** E.g., the rtl-tcp escalator's `rtl-usb-reset` — currently doesn't take this lock, but could.
 
-If you're building a decoder that needs continuous access to a dongle (like ACARS), do NOT use the coordinator — give it the dongle outright and disable the wideband scanner on that dongle (see `acars/DEPLOY.md`).
+If you're building a decoder that needs continuous access to a dongle (like ACARS), do NOT use the coordinator. Start it with `pipeline.sh up <pipe> <serial>`, which pauses the wideband scanner on that dongle for the session and resumes it on `down`. The leap-era manual takeover is archived in `docs/archive/ACARS-DEPLOY-LEAP-20260502.md`.
 
 ## Files
 

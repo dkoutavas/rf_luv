@@ -8,6 +8,7 @@ drops it when another consumer holds the dongle lock.
 """
 
 import contextlib
+import itertools
 import socket
 import threading
 
@@ -89,6 +90,36 @@ def test_one_connection_across_sweeps(monkeypatch, fake_server, capsys):
     assert fake_server.accepts == 1
 
 
+def test_first_sweeps_do_not_wait_for_uptime(monkeypatch, fake_server, capsys):
+    """time.monotonic() counts from boot. Right after a reboot it is smaller
+    than the sweep intervals, and the scanner used to idle until uptime passed
+    each interval. Both presets must be due on the first tick, shortest
+    interval first, with no idle tick in between."""
+    clock = itertools.count(30.0, 0.5)                       # booted 30 s ago
+    monkeypatch.setattr(scanner.time, "monotonic", lambda: next(clock))
+    sleeps = []
+    monkeypatch.setattr(scanner.time, "sleep", sleeps.append)
+    monkeypatch.setattr(scanner, "FULL_INTERVAL", 280)
+    monkeypatch.setattr(scanner, "AIRBAND_INTERVAL", 60)
+    monkeypatch.setattr(scanner, "dongle_lock",
+                        lambda *a, **kw: contextlib.nullcontext(True))
+    sweeps = []                                              # (start Hz, idle sleeps so far)
+
+    def fake_sweep(client, freq_start, freq_end):
+        sweeps.append((freq_start, len(sleeps)))
+        if len(sweeps) >= 2:
+            scanner.running = False
+        bins = [{"freq_hz": 100_000_000, "power_dbfs": -50.0}]
+        clipping = {"max_clip_fraction": 0.0, "worst_clip_freq_hz": 0,
+                    "clipped_captures": 0, "total_captures": 1, "clipped": False}
+        return bins, clipping
+    monkeypatch.setattr(scanner, "sweep", fake_sweep)
+
+    scanner.main()
+
+    assert sweeps == [(scanner.AIRBAND_START, 0), (scanner.FREQ_START, 0)]
+
+
 def test_releases_connection_when_lock_is_taken(monkeypatch, fake_server, capsys):
     """When another consumer holds the lock, the scanner closes its socket
     so rtl_tcp can accept that consumer, then reconnects afterwards."""
@@ -123,7 +154,14 @@ def test_idle_scanner_lets_another_consumer_take_the_lock(monkeypatch, fake_serv
     result = {}
 
     def contender():
-        while not clients:                                    # wait until the scanner idles
+        # Wait until the scanner idles. Bounded, so a scanner that never
+        # sweeps fails the test instead of hanging the suite.
+        deadline = _time.monotonic() + 10
+        while not clients:
+            if _time.monotonic() > deadline:
+                result["ok"], result["wait"] = False, None
+                scanner.running = False
+                return
             _time.sleep(0.05)
         t0 = _time.monotonic()
         with coordinator.dongle_lock(scanner.DONGLE_ID, mode="timeout", timeout=5) as ok:
@@ -135,5 +173,6 @@ def test_idle_scanner_lets_another_consumer_take_the_lock(monkeypatch, fake_serv
     scanner.main()
     th.join()
 
+    assert clients, "the scanner never swept, so no preset came due"
     assert result["ok"], "a waiting consumer never got the lock from an idle scanner"
     assert result["wait"] < 2.5, result["wait"]

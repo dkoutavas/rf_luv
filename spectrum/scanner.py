@@ -441,8 +441,13 @@ def main():
     for p in presets:
         log.info(f"  {p['name']}: {p['start']/1e6:.1f}-{p['end']/1e6:.1f} MHz every {p['interval']}s")
 
-    # Track last run time for each preset
-    last_run = {p["name"]: 0.0 for p in presets}
+    # Track last run time for each preset. time.monotonic() counts from boot,
+    # so starting at 0.0 left a preset undue until uptime passed its interval
+    # (after a reboot the first full sweep waited ~280 s). Back-dating every
+    # preset by the longest interval makes all of them due on the first tick,
+    # shortest interval first, as on a host with long uptime.
+    origin = time.monotonic() - max(p["interval"] for p in presets)
+    last_run = {p["name"]: origin for p in presets}
 
     # Single-element list as a mutable flag for "have we logged the
     # coordinator-missing warning yet" — keeps the log noise to one line

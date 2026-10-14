@@ -42,10 +42,14 @@ ENV_FILE="${CLICKHOUSE_BACKUP_ENV:-/etc/rtl-scanner/clickhouse-backup.env}"
 # mount, rclone-mounted bucket). A backup on the same failing disk is no backup.
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/rf-clickhouse}"
 
-# Which databases to dump. Post-consolidation all eight live on one server;
-# spectrum/acars hold the irreplaceable data, adsb/ais/ism/noaa are companion
-# pipelines (often empty) but cheap to include.
-DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa rds ghost}"
+# Which databases to dump. All nine live on one server. spectrum and acars
+# hold the irreplaceable data. adsb/ais/ism/noaa are companion pipelines
+# (often empty) but cheap to include.
+# pocsag holds decoded pager text, which must never leave this host (see
+# pocsag/README.md). It is in the default because the Omen's BACKUP_DIR is an
+# internal disk. If BACKUP_DIR ever points off-host, drop pocsag from
+# DATABASES in the env file first.
+DATABASES="${DATABASES:-spectrum acars adsb ais ism noaa rds ghost pocsag}"
 
 # The single shared ClickHouse container (post-2026-06 consolidation). All
 # databases live in it; the per-db container names (clickhouse-<db>) are gone.

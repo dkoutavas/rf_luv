@@ -118,8 +118,8 @@ docker network create rf_luv_net          # idempotent
 bash infra/up.sh                           # ClickHouse 8123/9000, Grafana 3000, logging-form 8084
 ```
 
-The `ch-bootstrap` one-shot creates all eight databases (adsb, ais, ism,
-spectrum, acars, noaa, rds, ghost), their users, the schema and the Athens
+The `ch-bootstrap` one-shot creates all nine databases (adsb, ais, ism,
+spectrum, acars, noaa, rds, ghost, pocsag), their users, the schema and the Athens
 known-frequencies seed.
 
 ## Step 5: run the host installer

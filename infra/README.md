@@ -30,7 +30,7 @@ ClickHouse ports published now; the old per-pipeline ports are retired.
 | Service | Image | Host port | Role |
 |---|---|---|---|
 | clickhouse | `clickhouse/clickhouse-server:26.8.12.53-alpine` | 8123 (HTTP), 9000 (native) | the one database server |
-| grafana | `grafana/grafana:13.2.2` | 3000 | all eight dashboards |
+| grafana | `grafana/grafana:13.2.2` | 3000 | every dashboard, one folder per database |
 | logging-form | `nginx:1.30.5-alpine` | 8084 | the spectrum logging form |
 | ch-bootstrap | built from `Dockerfile.bootstrap` | (none, one-shot) | creates identities + schema |
 
@@ -42,10 +42,10 @@ From another machine, use an SSH tunnel:
 
 ## Identities and the cross-grant
 
-One server hosts eight databases. Each pipeline keeps its own database and its own
+One server hosts nine databases. Each pipeline keeps its own database and its own
 least-privilege user, created by `clickhouse/bootstrap.sql` (PHASE 1):
 
-- eight databases + eight users; **user name == db name**, **password ==
+- nine databases + nine users. **user name == db name**, **password ==
   `<db>_local`**, `GRANT ALL ON <db>.*`. This is the same credential convention
   every pipeline's config already defaults to, so nothing downstream changes.
 - one extra cross-grant: `GRANT SELECT ON acars.* TO spectrum`, so the
@@ -66,7 +66,7 @@ string and the healthcheck + bootstrap fail loudly rather than booting blank.
    grants). This is load-bearing: the acars and noaa migrators do **not** create
    their own database, and every per-db user must exist before its schema runs.
 2. **PHASE 2**, each schema applied as its own per-db user:
-   - `adsb`, `ism`, `ais`, `noaa`, `ghost` -> numbered migrations in
+   - `adsb`, `ism`, `ais`, `pocsag`, `noaa`, `ghost` -> numbered migrations in
      `<pipe>/clickhouse/migrations/` through the shared runner
      `infra/migrate.py <pipe>`
    - `spectrum` -> `init.sql`, **then** the Athens seed, **then** `migrate.py`
@@ -104,7 +104,8 @@ image into `python:3.12-slim` (Debian/glibc) and symlinks `clickhouse-client`
 Grafana auto-provisions one ClickHouse datasource per database over the
 **native** protocol (`clickhouse:9000`), with UIDs `P_<DBUPPER>_CLICKHOUSE`
 (`P_ADSB_CLICKHOUSE`, `P_AIS_CLICKHOUSE`, `P_ISM_CLICKHOUSE`,
-`P_SPECTRUM_CLICKHOUSE`, `P_ACARS_CLICKHOUSE`, `P_NOAA_CLICKHOUSE`). Exactly one
+`P_SPECTRUM_CLICKHOUSE`, `P_ACARS_CLICKHOUSE`, `P_NOAA_CLICKHOUSE`,
+`P_RDS_CLICKHOUSE`, `P_GHOST_CLICKHOUSE`, `P_POCSAG_CLICKHOUSE`). Exactly one
 is the default: spectrum. (The provisioning tree itself is owned by the grafana
 unit; `compose.yml` only binds it in.)
 
@@ -139,7 +140,7 @@ the two above.
 
 ## Backups: do this before collecting new data
 
-All eight databases now share one `ch-data` volume on one disk. The 2026-06 leap
+All nine databases now share one `ch-data` volume on one disk. The 2026-06 leap
 disk failure is the cautionary tale: months of data, zero backups, total loss.
 This consolidation makes that single point of failure more concentrated, not
 less. **Strongly recommended** (not a hard gate): deploy `ops/clickhouse-backup`

@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Procedure (correct-by-construction, no double-counting):
 #   1. The fresh stack must already be up and migrated (tables + MVs exist):
-#        bash infra/up.sh   # ch-bootstrap migrates schema for all 8 databases
+#        bash infra/up.sh   # ch-bootstrap migrates schema for all 9 databases
 #   2. DETACH every materialized view so re-inserting base data does NOT fan
 #      out into rollup tables (we restore those rollups from their own dumps).
 #   3. For each dumped table: TRUNCATE then INSERT ... FORMAT Native.

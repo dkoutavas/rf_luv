@@ -128,9 +128,9 @@ def test_coast_station_gets_louder_on_day_4_at_the_same_gain():
     assert np.mean(day4) - np.mean(day3) > 9.0
 
 
-def test_marine_channel_is_daytime_only_until_one_burst_at_3_local():
+def test_marine_channel_is_daytime_only_until_one_burst_at_5_local():
     v3 = [p for p in FIXTURE.peaks if p["freq_hz"] == synth.MARINE_CH16 and p["dongle_id"] == synth.V3]
     local = [p["timestamp"].astimezone(synth.ATHENS) for p in v3]
     odd = [t for t in local if not 8 <= t.hour < 18]
-    assert odd and {t.hour for t in odd} == {3}
+    assert odd and {t.hour for t in odd} == {5}
     assert all(t.day == 9 for t in odd)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Send the rf_luv daily digest at 21:00
+
+[Timer]
+# 21:00 host time, the evening of a listening day. If the laptop sleeps
+# through it, Persistent=true sends it once on wake. A day with no sweeps
+# sends nothing.
+OnCalendar=*-*-* 21:00:00
+Unit=spectrum-digest.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

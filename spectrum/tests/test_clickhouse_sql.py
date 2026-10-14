@@ -27,10 +27,12 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+import anomalies
 import db
 import emitters
 import migrate
 from tests import ch_twin
+from tests import emitter_world as world
 from tests import synth_sweeps as synth
 
 URL = os.environ.get("RF_LUV_SQL_TEST_URL", "")
@@ -156,3 +158,41 @@ def test_tetra_views_count_primary_carriers_and_skip_spurs():
     v4 = db.query_rows("SELECT diurnal_duty FROM spectrum.tetra_carriers "
                        f"WHERE dongle_id = 'v4-01' AND center_hz = {synth.TETRA_PS_CONTINUOUS[1]}")
     assert v4[0]["diurnal_duty"][3] is None
+
+
+def test_levels_sql_matches_twin():
+    elist = world.emitter_view(world.run(FIXTURE))
+    fps = [e.footprint for e in elist]
+    _same(db.query_rows(anomalies.levels_sql(fps, SPLIT_AT)),
+          ch_twin.levels(FIXTURE.peaks, FIXTURE.sweep_health, fps, SPLIT_AT))
+
+
+def test_detection_on_sql_output_matches_the_twin_world(monkeypatch):
+    now = world.at(5)
+    expected, expected_pick, elist, _ = world.detect(FIXTURE, now)
+    fps = [e.footprint for e in elist]
+    window_start = emitters.recent_split(now)
+    activity = emitters.summarize_activity(db.query_rows(emitters.activity_sql(fps, window_start)))
+    levels = anomalies.group_levels(db.query_rows(anomalies.levels_sql(fps, window_start)))
+    coverage = emitters.Coverage([emitters.CoverageRow(**r) for r in db.query_rows(emitters.coverage_sql())])
+    roles = {r["dongle_id"]: anomalies.Role(bool(r["is_primary"]), bool(r["levels_trusted"]))
+             for r in db.query_rows(anomalies.ROLES_SQL)}
+    assert roles == world.ROLES
+    ts = int(now.timestamp())
+    found = anomalies.detect(elist, activity, coverage, levels, roles, ts)
+    assert found == expected
+    assert anomalies.signal_of_the_day(elist, found, roles, ts) == expected_pick
+    db.insert("spectrum.anomalies", anomalies.anomaly_rows(found, now))
+    db.insert("spectrum.signal_of_the_day", [anomalies.pick_row(expected_pick, "2026-10-09", now)])
+    assert db.query_scalar("SELECT count() FROM spectrum.anomalies FINAL") == len(found)
+
+
+def test_the_job_sends_no_digest_when_nothing_was_swept(monkeypatch):
+    # Wall-clock now is days after the fixture: the window holds no sweeps.
+    sent = []
+    monkeypatch.setattr(anomalies, "send_digest", lambda *a: sent.append(a))
+    emitters.run()
+    before = db.query_scalar("SELECT count() FROM spectrum.anomalies")
+    assert anomalies.run(send=True) == []
+    assert sent == []
+    assert db.query_scalar("SELECT count() FROM spectrum.anomalies") == before

@@ -60,8 +60,8 @@ APPEARS_AT = START + timedelta(days=3, hours=8)
 STOPS_AT = START + timedelta(days=3, hours=10)
 LOUDER_FROM = START + timedelta(days=4)
 LOUDER_DB = 10.0
-# Day 4, 03:00-03:20 local: a marine burst at an hour this channel never uses.
-ODD_HOUR_BURST = (START + timedelta(days=4), START + timedelta(days=4, minutes=20))
+# Day 4, 05:00-05:20 local: a marine burst at an hour this channel never uses.
+ODD_HOUR_BURST = (START + timedelta(days=4, hours=2), START + timedelta(days=4, hours=2, minutes=20))
 
 # ─── Bin frequencies (Hz) ───────────────────────────────────
 
@@ -72,7 +72,7 @@ APPROACH_AIRBAND = 118_550_000  # Athens Approach 118.575 on the airband grid
 APPROACH_FULL = 118_622_000     # ... and on the full grid, 72 kHz away
 NEW_ON_DAY3 = 140_550_000       # nothing allocated or catalogued here
 APRS = 144_846_000              # 144.800 APRS, one bin from 144.775 voice
-MARINE_CH16 = 156_834_000       # daytime only, then one burst at 03:00 local
+MARINE_CH16 = 156_834_000       # daytime only, then one burst at 05:00 local
 COAST_STATION = 158_082_000     # Piraeus Radio 158.08, gets 10 dB louder on day 4
 STOPS_ON_DAY3 = 165_026_000     # land mobile carrier that goes off air
 TILE_SPUR = 299_994_000         # DC bin of tile 103

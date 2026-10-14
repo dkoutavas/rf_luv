@@ -286,6 +286,7 @@ class Activity:
     power_n: int = 0
     hod_hits: list[int] = field(default_factory=lambda: [0] * 24)
     hod_hits_recent: list[int] = field(default_factory=lambda: [0] * 24)
+    hod_first_recent: list[int | None] = field(default_factory=lambda: [None] * 24)
 
 
 def summarize_activity(cube_rows: list[dict]) -> dict[int, Activity]:
@@ -305,6 +306,9 @@ def summarize_activity(cube_rows: list[dict]) -> dict[int, Activity]:
         if int(r["recent"]):
             a.hits_recent += hits
             a.hod_hits_recent[hod] += hits
+            first_recent = a.hod_first_recent[hod]
+            a.hod_first_recent[hod] = (int(r["first_seen"]) if first_recent is None
+                                       else min(first_recent, int(r["first_seen"])))
         if int(r["clipped"]):
             a.hits_clipped += hits
         first, last = int(r["first_seen"]), int(r["last_seen"])

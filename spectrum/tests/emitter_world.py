@@ -1,13 +1,14 @@
-"""Run emitters.py's decision logic on the synthetic fixture, with no ClickHouse.
+"""Run emitters.py's and anomalies.py's logic on the synthetic fixture, no ClickHouse.
 
 The SQL steps are replaced by their Python twins (ch_twin.py). Everything
-else, from clustering to naming, is the real code.
+else, from clustering to naming to the anomaly rules, is the real code.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
+import anomalies
 import emitters
 from tests import ch_twin
 from tests import synth_sweeps as synth
@@ -83,3 +84,33 @@ def find(rows: list[dict], dongle: str, freq_hz: int) -> dict:
 def at(day: int, hour: int = 0) -> datetime:
     return synth.START + timedelta(days=day, hours=hour)
 
+
+
+ROLES = {"v3-01": anomalies.Role(is_primary=True, levels_trusted=True),
+         "v4-01": anomalies.Role(is_primary=False, levels_trusted=False)}
+
+
+def _epoch(text: str) -> int:
+    return int(datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=timezone.utc).timestamp())
+
+
+def emitter_view(rows: list[dict]) -> list[anomalies.Emitter]:
+    """build_rows() output as anomalies.py reads it back from emitters_current."""
+    return [anomalies.Emitter.from_row({**r, "first_seen": _epoch(r["first_seen"]),
+                                        "last_seen": _epoch(r["last_seen"])})
+            for r in sorted(rows, key=lambda r: (r["dongle_id"], r["center_hz"]))]
+
+
+def detect(fixture: synth.Synth, now: datetime):
+    """One anomalies.run() at `now`: (anomalies, signal of the day, emitters, coverage rows)."""
+    data = cut(fixture, now)
+    elist = emitter_view(run(fixture, now))
+    fps = [e.footprint for e in elist]
+    window_start = emitters.recent_split(now)
+    activity = emitters.summarize_activity(ch_twin.activity(data.peaks, data.sweep_health, fps, window_start))
+    levels = anomalies.group_levels(ch_twin.levels(data.peaks, data.sweep_health, fps, window_start))
+    coverage_rows = [emitters.CoverageRow(**r) for r in ch_twin.coverage(data.sweep_health)]
+    ts = int(now.timestamp())
+    found = anomalies.detect(elist, activity, emitters.Coverage(coverage_rows), levels, ROLES, ts)
+    pick = anomalies.signal_of_the_day(elist, found, ROLES, ts)
+    return found, pick, elist, coverage_rows

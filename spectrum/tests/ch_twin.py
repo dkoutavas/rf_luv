@@ -89,3 +89,35 @@ def activity(peaks: list[dict], sweep_health: list[dict],
             "power_n": len(rows),
         })
     return out
+
+
+def levels(peaks: list[dict], sweep_health: list[dict],
+           footprints: list[tuple[str, int, int]], split_at: int) -> list[dict]:
+    """anomalies.levels_sql(): clean sweeps only, the strongest bin per sweep."""
+    meta = {(h["dongle_id"], h["sweep_id"]): h for h in sweep_health}
+    per_sweep = {}
+    for p in peaks:
+        h = meta.get((p["dongle_id"], p["sweep_id"]))
+        idx = _index(p, footprints)
+        if h is None or h["clipped"] or idx == 0:
+            continue
+        ts = _ts(p["timestamp"])
+        cell = per_sweep.setdefault((idx, p["sweep_id"]), {
+            "gain_tenths": int(round(h["gain_db"] * 10)), "recent": int(ts >= split_at),
+            "power": p["power_dbfs"], "ts": ts})
+        cell["power"] = max(cell["power"], p["power_dbfs"])
+        cell["ts"] = max(cell["ts"], ts)
+    groups = defaultdict(list)
+    for (idx, _), cell in per_sweep.items():
+        groups[(idx, cell["gain_tenths"], cell["recent"])].append(cell)
+    out = []
+    for (idx, gain, recent), cells in sorted(groups.items()):
+        powers = [c["power"] for c in cells]
+        mean = sum(powers) / len(powers)
+        out.append({
+            "idx": idx, "gain_tenths": gain, "recent": recent, "n": len(cells),
+            "mean": round(mean, 2),
+            "std": round((sum((x - mean) ** 2 for x in powers) / len(powers)) ** 0.5, 2),
+            "last_at": max(c["ts"] for c in cells),
+        })
+    return out

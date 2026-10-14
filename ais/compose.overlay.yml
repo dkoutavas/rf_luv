@@ -34,7 +34,13 @@ services:
   ais-decoder:
     image: ghcr.io/jvde-github/ais-catcher:v0.62
     container_name: ais-decoder
-    restart: unless-stopped
+    # on-failure, not unless-stopped: pipeline.sh pauses the V3 scanner only
+    # for the session, so after a reboot rtl_tcp belongs to the scanner again
+    # (or is down if the V3 is unplugged). AIS-catcher v0.62 then retries the
+    # refused connection with no backoff and pins a core at 100%. It exits 0
+    # on SIGTERM, so a clean shutdown does not trigger on-failure. Run
+    # `pipeline.sh up ais v3-01` again to resume.
+    restart: on-failure
     networks: [rf_luv_net]
     depends_on:
       - ais-ingest
@@ -55,7 +61,7 @@ services:
       context: .
       dockerfile: Dockerfile.ingest
     container_name: ais-ingest
-    restart: unless-stopped
+    restart: on-failure
     networks: [rf_luv_net]
     environment:
       AIS_UDP_PORT: "10110"

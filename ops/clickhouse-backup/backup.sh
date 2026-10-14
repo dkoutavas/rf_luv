@@ -106,7 +106,9 @@ mkdir -p "$BACKUP_DIR"
 # loop (as a previous version did, keying on a non-existent clickhouse-<db>
 # name) would skip EVERY database and silently produce a zero-table backup,
 # the exact zero-backup trap this whole tool exists to prevent.
-if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" >/dev/null 2>&1; then
+# Compare the output: docker inspect exits 0 for a stopped container and
+# prints "false", so its exit code only says the container exists.
+if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != "true" ]; then
     fail "container '$CONTAINER' not running; nothing to back up. Bring the infra stack up first."
 fi
 
@@ -209,4 +211,10 @@ for db in $DATABASES; do
 done
 
 trap - ERR
+# A failed table listing reads as "no tables" above (mapfile cannot see the
+# exit code of ch), so a server that is up but not answering skips every
+# database. Every bootstrapped install has tables, so zero means a failure.
+if [ "$total_tables" -eq 0 ]; then
+    fail "0 tables dumped across [$DATABASES]; is ClickHouse answering?"
+fi
 info "clickhouse-backup done ($total_tables tables across [$DATABASES])"

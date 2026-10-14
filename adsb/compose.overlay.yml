@@ -14,9 +14,10 @@
 # rtl-tcp@<serial> (and with it the scanner) and leaves a marker so the
 # freshness probe reports LISTEN instead of alerting. `down` runs
 # `rf-mode scan`, which restarts rtl_tcp and the scanner.
-# Validated 2026-09-28 on the water-damaged V4: the damage is in its VHF
-# input, 1090 MHz uses the UHF path (620 frames, 69 aircraft in 120 s with
-# rtl_adsb, 6.5 cm arms, window mount).
+# First validated 2026-09-28 on the water-damaged V4 (620 frames, 69 aircraft
+# in 120 s with rtl_adsb, 6.5 cm arms, window mount). A same-antenna A/B the
+# same day put the V4 7 to 9 dB below the V3 at 1090 MHz (7 aircraft to
+# 39.6 nm against 18 to 68.7 nm), so ADS-B belongs on the V3.
 #
 # ClickHouse is reached over the shared rf_luv_net network at the
 # alias `clickhouse` on HTTP port 8123.

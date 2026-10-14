@@ -25,7 +25,9 @@ bash pipeline.sh down ais v3-01        # the scanner comes back
 ```
 
 Dongle: marine AIS is VHF (161.975 and 162.025 MHz). The water-damaged V4 is
-16.5 dB down at VHF, so AIS runs on the V3. ADS-B on the V4 keeps running.
+16.5 dB down at VHF, so AIS runs on the V3. ADS-B also belongs on the V3, so
+the two take turns. To run both at once, put ADS-B on the V4 and accept its
+shorter range.
 
 Antenna: a vertical dipole with 44 cm arms (7125 / 162 MHz), pointed SW toward
 Piraeus.

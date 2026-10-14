@@ -28,9 +28,10 @@ bash pipeline.sh up ism <serial>       # pauses that dongle's scanner
 bash pipeline.sh down ism <serial>     # the scanner comes back
 ```
 
-Dongle: 433.92 MHz is UHF, so the water-damaged V4 works as well as the V3.
-readsb holds the V4 over USB while ADS-B is up, so take ADS-B down first if you
-pick the V4. Picking the V3 stops the spectrum scanner for the session.
+Dongle: 433.92 MHz is UHF. The water-damaged V4 is about 3.5 dB down there,
+so it still works. ADS-B and POCSAG stop rtl_tcp on the dongle they hold, and
+`pipeline.sh up` does not check for that, so pick a dongle that neither of them
+holds. Picking the V3 stops the spectrum scanner for the session.
 
 Antenna: a vertical dipole with 16.4 cm arms (7125 / 433.92 MHz), at a window.
 

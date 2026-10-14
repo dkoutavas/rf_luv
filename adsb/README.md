@@ -9,9 +9,10 @@ RTL-SDR (USB) -> ultrafeeder (readsb + tar1090) -> SBS :30003 -> adsb-ingest -> 
 
 ## Status
 
-Validated live on 2026-09-28 on the V4. Its water damage is in the VHF input,
-and 1090 MHz takes the UHF path, so ADS-B still works on it. PR #36 added
-aircraft metadata, airlines and coverage panels.
+Validated live on 2026-09-28. A same-antenna A/B that day (window, gain 49.6)
+heard 18 aircraft out to 68.7 nm on the V3 and 7 out to 39.6 nm on the
+water-damaged V4, which is 7 to 9 dB down at 1090 MHz. Run ADS-B on the V3.
+PR #36 added aircraft metadata, airlines and coverage panels.
 
 ## How it runs
 
@@ -23,9 +24,9 @@ freshness probe reports `LISTEN` instead of alerting. `down` runs
 
 ```bash
 bash infra/up.sh                       # shared ClickHouse + Grafana first
-bash pipeline.sh up adsb v4-01         # readsb takes the V4 over USB
+bash pipeline.sh up adsb v3-01         # readsb takes the V3 over USB
 # map: http://localhost:8080 (tar1090, graphs1090 at /graphs1090/)
-bash pipeline.sh down adsb v4-01       # rtl_tcp and the scanner come back
+bash pipeline.sh down adsb v3-01       # rtl_tcp and the scanner come back
 ```
 
 `pipeline.sh rotate` refuses to leave a USB pipe. Run `down` first.

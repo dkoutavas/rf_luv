@@ -13,8 +13,8 @@
 # pipeline.sh reads the port from /etc/rtl-scanner/<serial>.env. rtl_tcp serves
 # one client at a time, so pipeline.sh pauses rtl-scanner@<serial> for the
 # session. The decoder does not take the rtl-coordinator lock.
-# 433.92 MHz is UHF, so the water-damaged V4 works too. readsb holds the V4
-# over USB while ADS-B is up, so take ADS-B down first.
+# 433.92 MHz is UHF, so the water-damaged V4 works too (about 3.5 dB down).
+# ADS-B and POCSAG stop rtl_tcp on the dongle they hold, so pick another one.
 #
 # Decodes weather stations, tire sensors, doorbells, remotes, etc.
 # at 433.92 MHz. Dipole arms ~16.4 cm, vertical, at window.

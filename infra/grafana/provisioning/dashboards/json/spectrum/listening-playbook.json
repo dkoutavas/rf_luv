@@ -636,6 +636,240 @@
       "options": {
         "showHeader": true
       }
+    },
+    {
+      "type": "table",
+      "title": "Signal of the Day",
+      "description": "One pick per day from spectrum/anomalies.py, newest first, with the written reason. The interest score favors unnamed, new and rare emitters and pushes broadcast FM, DVB-T and artifact suspects to the bottom. Re-picked every hour, sent in the 21:00 digest.",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 62 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT toString(day) AS day, round(center_hz / 1000000.0, 3) AS freq_mhz, name, name_source AS named_by, dongle_id, score, reason FROM spectrum.signal_of_the_day FINAL ORDER BY day DESC LIMIT 7",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "freq_mhz" },
+            "properties": [{ "id": "unit", "value": "MHz" }, { "id": "decimals", "value": 3 }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Active Emitters",
+      "description": "Emitters on the selected dongle with a peak in the last hour (spectrum.emitters_current, rebuilt every 15 min). An emitter is one transmitter: adjacent bins that peak across many sweeps. Unnamed and new first, broadcast and artifact suspects last, roughly the order of rf.py now, which has the exact score. ARTIFACT SUSPECT rows are the receiver's own spurs, not transmitters.",
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 67 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT round(center_hz / 1000000.0, 3) AS freq_mhz, name, name_source AS named_by, if(artifact_suspect, concat('ARTIFACT SUSPECT: ', artifact_reason), if(tetra_network != '', concat('TETRA ', tetra_network, if(tetra_mode = 'continuous', ', likely control channel', ', bursty')), '')) AS flag, round(100 * duty_overall, 1) AS duty_pct, hours_observed, first_seen, last_seen, emitter_id FROM spectrum.emitters_current WHERE dongle_id = '$dongle' AND last_seen > now() - INTERVAL 1 HOUR ORDER BY artifact_suspect, class_id IN ('broadcast_fm', 'dvbt_mux') OR service IN ('broadcast_fm', 'dvb_t_gr'), name_source NOT IN ('allocation', 'signal_catalog', 'unnamed'), first_seen DESC LIMIT 50",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "freq_mhz" },
+            "properties": [{ "id": "unit", "value": "MHz" }, { "id": "decimals", "value": 3 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duty_pct" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "hours_observed" },
+            "properties": [{ "id": "unit", "value": "suffix: h" }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Today's Anomalies",
+      "description": "What was new or strange in the last 24 h, both dongles (spectrum.anomalies, hourly). Kinds: new_emitter, gone_quiet, louder_than_usual, broken_pattern, new_tetra_carrier. Silence counts swept hours only, so a session gap is never gone_quiet. confidence low = a level anomaly from a dongle whose levels are not trusted (the water-damaged V4).",
+      "gridPos": { "h": 10, "w": 10, "x": 14, "y": 67 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT event_at, kind, round(center_hz / 1000000.0, 3) AS freq_mhz, name, dongle_id, confidence, detail FROM spectrum.anomalies FINAL WHERE event_at > now() - INTERVAL 24 HOUR ORDER BY confidence = 'low', event_at DESC LIMIT 100",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "freq_mhz" },
+            "properties": [{ "id": "unit", "value": "MHz" }, { "id": "decimals", "value": 3 }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "TETRA Networks",
+      "description": "TETRA carriers per network on the primary dongle (dongle_roles, the V3). public_safety is 380-400 MHz, civil 410-430 MHz, other is anywhere else and is a finding. A continuous carrier is likely a base station's control channel. Tile-grid spurs with a tetra label are left out. Occupancy from sweep data only: nothing is captured or decoded.",
+      "gridPos": { "h": 6, "w": 10, "x": 0, "y": 77 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT network, carriers, likely_control_channels, bursty, outside_known_allocation, also_on_secondary, secondary_only, hours_observed FROM spectrum.tetra_networks ORDER BY network = 'other', network",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "hours_observed" },
+            "properties": [{ "id": "unit", "value": "suffix: h" }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "TETRA Activity by Hour of Day",
+      "description": "Per network, the share of covering sweeps with a peak on its carriers, by hour of day in Athens time, primary dongle only. Hours the dongle never swept stay blank, they are not 0 %. A swept hour with no peak is dark.",
+      "gridPos": { "h": 6, "w": 14, "x": 10, "y": 77 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT hour_of_day, 100 * maxIf(duty, network = 'public_safety') AS `public safety`, 100 * maxIf(duty, network = 'civil') AS `civil`, 100 * maxIf(duty, network = 'other') AS `other` FROM spectrum.tetra_network_hourly GROUP BY hour_of_day ORDER BY hour_of_day",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Blues",
+          "steps": 64,
+          "min": 0,
+          "max": 100
+        },
+        "filterValues": {
+          "le": -1
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "axisWidth": 100,
+          "reverse": false
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "never"
+      }
+    },
+    {
+      "type": "table",
+      "title": "TETRA Carriers",
+      "description": "Every TETRA carrier per dongle. The primary (V3) is the source of truth. Secondary rows show what the V4 also sees, never its levels. mode: continuous (likely control channel) or bursty, from the duty cycle. finding marks a carrier outside every known TETRA allocation.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 83 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "targets": [
+        {
+          "rawSql": "SELECT network, role, dongle_id, center_mhz, mode, round(100 * duty_overall, 1) AS duty_pct, hours_observed, if(outside_known_allocation, 'outside every known TETRA allocation', '') AS finding, other_dongle_sees_it AS on_other_dongle, evidence, name, last_seen FROM spectrum.tetra_carriers ORDER BY network, role, center_mhz",
+          "format": 1
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "center_mhz" },
+            "properties": [{ "id": "unit", "value": "MHz" }, { "id": "decimals", "value": 3 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duty_pct" },
+            "properties": [{ "id": "unit", "value": "percent" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "hours_observed" },
+            "properties": [{ "id": "unit", "value": "suffix: h" }]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Occupancy Atlas",
+      "description": "M1: per band and hour, the share of sweeps in which the peak detector fired, averaged over the band's 1 MHz cells (spectrum.occupancy_hourly). Only swept time counts: hours the dongle was unplugged are blank, and a swept band with no peak is dark, 0 %. Raw peaks, so tile-grid spurs and FM intermodulation add some false occupancy.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 91 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "P_SPECTRUM_CLICKHOUSE" },
+      "timeFrom": "7d",
+      "targets": [
+        {
+          "rawSql": "SELECT hour AS time, avgIfOrNull(active_pct, band_mhz BETWEEN 88 AND 107) AS `FM broadcast 88-108`, avgIfOrNull(active_pct, band_mhz BETWEEN 108 AND 117) AS `aero nav 108-118`, avgIfOrNull(active_pct, band_mhz BETWEEN 118 AND 136) AS `airband 118-137`, avgIfOrNull(active_pct, band_mhz BETWEEN 137 AND 143) AS `weather sats 137-144`, avgIfOrNull(active_pct, band_mhz BETWEEN 144 AND 145) AS `2 m ham 144-146`, avgIfOrNull(active_pct, band_mhz BETWEEN 146 AND 155) AS `gov, business 146-156`, avgIfOrNull(active_pct, band_mhz BETWEEN 156 AND 161) AS `marine 156-162`, avgIfOrNull(active_pct, band_mhz BETWEEN 162 AND 173) AS `land mobile 162-174`, avgIfOrNull(active_pct, band_mhz BETWEEN 174 AND 229) AS `DVB-T 174-230`, avgIfOrNull(active_pct, band_mhz BETWEEN 230 AND 379) AS `military aero 230-380`, avgIfOrNull(active_pct, band_mhz BETWEEN 380 AND 399) AS `TETRA public safety 380-400`, avgIfOrNull(active_pct, band_mhz BETWEEN 400 AND 409) AS `unallocated 400-410`, avgIfOrNull(active_pct, band_mhz BETWEEN 410 AND 429) AS `TETRA civil 410-430`, avgIfOrNull(active_pct, band_mhz BETWEEN 430 AND 445) AS `70 cm, ISM 430-446`, avgIfOrNull(active_pct, band_mhz BETWEEN 446 AND 469) AS `PMR446, land mobile 446-470` FROM spectrum.occupancy_hourly WHERE dongle_id = '$dongle' AND $__timeFilter(hour) GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Inferno",
+          "steps": 64,
+          "min": 0,
+          "max": 100
+        },
+        "filterValues": {
+          "le": -1
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "axisWidth": 200,
+          "reverse": false
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "never"
+      }
     }
   ],
   "refresh": "60s",

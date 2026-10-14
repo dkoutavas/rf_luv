@@ -1,0 +1,14 @@
+[Unit]
+Description=Run rf_luv anomaly detection every hour
+
+[Timer]
+# Hourly, 2 min past the hour, after the emitter run at :00:50. Every rule
+# counts swept hours, so an hour is the natural step. Each run looks back
+# 24 h, and the anomalies table keeps one row per event, so overlapping
+# runs do not repeat themselves.
+OnCalendar=*:02:00
+Unit=spectrum-anomalies.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

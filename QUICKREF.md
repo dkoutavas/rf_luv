@@ -55,6 +55,13 @@ journalctl --user -u rtl-scanner@v4-01 -f     # live log
 # Full 88–470 MHz sweep every ~5 min, airband every 60s
 ```
 
+### What is on air, and what is that?
+```bash
+python3 spectrum/rf.py now                    # emitters heard in the last 10 min, most interesting first
+python3 spectrum/rf.py autopsy 144.8          # IQ capture + blind analysis on the V3, with the emitter's history
+# autopsy refuses TETRA and cellular (blocklist) and any capture window that holds a TETRA emitter
+```
+
 ### Quick one-shot spectrum scan (V3, free the dongle first)
 ```bash
 rf-mode listen v3-01                          # free the V3

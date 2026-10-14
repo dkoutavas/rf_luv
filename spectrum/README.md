@@ -32,6 +32,17 @@ The scanner only ever stores FFT *power* - it can locate a signal in frequency b
 
 **Roadmap - D3.1 (not built here).** A follow-up will wire blind verdicts into the classifier via a new `modulation_in` evidence axis in `signal_classes.evidence_rules`: a small `latest_modulation_for(freq_hz)` helper plus a few lines in `classifier.score_class` rewarding a class whose expected modulation matches the observed family, weighted by confidence. That needs its own migration + classifier re-baseline, so it deliberately does **not** ride along with D3.
 
+## Looking closer: `rf.py`
+
+```bash
+python3 spectrum/rf.py now                  # what is on air on the V3, most interesting first
+python3 spectrum/rf.py autopsy 144.8        # capture IQ at 144.8 MHz and identify it
+```
+
+`now` maps the peaks of the last 10 minutes (`--minutes`) onto the emitters and ranks them by the signal-of-the-day score. Artifact suspects are marked and sorted last. If the dongle has not swept in that time it says so: not listening is not silence.
+
+`autopsy` runs `iq_capture.py --capture` on the V3 (`--dongle`, port from `/etc/rtl-scanner/<serial>.env`, gain from its latest sweep unless `--gain`), then `analysis/blind_analyze.py` on the file, and prints the emitter's name and history next to the blind verdict. It refuses, before touching the dongle, any frequency in `iq_capture.BLOCKED_BANDS` and any capture window that would include a TETRA emitter, wherever it is. If it cannot read the emitter table, or the table is empty, it refuses too.
+
 ## Setup
 
 The scanner runs natively under systemd, one `rtl-tcp@<serial>` plus one
@@ -113,8 +124,20 @@ Three Python scripts run on a 5-minute cadence as systemd user timers - they rea
 | `feature_extractor.py` | `peaks`, `scans`, `sweep_health`, `allocations` | `peak_features` | 5 min |
 | `classifier.py` | `peak_features`, `known_frequencies`, `allocations`, `signal_classes`, `listening_log` | `signal_classifications` | 5 min |
 | `classifier_health.py` | `signal_classifications`, baselines | `classifier_health` | 5 min |
+| `emitters.py` | `peaks`, `sweep_health`, `signal_classifications`, the naming tables | `emitters` | 15 min |
+| `anomalies.py` | `emitters_current`, `peaks`, `sweep_health`, `dongle_roles` | `anomalies`, `signal_of_the_day` | hourly, digest daily at 21:00 |
 
-They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/<file>.py` (Tumbleweed's `python3` is 3.13). Status: `systemctl --user list-timers | grep spectrum-`.
+They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{service,timer}`, `spectrum-classifier-health.{service,timer}`, `spectrum-emitters.{service,timer}`, `spectrum-anomalies.{service,timer}` and `spectrum-digest.{service,timer}` under `~/.config/systemd/user/`, with `ExecStart=/usr/bin/python3 %h/dev/rf_luv/spectrum/<file>.py` (Tumbleweed's `python3` is 3.13). Status: `systemctl --user list-timers | grep spectrum-`.
+
+`emitters.py` turns per-bin peaks into emitters: one transmitter as one dongle sees it, a cluster of adjacent bins that peaks across many sweeps. Each emitter has a stable ID, duty cycles over swept time only, a name (operator log first, then known frequencies, the classifier, the allocation) and an `artifact_suspect` flag for the dongle's own spurs. Read `emitters_current` for the latest list and `emitters_merged` for both dongles side by side, primary first. `python3 spectrum/emitters.py --dry-run` prints the list without writing.
+
+`anomalies.py` asks five questions of every emitter over the last 24 h: new emitter, gone quiet, louder than usual, broken pattern (active at an hour of day where it never is), and new TETRA carrier. Silence counts swept hours only, so a session gap is never "gone quiet". Levels compare within one dongle and one gain, clean sweeps only, and the V4's level anomalies are marked low confidence. Artifact suspects raise nothing. It also picks a signal of the day by a fixed interest score (unnamed, new and rare first, broadcast and artifacts last) and writes the reason. `--digest` sends the day's summary through `ops/notify/notify.py`, unless the dongles swept nothing. `--dry-run` prints without writing or sending.
+
+**TETRA network map.** Every emitter with TETRA evidence (the classifier says `tetra`, it sits in a TETRA allocation, or `listening_log` or `known_frequencies` names it TETRA) gets a network: `public_safety` (380-400 MHz), `civil` (410-430 MHz) or `other`. An `other` carrier is a finding, kept and marked. `tetra_carriers` lists them with continuous or bursty mode, duty by hour of day and hours observed. `tetra_networks` and `tetra_network_hourly` summarize per network. The primary dongle (`dongle_roles`, the V3) is the source of truth, artifact suspects stay off the map, and no view shows a level. This is occupancy from sweep data only. Nothing captures, demodulates or decodes TETRA.
+
+**Occupancy atlas (M1).** `occupancy_hourly` gives, per dongle, 1 MHz band and hour, the share of the sweeps that measured the band in which the peak detector fired there. Two materialized views on `scans` and `peaks` fill `occupancy_hourly_cells` at insert time, and `sweep_health` supplies the sweep counts, so only swept time counts and a session gap has no cells at all. Peaks are counted raw, so spurs add some false occupancy.
+
+**Dashboard.** The Listening Playbook (Grafana, Spectrum folder) has panels for the signal of the day, active emitters, today's anomalies, the TETRA networks and carriers, TETRA activity by hour of day, and the occupancy atlas as a band-by-hour heatmap.
 
 A fourth, `analysis/detect_compression.py`, is a one-shot/backfill tool - runnable manually for archaeology, no production timer.
 

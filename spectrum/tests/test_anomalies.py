@@ -48,7 +48,7 @@ def test_a_session_gap_is_not_silence():
     hours = _hours(T0, 12)                          # swept 12 h, then unplugged for days
     act = _always_on(T0, T0 + 12 * H - 60, hours)
     now = T0 + 3 * DAY
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is None
 
 
 def test_gone_quiet_counts_swept_hours_across_a_gap():
@@ -58,11 +58,24 @@ def test_gone_quiet_counts_swept_hours_across_a_gap():
     hours.update(_hours(T0 + 2 * DAY, 3))
     hours.update(_hours(T0 + 2 * DAY + 10 * H, 3))
     now = T0 + 2 * DAY + 13 * H
-    found = anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now)
+    found = anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED)
     assert found and found.kind == "gone_quiet"
     assert found.event_at == T0 + 2 * DAY + 13 * H      # the end of the 6th silent swept hour
     del hours[T0 + 2 * DAY + 12 * H]
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is None
+
+
+def test_gone_quiet_on_an_untrusted_dongle_is_low_confidence():
+    # The V4 lost 20 dB at FM when its antenna changed: every FM station on it
+    # fell under the peak detector's line at once. The receiver changed, not 35
+    # transmitters, so the rule reports but marks it low confidence.
+    hours = _hours(T0, 12)
+    act = _always_on(T0, T0 + 12 * H - 60, hours)
+    hours.update(_hours(T0 + 2 * DAY, 6))
+    now = T0 + 2 * DAY + 7 * H
+    found = anomalies.gone_quiet(_emitter(dongle_id="v4-01"), act, hours, now - DAY, now, UNTRUSTED)
+    assert found and found.confidence == "low" and "not trusted" in found.detail
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED).confidence == "normal"
 
 
 def test_the_unfinished_current_hour_does_not_count_as_silence():
@@ -71,10 +84,10 @@ def test_the_unfinished_current_hour_does_not_count_as_silence():
     hours.update(_hours(T0 + 72 * H, 5))          # 5 full silent hours
     hours[T0 + 77 * H] = (1, 0)                   # and 2 minutes of the current one
     now = T0 + 77 * H + 120
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is None
     later = T0 + 78 * H + 120                     # once that hour is over, it counts
     hours[T0 + 77 * H] = (13, 0)
-    found = anomalies.gone_quiet(_emitter(), act, hours, later - DAY, later)
+    found = anomalies.gone_quiet(_emitter(), act, hours, later - DAY, later, TRUSTED)
     assert found and found.event_at == T0 + 78 * H
 
 
@@ -83,7 +96,7 @@ def test_a_rare_emitter_is_not_quiet_after_a_few_hours():
     act = Activity(hits=8, first_seen=T0, last_seen=T0 + 3 * H)
     act.hod_hits[emitters.local_hour(T0)] = 8
     now = T0 + 30 * H
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is None
 
 
 def test_a_daytime_channel_is_not_quiet_at_night():
@@ -98,10 +111,10 @@ def test_a_daytime_channel_is_not_quiet_at_night():
     now = T0 + 2 * DAY + 3 * H
     silent = [h for h in hours if h > act.last_seen]
     assert len(silent) >= anomalies.GONE_QUIET_SWEPT_HOURS    # enough silence to fire...
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is None   # ...but it is night
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is None   # ...but it is night
     # The same silence in daytime hours would fire.
     act.hod_hits = [act.hits // 24] * 24
-    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now) is not None
+    assert anomalies.gone_quiet(_emitter(), act, hours, now - DAY, now, TRUSTED) is not None
 
 
 # ─── broken_pattern ─────────────────────────────────────────
@@ -134,7 +147,7 @@ def _daytime_history(days, recent_hour_local=None, recent_peaks=4):
 
 def test_broken_pattern_fires_on_a_night_burst_of_a_day_channel():
     act, hours, window_start = _daytime_history(4, recent_hour_local=5)
-    found = anomalies.broken_pattern(_emitter(), act, hours, window_start)
+    found = anomalies.broken_pattern(_emitter(), act, hours, window_start, TRUSTED)
     assert found and "05:00" in found.detail
 
 
@@ -142,12 +155,12 @@ def test_no_broken_pattern_without_swept_history_at_that_hour():
     act, hours, window_start = _daytime_history(4, recent_hour_local=5)
     for h in [h for h in hours if h < window_start and emitters.local_hour(h) == 5]:
         del hours[h]
-    assert anomalies.broken_pattern(_emitter(), act, hours, window_start) is None
+    assert anomalies.broken_pattern(_emitter(), act, hours, window_start, TRUSTED) is None
 
 
 def test_one_odd_peak_is_luck_not_a_broken_pattern():
     act, hours, window_start = _daytime_history(4, recent_hour_local=5, recent_peaks=1)
-    assert anomalies.broken_pattern(_emitter(), act, hours, window_start) is None
+    assert anomalies.broken_pattern(_emitter(), act, hours, window_start, TRUSTED) is None
 
 
 def test_poisson_tail():
@@ -279,7 +292,7 @@ def test_digest_counts_each_kind_and_keeps_low_confidence_apart():
              Anomaly("louder_than_usual", "v3-01", "y", 1, "n", T0, "normal", ""),
              Anomaly("louder_than_usual", "v4-01", "y", 1, "n", T0, "low", "")]
     title, body = anomalies.digest(pick, found, {"v3-01": 23, "v4-01": 12}, "2026-10-09")
-    assert title == "rf_luv 2026-10-09: unnamed 140.550 MHz"
+    assert title == "rf_luv 2026-10-09: signal of the day 140.550 MHz"
     assert "Signal of the day: unnamed at 140.550 MHz on v3-01: unnamed, new." in body
     assert ("Last 24 h: new emitter 1, gone quiet 0, louder than usual 1, broken pattern 0, "
             "new TETRA carrier 0.") in body

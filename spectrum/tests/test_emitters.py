@@ -307,3 +307,10 @@ def test_each_dongle_gets_its_own_emitters(rows):
     v3 = world.find(rows, "v3-01", synth.TETRA_PS_CONTINUOUS[1])
     assert v4["emitter_id"].startswith("v4-01:") and v3["emitter_id"].startswith("v3-01:")
     assert not [r for r in rows if r["dongle_id"] == "v4-01" and r["lo_hz"] <= synth.INTERMOD <= r["hi_hz"]]
+
+
+def test_minted_id_avoids_ids_that_older_runs_issued():
+    # The anchor bin's ID went to an emitter the latest run no longer has. A new
+    # cluster there must not inherit its rows and anomaly history.
+    ids = emitters.assign_ids("v3-01", [_cluster(100_000_000)], [], issued={"v3-01:100000"})
+    assert ids == ["v3-01:100000-2"]

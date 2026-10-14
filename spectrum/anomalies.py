@@ -170,6 +170,21 @@ def _anomaly(kind: str, e: Emitter, event_at: int, detail: str, confidence: str 
     return Anomaly(kind, e.dongle_id, e.emitter_id, e.center_hz, e.name, event_at, confidence, detail)
 
 
+def _receiver_caveat(detail: str, role: Role) -> tuple[str, str]:
+    """(detail, confidence) for a rule that depends on the receiver.
+
+    Whether a bin peaks depends on the receiver's sensitivity as much as on
+    the transmitter: a peak is 10 dB over its neighbors, and a weak front end
+    puts weak carriers under that line. A dongle whose levels are not trusted
+    (dongle_roles) therefore reports low confidence. On the first run over real
+    data the V4, 20 dB down at FM since its antenna changed on 2026-09-28,
+    reported 35 FM stations "gone quiet". The stations were fine.
+    """
+    if role.levels_trusted:
+        return detail, "normal"
+    return detail + ". This dongle's levels are not trusted (dongle_roles)", "low"
+
+
 # ─── The five rules ─────────────────────────────────────────
 
 
@@ -181,7 +196,7 @@ def new_emitter(e: Emitter, act: Activity, window_start: int) -> Anomaly | None:
 
 
 def gone_quiet(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]], window_start: int,
-               now: int) -> Anomaly | None:
+               now: int, role: Role) -> Anomaly | None:
     """Silent through GONE_QUIET_SWEPT_HOURS swept hours, the Nth of them inside the window.
 
     Only complete hours with covering sweeps count. Reported once: at the
@@ -209,10 +224,10 @@ def gone_quiet(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]], win
     expected = sum(hod_duty[local_hour(h)] * hours[h][0] for h in nth)
     if expected < GONE_QUIET_MIN_EXPECTED:
         return None
-    return _anomaly("gone_quiet", e, onset,
-                    f"no peak in {len(silent)} swept hours since {_local(act.last_seen)}. "
-                    f"Its usual rate at those hours of day predicts about {expected:.0f} "
-                    f"peaks in the first {GONE_QUIET_SWEPT_HOURS}")
+    detail = (f"no peak in {len(silent)} swept hours since {_local(act.last_seen)}. "
+              f"Its usual rate at those hours of day predicts about {expected:.0f} "
+              f"peaks in the first {GONE_QUIET_SWEPT_HOURS}")
+    return _anomaly("gone_quiet", e, onset, *_receiver_caveat(detail, role))
 
 
 def poisson_tail(k: int, lam: float) -> float:
@@ -228,7 +243,7 @@ def poisson_tail(k: int, lam: float) -> float:
 
 
 def broken_pattern(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]],
-                   window_start: int) -> Anomaly | None:
+                   window_start: int, role: Role) -> Anomaly | None:
     """Peaks in the window at an hour of day where history has none, too many to be luck.
 
     History is everything from first_seen to the window start. An hour of
@@ -270,10 +285,10 @@ def broken_pattern(e: Emitter, act: Activity, hours: dict[int, tuple[int, int]],
         return None
     hod, peaks, chance = odd[0]
     event_at = min(act.hod_first_recent[h] for h, _, _ in odd)
-    return _anomaly("broken_pattern", e, event_at,
-                    f"active at {', '.join(f'{h:02d}:00' for h, _, _ in odd)} local. "
-                    f"No peak at {hod:02d}:00 in {hist_days[hod]} swept days of history, and "
-                    f"{peaks} peaks by luck had a {chance:.1e} chance")
+    detail = (f"active at {', '.join(f'{h:02d}:00' for h, _, _ in odd)} local. "
+              f"No peak at {hod:02d}:00 in {hist_days[hod]} swept days of history, and "
+              f"{peaks} peaks by luck had a {chance:.1e} chance")
+    return _anomaly("broken_pattern", e, event_at, *_receiver_caveat(detail, role))
 
 
 def louder_than_usual(e: Emitter, levels: list[LevelStat], role: Role) -> Anomaly | None:
@@ -298,10 +313,7 @@ def louder_than_usual(e: Emitter, levels: list[LevelStat], role: Role) -> Anomal
     delta, hist, rec = best
     detail = (f"{delta:+.1f} dB at gain {hist.gain_db:g} dB: {rec.mean:.1f} dBFS over {rec.n} clean "
               f"sweeps, usually {hist.mean:.1f} ± {hist.std:.1f} over {hist.n}")
-    if not role.levels_trusted:
-        detail += ". This dongle's levels are not trusted (dongle_roles)"
-    return _anomaly("louder_than_usual", e, rec.last_at, detail,
-                    "normal" if role.levels_trusted else "low")
+    return _anomaly("louder_than_usual", e, rec.last_at, *_receiver_caveat(detail, role))
 
 
 def new_tetra_carrier(e: Emitter, act: Activity, window_start: int) -> Anomaly | None:
@@ -336,9 +348,9 @@ def detect(emitter_list: list[Emitter], activity: dict[int, Activity], coverage:
         hours = coverage.hours(e.dongle_id, e.center_hz)
         role = roles.get(e.dongle_id, Role(False, False))
         for found in (new_emitter(e, act, window_start),
-                      gone_quiet(e, act, hours, window_start, now),
+                      gone_quiet(e, act, hours, window_start, now, role),
                       louder_than_usual(e, levels.get(idx, []), role),
-                      broken_pattern(e, act, hours, window_start),
+                      broken_pattern(e, act, hours, window_start, role),
                       new_tetra_carrier(e, act, window_start)):
             if found:
                 out.append(found)
@@ -419,7 +431,10 @@ def digest(pick: Pick | None, anomalies: list[Anomaly], swept_hours: dict[str, i
     """(title, body) for notify.send, or None when the dongles swept nothing."""
     if not any(swept_hours.values()):
         return None
-    title = f"rf_luv {day}: " + (f"{pick.emitter.name} {pick.emitter.center_hz / 1e6:.3f} MHz"
+    # The name stays out of the title: ntfy carries the title in an HTTP header,
+    # which http.client encodes as latin-1, and station names can be Greek. The
+    # body's first line names it.
+    title = f"rf_luv {day}: " + (f"signal of the day {pick.emitter.center_hz / 1e6:.3f} MHz"
                                  if pick else "no signal of the day")
     normal = [a for a in anomalies if a.confidence == "normal"]
     low = [a for a in anomalies if a.confidence == "low"]
@@ -576,8 +591,10 @@ def run(send: bool = False, dry_run: bool = False) -> list[Anomaly]:
         if message is None:
             log.info("The dongles swept nothing in the last %d h, no digest", WINDOW_HOURS)
         else:
-            send_digest(*message)
-            log.info("Digest sent: %s", message[0])
+            if send_digest(*message):
+                log.info("Digest sent: %s", message[0])
+            else:
+                log.warning("Digest not sent (deduplicated, or no notifier reached): %s", message[0])
     return found
 
 

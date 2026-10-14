@@ -362,6 +362,13 @@ def cmd_autopsy(args) -> int:
     if port is None:
         print(f"No RTL_TCP_PORT in {ENV_DIR}/{args.dongle}.env, so the dongle cannot be reached.")
         return 1
+    # iq_capture.py takes the dongle from the scanner before it opens its
+    # output file. Checking the directory first keeps a missing install from
+    # costing a sweep and ending in an opaque "exit 1".
+    if not os.access(iq_capture.IQ_CAPTURE_DIR, os.W_OK):
+        print(f"Cannot write to {iq_capture.IQ_CAPTURE_DIR} (IQ_CAPTURE_DIR). Run "
+              f"ops/spectrum-iq-capture/install.sh first, which creates it.")
+        return 1
     gain = args.gain if args.gain is not None else latest_gain(args.dongle)
     try:
         path, verdict = capture_and_analyze(freq, args.dongle, port, gain, args.duration)

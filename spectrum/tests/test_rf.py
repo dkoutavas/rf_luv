@@ -61,6 +61,7 @@ def tools(monkeypatch, tmp_path):
     monkeypatch.setattr(rf, "latest_gain", lambda dongle: 3.7)
     (tmp_path / "v3-01.env").write_text("SCAN_DONGLE_ID=v3-01\nRTL_TCP_PORT=1235\n")
     monkeypatch.setattr(rf, "ENV_DIR", str(tmp_path))
+    monkeypatch.setattr(rf.iq_capture, "IQ_CAPTURE_DIR", str(tmp_path))   # the preflight finds a writable dir
     return fake
 
 
@@ -186,6 +187,14 @@ def test_autopsy_runs_capture_then_analysis(tools, capsys):
     assert "within one bin : APRS (IARU Region 1) [known_frequencies]" in out
     assert "modulation     : NFM (confidence 0.62)" in out
     assert "2. frequency wanders: FM" in out
+
+
+def test_autopsy_refuses_without_a_capture_directory(tools, monkeypatch, capsys):
+    # iq_capture.py would take the dongle and then fail to open its file
+    monkeypatch.setattr(rf.iq_capture, "IQ_CAPTURE_DIR", "/nonexistent/iq_captures")
+    assert rf.main(["autopsy", "144.8"]) == 1
+    assert tools.calls == []
+    assert "ops/spectrum-iq-capture/install.sh" in capsys.readouterr().out
 
 
 def test_failed_capture_skips_analysis(tools, capsys):

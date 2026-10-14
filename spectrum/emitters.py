@@ -180,7 +180,8 @@ class Previous:
     sweeps_hit: int
 
 
-def assign_ids(dongle_id: str, clusters: list[Cluster], previous: list[Previous]) -> list[str]:
+def assign_ids(dongle_id: str, clusters: list[Cluster], previous: list[Previous],
+               issued: set[str] = frozenset()) -> list[str]:
     """Give each cluster the ID of the previous emitter it overlaps most.
 
     Why tracking and not a frequency hash: an ID derived from the frequency
@@ -217,7 +218,9 @@ def assign_ids(dongle_id: str, clusters: list[Cluster], previous: list[Previous]
             ids[ci] = emitter_id
             taken.add(emitter_id)
 
-    used = taken | {p.emitter_id for p in previous}
+    # Every ID any run issued stays taken, not only the latest run's: an emitter
+    # that dropped out keys its old rows and its anomaly history.
+    used = taken | {p.emitter_id for p in previous} | set(issued)
     for ci, c in enumerate(clusters):
         if ids[ci] is not None:
             continue
@@ -652,13 +655,14 @@ class Planned:
     cluster: Cluster
 
 
-def plan(bins: list[BinStat], previous: dict[str, list[Previous]]) -> list[Planned]:
+def plan(bins: list[BinStat], previous: dict[str, list[Previous]],
+         issued: dict[str, set[str]] | None = None) -> list[Planned]:
     """Cluster every dongle's bins and carry the IDs forward."""
     clusters = cluster_bins(bins)
     out: list[Planned] = []
     for dongle_id in sorted({c.dongle_id for c in clusters}):
         mine = [c for c in clusters if c.dongle_id == dongle_id]
-        ids = assign_ids(dongle_id, mine, previous.get(dongle_id, []))
+        ids = assign_ids(dongle_id, mine, previous.get(dongle_id, []), (issued or {}).get(dongle_id, set()))
         out += [Planned(i, c) for i, c in zip(ids, mine)]
     return out
 
@@ -755,6 +759,12 @@ def load_previous() -> dict[str, list[Previous]]:
     return out
 
 
+def load_issued_ids() -> dict[str, set[str]]:
+    """Every emitter_id any run wrote, per dongle. The table keeps 90 days."""
+    return {r["dongle_id"]: set(r["ids"]) for r in db.query_rows(
+        "SELECT dongle_id, groupUniqArray(emitter_id) AS ids FROM spectrum.emitters GROUP BY dongle_id")}
+
+
 def load_coverage() -> Coverage:
     return Coverage([CoverageRow(r["dongle_id"], r["preset"], int(r["hour"]), int(r["gain_tenths"]),
                                  int(r["sweeps"]), int(r["clipped_sweeps"]))
@@ -775,7 +785,7 @@ def run(dry_run: bool = False) -> int:
     if not bins:
         log.info("No bin peaked in %d sweeps yet, nothing to cluster", MIN_BIN_SWEEPS)
         return 0
-    planned = plan(bins, load_previous())
+    planned = plan(bins, load_previous(), load_issued_ids())
     activity = summarize_activity(db.query_rows(activity_sql(footprints(planned), split_at)))
     rows = build_rows(planned, activity, load_coverage(), load_references(), split_at, now)
 

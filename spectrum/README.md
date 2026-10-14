@@ -32,6 +32,17 @@ The scanner only ever stores FFT *power* - it can locate a signal in frequency b
 
 **Roadmap - D3.1 (not built here).** A follow-up will wire blind verdicts into the classifier via a new `modulation_in` evidence axis in `signal_classes.evidence_rules`: a small `latest_modulation_for(freq_hz)` helper plus a few lines in `classifier.score_class` rewarding a class whose expected modulation matches the observed family, weighted by confidence. That needs its own migration + classifier re-baseline, so it deliberately does **not** ride along with D3.
 
+## Looking closer: `rf.py`
+
+```bash
+python3 spectrum/rf.py now                  # what is on air on the V3, most interesting first
+python3 spectrum/rf.py autopsy 144.8        # capture IQ at 144.8 MHz and identify it
+```
+
+`now` maps the peaks of the last 10 minutes (`--minutes`) onto the emitters and ranks them by the signal-of-the-day score. Artifact suspects are marked and sorted last. If the dongle has not swept in that time it says so: not listening is not silence.
+
+`autopsy` runs `iq_capture.py --capture` on the V3 (`--dongle`, port from `/etc/rtl-scanner/<serial>.env`, gain from its latest sweep unless `--gain`), then `analysis/blind_analyze.py` on the file, and prints the emitter's name and history next to the blind verdict. It refuses, before touching the dongle, any frequency in `iq_capture.BLOCKED_BANDS` and any capture window that would include a TETRA emitter, wherever it is. If it cannot read the emitter table it refuses too.
+
 ## Setup
 
 The scanner runs natively under systemd, one `rtl-tcp@<serial>` plus one

@@ -119,6 +119,8 @@ They install as `spectrum-features.{service,timer}`, `spectrum-classifier.{servi
 
 `emitters.py` turns per-bin peaks into emitters: one transmitter as one dongle sees it, a cluster of adjacent bins that peaks across many sweeps. Each emitter has a stable ID, duty cycles over swept time only, a name (operator log first, then known frequencies, the classifier, the allocation) and an `artifact_suspect` flag for the dongle's own spurs. Read `emitters_current` for the latest list and `emitters_merged` for both dongles side by side, primary first. `python3 spectrum/emitters.py --dry-run` prints the list without writing.
 
+**TETRA network map.** Every emitter with TETRA evidence (the classifier says `tetra`, it sits in a TETRA allocation, or `listening_log` or `known_frequencies` names it TETRA) gets a network: `public_safety` (380-400 MHz), `civil` (410-430 MHz) or `other`. An `other` carrier is a finding, kept and marked. `tetra_carriers` lists them with continuous or bursty mode, duty by hour of day and hours observed. `tetra_networks` and `tetra_network_hourly` summarize per network. The primary dongle (`dongle_roles`, the V3) is the source of truth, artifact suspects stay off the map, and no view shows a level. This is occupancy from sweep data only. Nothing captures, demodulates or decodes TETRA.
+
 A fourth, `analysis/detect_compression.py`, is a one-shot/backfill tool - runnable manually for archaeology, no production timer.
 
 ## Helper Scripts

@@ -129,3 +129,30 @@ def test_emitter_job_writes_and_the_views_read():
     solo = db.query_rows("SELECT dongle_id, from_primary, also_emitter_id FROM spectrum.emitters_merged "
                          f"WHERE lo_hz <= {synth.NEW_ON_DAY3} AND hi_hz >= {synth.NEW_ON_DAY3}")
     assert solo == [{"dongle_id": "v3-01", "from_primary": True, "also_emitter_id": ""}]
+
+
+def test_tetra_views_count_primary_carriers_and_skip_spurs():
+    emitters.run()
+    nets = {r["network"]: r for r in db.query_rows(
+        "SELECT network, carriers, likely_control_channels, bursty, outside_known_allocation, "
+        "also_on_secondary, secondary_only, length(diurnal_duty) AS hours FROM spectrum.tetra_networks")}
+    assert {k: (v["carriers"], v["likely_control_channels"], v["bursty"]) for k, v in nets.items()} == {
+        "public_safety": (3, 2, 1), "civil": (3, 2, 1), "other": (1, 1, 0)}
+    assert nets["other"]["outside_known_allocation"] == 1
+    assert nets["public_safety"]["outside_known_allocation"] == 0
+    assert nets["public_safety"]["also_on_secondary"] == 3
+    assert nets["civil"]["also_on_secondary"] == 2
+    assert all(v["secondary_only"] == 0 and v["hours"] == 24 for v in nets.values())
+
+    centers = {int(r["center_hz"]) for r in db.query_rows("SELECT center_hz FROM spectrum.tetra_carriers")}
+    assert not centers & set(synth.TETRA_SPURS)
+    modes = {r["mode"] for r in db.query_rows("SELECT mode FROM spectrum.tetra_carriers")}
+    assert modes == {"continuous (likely control channel)", "bursty"}
+
+    hourly = db.query_rows("SELECT network, hour_of_day, carriers, duty FROM spectrum.tetra_network_hourly "
+                           "ORDER BY network, hour_of_day")
+    assert len(hourly) == 3 * 24
+    # Hours the secondary never swept stay NULL in its own carriers' patterns.
+    v4 = db.query_rows("SELECT diurnal_duty FROM spectrum.tetra_carriers "
+                       f"WHERE dongle_id = 'v4-01' AND center_hz = {synth.TETRA_PS_CONTINUOUS[1]}")
+    assert v4[0]["diurnal_duty"][3] is None

@@ -21,8 +21,8 @@ One run:
   3. ClickHouse maps every peak onto its cluster and aggregates the hits by
      hour of day, clipped or not, recent or not. It also counts the sweeps per
      dongle, preset and hour (the denominators).
-  4. Python turns that into duty cycles, flags artifact suspects and picks a
-     name.
+  4. Python turns that into duty cycles, flags artifact suspects, picks a
+     name and decides whether the emitter belongs on the TETRA map.
   5. One INSERT writes the run. The view emitters_current shows the latest run.
 
 Heavy work stays in ClickHouse: no query here reads `scans`, and Python only
@@ -53,6 +53,12 @@ BIN_HZ = sweep_grid.BIN_WIDTH_HZ
 HALF_BIN_HZ = BIN_HZ // 2           # a bin covers its label +/- half a bin
 MATCH_HZ = BIN_HZ                   # names match within one bin, the scanner's resolution
 RECENT_HOURS = 24
+
+# TETRA map (see tetra_evidence). The bands match the TETRA rows of
+# allocations (tetra_gr) and signal_catalog (tetra_gr, tetra_civil).
+TETRA_NETWORKS = (("public_safety", 380_000_000, 400_000_000),
+                  ("civil", 410_000_000, 430_000_000))
+CONTINUOUS_DUTY = 0.5               # on in most sweeps: a carrier that never keys down
 
 # Artifact tests (see artifact_reasons)
 KNOWN_INTERMOD_HZ = (116_820_000,)  # migration 025: FM intermod inside the V3, not a navaid
@@ -317,6 +323,7 @@ class Numbers:
     hours_observed: int          # clock hours with covering sweeps since first seen
     sweeps_clipped: int          # covering sweeps from first to last seen, clipped
     sweeps_unclipped: int        # ... and not clipped
+    diurnal_sweeps: list[int]    # covering sweeps since first seen, by local hour of day
 
 
 def duty_numbers(act: Activity, hours: dict[int, tuple[int, int]], split_at: int) -> Numbers:
@@ -334,12 +341,16 @@ def duty_numbers(act: Activity, hours: dict[int, tuple[int, int]], split_at: int
     recent = sum(s for h, (s, _) in swept.items() if h >= split_at)
     window = [(s, c) for h, (s, c) in swept.items() if h <= last_hour]
     clipped = sum(c for _, c in window)
+    diurnal = [0] * 24
+    for h, (s, _) in swept.items():
+        diurnal[local_hour(h)] += s
     return Numbers(
         duty_overall=act.hits / total if total else 0.0,
         duty_24h=act.hits_recent / recent if recent else None,
         hours_observed=len(swept),
         sweeps_clipped=clipped,
         sweeps_unclipped=sum(s for s, _ in window) - clipped,
+        diurnal_sweeps=diurnal,
     )
 
 
@@ -483,6 +494,55 @@ def name_emitter(dongle_id: str, lo_hz: int, hi_hz: int, center_hz: int,
     return Naming(name, source, note, class_id, service)
 
 
+# ─── TETRA map ──────────────────────────────────────────────
+
+
+def tetra_evidence(class_id: str, center_hz: int, lo_hz: int, hi_hz: int,
+                   refs: References) -> list[str]:
+    """Why this emitter counts as a TETRA carrier. Empty if it does not.
+
+    class       the classifier says tetra
+    allocation  the center lies in a TETRA range of allocations or signal_catalog
+    named       a listening_log or known_frequencies entry within one bin says tetra
+
+    This is occupancy mapping from sweep data only: where a carrier sits,
+    how often it is on, at what hours. TETRA is encrypted. Nothing here, and
+    nothing that reads this, captures, demodulates or decodes it.
+    """
+    evidence = []
+    if class_id == "tetra":
+        evidence.append("class")
+    if any(lo <= center_hz <= hi for lo, hi, service, _ in refs.ranges if service.startswith("tetra")):
+        evidence.append("allocation")
+    named = [r for r in refs.listening_log + refs.known_frequencies
+             if r["class_id"] == "tetra" and within_one_bin(r["freq_hz"], lo_hz, hi_hz)]
+    if named:
+        evidence.append("named")
+    return evidence
+
+
+def tetra_network(center_hz: int) -> str:
+    """public_safety (380-400 MHz), civil (410-430 MHz) or other.
+
+    "other" is a finding: a TETRA-looking carrier outside both known bands.
+    """
+    for network, lo, hi in TETRA_NETWORKS:
+        if lo <= center_hz < hi:
+            return network
+    return "other"
+
+
+def carrier_mode(duty: float) -> str:
+    """continuous or bursty, from the share of sweeps the carrier is on.
+
+    A TETRA base station keeps its main carrier, which holds the control
+    channel, on all the time. Extra carriers key up with traffic. So a
+    continuous carrier is most likely a control channel. Most likely only:
+    the scanner sees power, not what the carrier holds.
+    """
+    return "continuous" if duty >= CONTINUOUS_DUTY else "bursty"
+
+
 # ─── SQL (ClickHouse does the aggregation) ──────────────────
 
 
@@ -591,6 +651,7 @@ def build_rows(planned: list[Planned], activity: dict[int, Activity], coverage: 
         reasons = artifact_reasons([b.freq_hz for b in c.members], c.lo_hz, c.hi_hz,
                                    act.hits_clipped, act.hits - act.hits_clipped,
                                    nums.sweeps_clipped, nums.sweeps_unclipped)
+        evidence = tetra_evidence(naming.class_id, center, c.lo_hz, c.hi_hz, refs)
         rows.append({
             "emitter_id": p.emitter_id,
             "dongle_id": c.dongle_id,
@@ -614,6 +675,11 @@ def build_rows(planned: list[Planned], activity: dict[int, Activity], coverage: 
             "name_note": naming.note,
             "artifact_suspect": bool(reasons),
             "artifact_reason": ",".join(reasons),
+            "tetra_network": tetra_network(center) if evidence else "",
+            "tetra_mode": carrier_mode(nums.duty_overall) if evidence else "",
+            "tetra_evidence": ",".join(evidence),
+            "diurnal_hits": act.hod_hits,
+            "diurnal_sweeps": nums.diurnal_sweeps,
             "run_at": run_at.strftime("%Y-%m-%d %H:%M:%S"),
         })
     return rows

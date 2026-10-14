@@ -140,6 +140,15 @@ def test_unreadable_emitter_table_fails_closed(monkeypatch, capsys):
     assert "cannot be ruled out" in capsys.readouterr().out
 
 
+def test_empty_emitter_table_fails_closed(monkeypatch, capsys):
+    # Before the emitter job's first run nothing rules out the civil TETRA
+    # carriers, which the blocklist does not cover.
+    monkeypatch.setattr(rf, "load_emitter_rows", lambda: [])
+    monkeypatch.setattr(rf, "run_tool", lambda *a: pytest.fail("must not capture"))
+    assert rf.main(["autopsy", "425.1"]) == 2
+    assert "is empty" in capsys.readouterr().out
+
+
 # ─── The glue ───────────────────────────────────────────────
 
 

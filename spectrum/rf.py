@@ -22,7 +22,8 @@ neither capture nor analysis. It refuses before it touches the dongle when:
     a TETRA emitter from spectrum.emitters, on any dongle, wherever it is.
     That covers the civil carriers at 424-426 MHz, which the blocklist does
     not, and any TETRA carrier found outside the known bands.
-  * the emitter table cannot be read, because then it cannot rule TETRA out.
+  * the emitter table cannot be read or is empty (the emitter job has not run
+    yet), because then it cannot rule TETRA out.
 
 TETRA is encrypted. Listening is legal, decoding it is not, and capturing it
 to decode is out of scope. Nothing here tries.
@@ -339,6 +340,10 @@ def cmd_autopsy(args) -> int:
     except Exception as exc:  # any failure at all means TETRA cannot be ruled out
         print(f"Refused: cannot read spectrum.emitters_current ({exc}), so a TETRA carrier in the "
               f"capture window cannot be ruled out.")
+        return 2
+    if not rows:
+        print("Refused: spectrum.emitters_current is empty, so a TETRA carrier in the capture window "
+              "cannot be ruled out. Run spectrum/emitters.py first.")
         return 2
     refusal = tetra_refusal(freq, iq_capture.DEFAULT_SAMPLE_RATE, [Emitter.from_row(r) for r in rows])
     if refusal:

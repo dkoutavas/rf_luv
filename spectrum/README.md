@@ -41,7 +41,7 @@ python3 spectrum/rf.py autopsy 144.8        # capture IQ at 144.8 MHz and identi
 
 `now` maps the peaks of the last 10 minutes (`--minutes`) onto the emitters and ranks them by the signal-of-the-day score. Artifact suspects are marked and sorted last. If the dongle has not swept in that time it says so: not listening is not silence.
 
-`autopsy` runs `iq_capture.py --capture` on the V3 (`--dongle`, port from `/etc/rtl-scanner/<serial>.env`, gain from its latest sweep unless `--gain`), then `analysis/blind_analyze.py` on the file, and prints the emitter's name and history next to the blind verdict. It refuses, before touching the dongle, any frequency in `iq_capture.BLOCKED_BANDS` and any capture window that would include a TETRA emitter, wherever it is. If it cannot read the emitter table it refuses too.
+`autopsy` runs `iq_capture.py --capture` on the V3 (`--dongle`, port from `/etc/rtl-scanner/<serial>.env`, gain from its latest sweep unless `--gain`), then `analysis/blind_analyze.py` on the file, and prints the emitter's name and history next to the blind verdict. It refuses, before touching the dongle, any frequency in `iq_capture.BLOCKED_BANDS` and any capture window that would include a TETRA emitter, wherever it is. If it cannot read the emitter table, or the table is empty, it refuses too.
 
 ## Setup
 
